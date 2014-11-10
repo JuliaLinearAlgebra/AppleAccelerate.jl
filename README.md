@@ -10,13 +10,17 @@ which provide a vectorised form of many common mathemetical functions. In
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
-The following functions are supported, (differences from Base noted in
-parantheses):: 
- * *Rounding*: `ceil`, `floor`, `trunc`, `round` (breaks ties by rounding to even)
+The following functions are supported:
+ * *Rounding*: `ceil`, `floor`, `trunc`, `round`
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
  * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`
  * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
  * *Other*: `sqrt`, `copysign`
+
+Note there are some slight differences from behaviour in Base:
+ * No `DomainError`s are raised, instead `NaN` values are returned.
+ * `round` breaks ties (values with a fractional part of 0.5) by choosing the
+   nearest even value.
 
 Some additional functions that are also available:
 * `rec`: recipricol (`1.0/x`)
