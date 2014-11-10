@@ -8,19 +8,18 @@ const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 for f in (:ceil,:floor,:sqrt,:rsqrt,:rec,
           :exp,:exp2,:expm1,:log,:log1p,:log2,:log10,:logb,
           :sin,:sinpi,:cos,:cospi,:tan,:tanpi,:asin,:acos,:atan,
-          :sinh,:cosh,:tanh,:asinh,:acosh,:atanh)
+          :sinh,:cosh,:tanh,:asinh,:acosh,:atanh),
+    (t, s) in ((Float64, ""), (Float32, "f"))
     @eval begin
-        function ($f)(X::Array{Float64})
+        function ($f)(X::Array{$t})
             n = length(X)
-            Y = Array(Float64,n)
-            ccall(($(string("vv",f)),libacc),Void,(Ptr{Float64},Ptr{Float64},Ptr{Cint}),Y,X,&n)
+            Y = Array($t,n)
+            ccall(($(string("vv",f,s)),libacc),Void,(Ptr{$t},Ptr{$t},Ptr{Cint}),Y,X,&n)
             Y
         end
-        function ($f)(X::Array{Float32})
+        function ($(symbol("$(f)!")))(X::Array{$t})
             n = length(X)
-            Y = Array(Float32,n)
-            ccall(($(string("vv",f,"f")),libacc),Void,(Ptr{Float32},Ptr{Float32},Ptr{Cint}),Y,X,&n)
-            Y
+            ccall(($(string("vv",f,s)),libacc),Void,(Ptr{$t},Ptr{$t},Ptr{Cint}),X,X,&n)
         end
     end
 end
