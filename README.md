@@ -24,8 +24,8 @@ Note there are some slight differences from behaviour in Base:
  * `exponent` returns a floating point value of the same type (instead of an `Int`).
 
 Some additional functions that are also available:
-* `rec`: recipricol (`1.0/x`)
-* `rsqrt`: recipricold square-root (`1.0/sqrt(x)`)
+* `rec`: reciprocal (`1.0/x`)
+* `rsqrt`: reciprocal square-root (`1.0/sqrt(x)`)
 
 
 ## Example
