@@ -41,7 +41,7 @@ Output arrays can be specified as first arguments of the functions suffixed
 with `!`:
 ```julia
 out = Array(Float64,1_000_000)
-@time Accelerate.exp!(out, gX)
+@time Accelerate.exp!(out, X)
 ```
 
 Operations can be performed in-place by specifying the output array as the
