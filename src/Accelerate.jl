@@ -30,7 +30,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # renamed functions
-    for (f,fa) in ((:trunc,:int),(:round,:nint),(:exponent,:logb)
+    for (f,fa) in ((:trunc,:int),(:round,:nint),(:exponent,:logb))
         @eval begin
             function ($f)(X::Array{$T})
                 out = Array($T,size(X))
