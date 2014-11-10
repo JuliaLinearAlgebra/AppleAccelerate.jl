@@ -15,12 +15,13 @@ The following functions are supported:
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
  * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`
  * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
- * *Other*: `sqrt`, `copysign`
+ * *Other*: `sqrt`, `copysign`, `exponent`
 
 Note there are some slight differences from behaviour in Base:
  * No `DomainError`s are raised, instead `NaN` values are returned.
  * `round` breaks ties (values with a fractional part of 0.5) by choosing the
    nearest even value.
+ * `exponent` returns a floating point value of the same type (instead of an `Int`).
 
 Some additional functions that are also available:
 * `rec`: recipricol (`1.0/x`)
