@@ -24,8 +24,9 @@ Note there are some slight differences from behaviour in Base:
  * `exponent` returns a floating point value of the same type (instead of an `Int`).
 
 Some additional functions that are also available:
-* `rec`: reciprocal (`1.0/x`)
-* `rsqrt`: reciprocal square-root (`1.0/sqrt(x)`)
+* `rec(x)`: reciprocal (`1.0/x`)
+* `rsqrt(x)`: reciprocal square-root (`1.0/sqrt(x)`)
+* `pow(x,y)`: power (`x.^y` in Base).
 
 
 ## Example
@@ -43,6 +44,9 @@ with `!`:
 out = Array(Float64,1_000_000)
 @time Accelerate.exp!(out, X)
 ```
+
+**Warning**: no dimension checks are performed on the `!` functions, so ensure
+  your input and output arrays are of the same length.
 
 Operations can be performed in-place by specifying the output array as the
 input array (e.g. `Accelerate.exp!(X,X)`), but this is not mentioned in the

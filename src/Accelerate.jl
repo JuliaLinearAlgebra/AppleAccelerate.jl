@@ -21,7 +21,6 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 out
             end
             function ($(symbol("$(f)!")))(out::Array{$T}, X::Array{$T})
-                size(out) == size(X) || error("dimensions must match")
                 ccall(($(string("vv",f,suff)),libacc),Void,
                       (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,&length(X))
                 out
@@ -39,7 +38,6 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 out
             end
             function ($(symbol("$(f)!")))(out::Array{$T}, X::Array{$T})
-                size(out) == size(X) || error("dimensions must match")
                 ccall(($(string("vv",fa,suff)),libacc),Void,
                       (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,&length(X))
                 out
@@ -51,14 +49,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for f in (:copysign,:pow,:atan2)
         @eval begin
             function ($f)(X::Array{$T},Y::Array{$T})
-                size(X) == size(Y) || error("dimensions must match")
+                size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array($T,size(X))
                 ccall(($(string("vv",f,suff)),libacc),Void,
                       (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,&length(X))
                 out
             end
             function ($(symbol("$(f)!")))(X::Array{$T},Y::Array{$T})
-                size(out) == size(X) == size(Y) || error("dimensions must match")
                 ccall(($(string("vv",f,suff)),libacc),Void,
                       (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,&length(X))
                 out
