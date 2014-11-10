@@ -10,6 +10,19 @@ which provide a vectorised form of many common mathemetical functions. In
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
+The following functions are supported, (differences from Base noted in
+parantheses):: 
+ * *Rounding*: `ceil`, `floor`, `trunc`, `round` (breaks ties by rounding to even)
+ * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
+ * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`
+ * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+ * *Other*: `sqrt`, `copysign`
+
+Some additional functions that are also available:
+* `rec`: recipricol (`1.0/x`)
+* `rsqrt`: recipricold square-root (`1.0/sqrt(x)`)
+
+
 ## Example
 
 ```julia
@@ -18,3 +31,14 @@ X = randn(1_000_000)
 @time Y = exp(X) # standard libm function
 @time Y = Accelerate.exp(X) # Accelerate array-oriented function
 ```
+
+Output arrays can be specified as first arguments of the functions suffixed
+with `!`:
+```julia
+out = Array(Float64,1_000_000)
+@time Accelerate.exp!(out, gX)
+```
+
+Operations can be performed in-place by specifying the output array as the
+input array (e.g. `Accelerate.exp!(X,X)`), but this is not mentioned in the
+Accelerate docs, so do this at your own risk!
