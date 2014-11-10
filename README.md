@@ -15,7 +15,7 @@ The following functions are supported:
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
  * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`
  * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
- * *Other*: `sqrt`, `copysign`, `exponent`
+ * *Other*: `sqrt`, `copysign`, `exponent`, `abs`, `rem`
 
 Note there are some slight differences from behaviour in Base:
  * No `DomainError`s are raised, instead `NaN` values are returned.
@@ -26,8 +26,10 @@ Note there are some slight differences from behaviour in Base:
 Some additional functions that are also available:
 * `rec(x)`: reciprocal (`1.0/x`)
 * `rsqrt(x)`: reciprocal square-root (`1.0/sqrt(x)`)
-* `pow(x,y)`: power (`x.^y` in Base).
-
+* `pow(x,y)`: power (`x.^y` in Base)
+* `div(x,y)`: divide (`x ./ y` in Base)
+* `sincos(x)`: returns `(sin(x), cos(x))`
+* `cosisin(x)`: returns `cos(x)+im*sin(x)`
 
 ## Example
 
