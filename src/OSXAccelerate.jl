@@ -1,4 +1,4 @@
-module Accelerate
+module OSXAccelerate
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 

@@ -1,12 +1,12 @@
-# Accelerate.jl
+# OSXAccelerate.jl
 
-[![Build Status](https://travis-ci.org/simonbyrne/Accelerate.jl.svg?branch=master)](https://travis-ci.org/simonbyrne/Accelerate.jl)
+[![Build Status](https://travis-ci.org/simonbyrne/OSXAccelerate.jl.svg?branch=master)](https://travis-ci.org/simonbyrne/OSXAccelerate.jl)
 
-This provides a Julia interface to some of OS X's
-[Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
+This provides a Julia interface to some of
+[OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
 the moment, the package only provides an interface to the
 [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
-which provide a vectorised form of many common mathemetical functions. In
+which provide a vectorised form of many common mathematical functions. In
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
@@ -36,29 +36,29 @@ Some additional functions that are also available:
 To avoid naming conflicts with Base, methods are not exported and so need to
 be accessed via the namespace:
 ```julia
-using Accelerate
+using OSXAccelerate
 X = randn(1_000_000)
 @time Y = exp(X) # standard libm function
-@time Y = Accelerate.exp(X) # Accelerate array-oriented function
+@time Y = OSXAccelerate.exp(X) # OSXAccelerate array-oriented function
 ```
 
 The `@replaceBase` macro replaces the relevant Base methods directly
 ```julia
-Accelerate.@replaceBase sin cos tan
-Accelerate.@replaceBase(.^, ./) # use paranthesised form for infix ops
-@time sin(X) # will use Accelerate methods for vectorised operations
+OSXAccelerate.@replaceBase sin cos tan
+OSXAccelerate.@replaceBase(.^, ./) # use parenthesised form for infix ops
+@time sin(X) # will use OSXAccelerate methods for vectorised operations
 ```
 
 Output arrays can be specified as first arguments of the functions suffixed
 with `!`:
 ```julia
 out = Array(Float64,1_000_000)
-@time Accelerate.exp!(out, X)
+@time OSXAccelerate.exp!(out, X)
 ```
 
 **Warning**: no dimension checks are performed on the `!` functions, so ensure
   your input and output arrays are of the same length.
 
 Operations can be performed in-place by specifying the output array as the
-input array (e.g. `Accelerate.exp!(X,X)`), but this is not mentioned in the
-Accelerate docs, so do this at your own risk!
+input array (e.g. `OSXAccelerate.exp!(X,X)`), but this is not mentioned in the
+OSXAccelerate docs, so do this at your own risk!
