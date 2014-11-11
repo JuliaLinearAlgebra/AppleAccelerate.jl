@@ -33,11 +33,19 @@ Some additional functions that are also available:
 
 ## Example
 
+To avoid naming conflicts with Base, methods are not exported and so need to
+be accessed via the namespace:
 ```julia
 using Accelerate
 X = randn(1_000_000)
 @time Y = exp(X) # standard libm function
 @time Y = Accelerate.exp(X) # Accelerate array-oriented function
+```
+
+The `@replace` macro allows replaces the Base array methods directly
+```julia
+Accelerate.@replaceBase sin cos tan
+@time sin(X) # will use Accelerate methods for vectorised operations
 ```
 
 Output arrays can be specified as first arguments of the functions suffixed

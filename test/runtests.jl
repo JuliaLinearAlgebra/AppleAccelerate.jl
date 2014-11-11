@@ -121,4 +121,14 @@ facts("Extra") do
     @fact Accelerate.cosisin(X) => roughly(cos(X)+im*sin(X))
 end
 
+facts("Replace Base") do
+    X = randn(N)
+    Y = randn(N)
+
+    Accelerate.@replaceBase sin atan2
+    
+    @fact sin(X) => Accelerate.sin(X)
+    @fact atan2(X,Y) => Accelerate.atan2(X,Y)
+end
+
 FactCheck.exitstatus()
