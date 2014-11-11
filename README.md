@@ -24,9 +24,9 @@ Note there are some slight differences from behaviour in Base:
  * `exponent` returns a floating point value of the same type (instead of an `Int`).
 
 Some additional functions that are also available:
-* `rec(x)`: reciprocal (`1.0/x`)
-* `rsqrt(x)`: reciprocal square-root (`1.0/sqrt(x)`)
-* `pow(x,y)`: power (`x.^y` in Base)
+* `rec(x)`: reciprocal (`1.0 ./ x`)
+* `rsqrt(x)`: reciprocal square-root (`1.0 ./ sqrt(x)`)
+* `pow(x,y)`: power (`x .^ y` in Base)
 * `div(x,y)`: divide (`x ./ y` in Base)
 * `sincos(x)`: returns `(sin(x), cos(x))`
 * `cosisin(x)`: returns `cos(x)+im*sin(x)`

@@ -44,13 +44,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # 2 arg functions
-    for f in (:copysign,:pow,:atan2,:div)
+    for f in (:copysign,:atan2,:div)
         f! = symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array($T,size(X))
-                ($f!)(out, X)
+                ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
                 ccall(($(string("vv",f,suff)),libacc),Void,
@@ -60,6 +60,24 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         end
     end
 
+    # for some bizarre reason, vvpow/vvpowf reverse the order of arguments.
+    for f in (:pow,)
+        f! = symbol("$(f)!")
+        @eval begin
+            function ($f)(X::Array{$T}, Y::Array{$T})
+                size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
+                out = Array($T,size(X))
+                ($f!)(out, X, Y)
+            end
+            function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
+                ccall(($(string("vv",f,suff)),libacc),Void,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,Y,X,&length(X))
+                out
+            end
+        end
+    end
+
+
     # renamed 2 arg functions
     for (f,fa) in ((:rem,:fmod),)
         f! = symbol("$(f)!")
@@ -67,7 +85,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array($T,size(X))
-                ($f!)(out, X)
+                ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
                 ccall(($(string("vv",fa,suff)),libacc),Void,
