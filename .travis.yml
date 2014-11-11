@@ -8,7 +8,7 @@ matrix:
  - JULIAVERSION="juliareleases"
  - JULIAVERSION="julianightlies"
 before_install:
- - curl http://julialang.org/install-julia.sh | sh -s \$JULIAVERSION
+ - curl http://julialang.org/install-julia.sh | sh -s $JULIAVERSION
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 script:
  - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.test("$pkg")'
