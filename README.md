@@ -42,9 +42,10 @@ X = randn(1_000_000)
 @time Y = Accelerate.exp(X) # Accelerate array-oriented function
 ```
 
-The `@replace` macro allows replaces the Base array methods directly
+The `@replace` macro replaces the relevant Base methods directly
 ```julia
 Accelerate.@replaceBase sin cos tan
+Accelerate.@replaceBase(.^, ./) # use paranthesised form for infix ops
 @time sin(X) # will use Accelerate methods for vectorised operations
 ```
 

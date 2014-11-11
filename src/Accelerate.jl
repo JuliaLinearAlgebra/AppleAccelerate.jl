@@ -132,13 +132,20 @@ end
 macro replaceBase(fs...)
     b = Expr(:block)
     for f in fs
+        if f == :./
+            fa = :div
+        elseif f == :.^
+            fa = :pow
+        else
+            fa = f
+        end
         e = quote
             if length(methods($f).defs.sig) == 1
-                (Base.$f)(X::Array{Float64}) = ($f)(X)
-                (Base.$f)(X::Array{Float32}) = ($f)(X)
+                (Base.$f)(X::Array{Float64}) = ($fa)(X)
+                (Base.$f)(X::Array{Float32}) = ($fa)(X)
             else
-                (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($f)(X,Y)
-                (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($f)(X,Y)
+                (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
             end
         end
         push!(b.args,e)

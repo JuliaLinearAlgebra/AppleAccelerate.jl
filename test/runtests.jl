@@ -110,7 +110,7 @@ end
 
 facts("Extra") do
     X = randn(N)
-    Y = exp(randn(N))
+    Y = abs(randn(N))
 
     @fact Accelerate.rec(X) => roughly(1./X)
     @fact Accelerate.rsqrt(Y) => roughly(1./sqrt(Y))
@@ -121,14 +121,16 @@ facts("Extra") do
     @fact Accelerate.cosisin(X) => roughly(cos(X)+im*sin(X))
 end
 
+
 facts("Replace Base") do
     X = randn(N)
-    Y = randn(N)
+    Y = abs(randn(N))
 
-    Accelerate.@replaceBase sin atan2
-    
+    Accelerate.@replaceBase(sin,atan2,./,.^)
     @fact sin(X) => Accelerate.sin(X)
     @fact atan2(X,Y) => Accelerate.atan2(X,Y)
+    @fact X ./ Y => Accelerate.div(X,Y)
+    @fact Y ./ X => Accelerate.div(Y,X)
 end
 
 FactCheck.exitstatus()
