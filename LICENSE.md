@@ -1,4 +1,4 @@
-The Accelerate.jl package is licensed under the MIT "Expat" License:
+The AppleAccelerate.jl package is licensed under the MIT "Expat" License:
 
 > Copyright (c) 2014: Simon Byrne.
 >

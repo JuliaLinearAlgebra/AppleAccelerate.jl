@@ -1,6 +1,6 @@
-# OSXAccelerate.jl
+# AppleAccelerate.jl
 
-[![Build Status](https://travis-ci.org/simonbyrne/OSXAccelerate.jl.svg?branch=master)](https://travis-ci.org/simonbyrne/OSXAccelerate.jl)
+[![Build Status](https://travis-ci.org/simonbyrne/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/simonbyrne/AppleAccelerate.jl)
 
 This provides a Julia interface to some of
 [OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
@@ -36,29 +36,29 @@ Some additional functions that are also available:
 To avoid naming conflicts with Base, methods are not exported and so need to
 be accessed via the namespace:
 ```julia
-using OSXAccelerate
+using AppleAccelerate
 X = randn(1_000_000)
 @time Y = exp(X) # standard libm function
-@time Y = OSXAccelerate.exp(X) # OSXAccelerate array-oriented function
+@time Y = AppleAccelerate.exp(X) # AppleAccelerate array-oriented function
 ```
 
 The `@replaceBase` macro replaces the relevant Base methods directly
 ```julia
-OSXAccelerate.@replaceBase sin cos tan
-OSXAccelerate.@replaceBase(.^, ./) # use parenthesised form for infix ops
-@time sin(X) # will use OSXAccelerate methods for vectorised operations
+AppleAccelerate.@replaceBase sin cos tan
+AppleAccelerate.@replaceBase(.^, ./) # use parenthesised form for infix ops
+@time sin(X) # will use AppleAccelerate methods for vectorised operations
 ```
 
 Output arrays can be specified as first arguments of the functions suffixed
 with `!`:
 ```julia
 out = Array(Float64,1_000_000)
-@time OSXAccelerate.exp!(out, X)
+@time AppleAccelerate.exp!(out, X)
 ```
 
 **Warning**: no dimension checks are performed on the `!` functions, so ensure
   your input and output arrays are of the same length.
 
 Operations can be performed in-place by specifying the output array as the
-input array (e.g. `OSXAccelerate.exp!(X,X)`), but this is not mentioned in the
-OSXAccelerate docs, so do this at your own risk!
+input array (e.g. `AppleAccelerate.exp!(X,X)`), but this is not mentioned in the
+AppleAccelerate docs, so do this at your own risk!
