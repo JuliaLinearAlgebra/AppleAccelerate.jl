@@ -39,7 +39,7 @@ be accessed via the namespace:
 using AppleAccelerate
 X = randn(1_000_000)
 @time Y = exp(X) # standard libm function
-@time Y = AppleAccelerate.exp(X) # AppleAccelerate array-oriented function
+@time Y = AppleAccelerate.exp(X) # Accelerate array-oriented function
 ```
 
 The `@replaceBase` macro replaces the relevant Base methods directly
