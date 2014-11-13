@@ -52,7 +52,7 @@ facts("Trigonometric") do
     end
 
     X = 2*rand(N)-1
-    for f in [:asin,:acos] # tanpi not defined in Base
+    for f in [:asin,:acos]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
         @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
@@ -130,7 +130,7 @@ facts("Replace Base") do
     @fact sin(X) => AppleAccelerate.sin(X)
     @fact atan2(X,Y) => AppleAccelerate.atan2(X,Y)
     @fact X ./ Y => AppleAccelerate.div(X,Y)
-    @fact Y ./ X => AppleAccelerate.div(Y,X)
+    @fact Y .^ X => AppleAccelerate.pow(Y,X)
 end
 
 FactCheck.exitstatus()
