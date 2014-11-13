@@ -2,11 +2,11 @@ language: objective-c
 compiler:
  - clang
 notifications:
-email: false
+  email: false
 env:
-matrix:
- - JULIAVERSION="juliareleases"
- - JULIAVERSION="julianightlies"
+  matrix:
+   - JULIAVERSION="juliareleases"
+   - JULIAVERSION="julianightlies"
 before_install:
  - curl http://julialang.org/install-julia.sh | sh -s $JULIAVERSION
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
