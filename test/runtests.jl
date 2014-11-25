@@ -115,7 +115,7 @@ facts("Extra") do
     @fact AppleAccelerate.rec(X) => roughly(1./X)
     @fact AppleAccelerate.rsqrt(Y) => roughly(1./sqrt(Y))
     @fact AppleAccelerate.pow(Y,X) => roughly(Y.^X)
-    @fact AppleAccelerate.div(X,Y) => roughly(X./Y)
+    @fact AppleAccelerate.fdiv(X,Y) => roughly(X./Y)
 
     @fact [AppleAccelerate.sincos(X)...] => roughly([sin(X),cos(X)])
     @fact AppleAccelerate.cosisin(X) => roughly(cos(X)+im*sin(X))
@@ -129,7 +129,7 @@ facts("Replace Base") do
     AppleAccelerate.@replaceBase(sin,atan2,./,.^)
     @fact sin(X) => AppleAccelerate.sin(X)
     @fact atan2(X,Y) => AppleAccelerate.atan2(X,Y)
-    @fact X ./ Y => AppleAccelerate.div(X,Y)
+    @fact X ./ Y => AppleAccelerate.fdiv(X,Y)
     @fact Y .^ X => AppleAccelerate.pow(Y,X)
 end
 

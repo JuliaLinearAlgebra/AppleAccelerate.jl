@@ -44,7 +44,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # 2 arg functions
-    for f in (:copysign,:atan2,:div)
+    for f in (:copysign,:atan2)
         f! = symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
@@ -79,7 +79,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
 
     # renamed 2 arg functions
-    for (f,fa) in ((:rem,:fmod),)
+    for (f,fa) in ((:rem,:fmod),(:fdiv,:div))
         f! = symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
@@ -133,7 +133,7 @@ macro replaceBase(fs...)
     b = Expr(:block)
     for f in fs
         if f == :./
-            fa = :div
+            fa = :fdiv
         elseif f == :.^
             fa = :pow
         else
