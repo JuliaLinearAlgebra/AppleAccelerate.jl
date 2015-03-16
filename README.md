@@ -60,5 +60,5 @@ out = Array(Float64,1_000_000)
   your input and output arrays are of the same length.
 
 Operations can be performed in-place by specifying the output array as the
-input array (e.g. `AppleAccelerate.exp!(X,X)`), but this is not mentioned in the
-AppleAccelerate docs, so do this at your own risk!
+input array (e.g. `AppleAccelerate.exp!(X,X)`). This is not mentioned in the
+Accelerate docs, but [this comment](http://stackoverflow.com/a/28833191/392585) by one of the authors indicates that it is safe.
