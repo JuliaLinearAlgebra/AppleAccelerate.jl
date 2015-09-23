@@ -153,4 +153,21 @@ macro replaceBase(fs...)
     b
 end
 
+
+function plan_dct(n,k::Integer)
+    @assert isinteger(log2(n))
+    @assert 2≤k≤4
+    ccall(("vDSP_DCT_CreateSetup",libacc),Ptr{Void},(Ptr{Void},Cint,Cint),C_NULL,n,k)
+end
+
+function dct(r::Vector{Float32},plan)
+    n=length(r)
+    @assert isinteger(log2(n))
+    out=Array(Float32,n)
+    ccall(("vDSP_DCT_Execute",libacc),Void,(Ptr{Void},Ptr{Float32},Ptr{Float32}),plan,r,out)
+    out
+end
+
+dct(r::Vector{Float32},k::Integer)=dct(r,plan_dct(length(r),k))
+
 end # module
