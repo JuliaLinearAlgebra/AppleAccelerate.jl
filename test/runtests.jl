@@ -83,6 +83,12 @@ facts("Hyperbolic") do
     end
 end
 
+facts("DCT") do
+    r=rand(Float32,2^16)
+    d1=dct(r)
+    d2=AppleAccelerate.dct(r)
+    @fact norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32) --> true
+end
 
 facts("Misc.") do
     X = exp(10*randn(N))
@@ -117,7 +123,7 @@ facts("Extra") do
     @fact AppleAccelerate.pow(Y,X) => roughly(Y.^X)
     @fact AppleAccelerate.fdiv(X,Y) => roughly(X./Y)
 
-    @fact [AppleAccelerate.sincos(X)...] => roughly([sin(X),cos(X)])
+    @fact [AppleAccelerate.sincos(X)...] => roughly([sin(X);cos(X)])
     @fact AppleAccelerate.cosisin(X) => roughly(cos(X)+im*sin(X))
 end
 
