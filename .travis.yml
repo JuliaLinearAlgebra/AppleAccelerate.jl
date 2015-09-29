@@ -1,12 +1,13 @@
-language: objective-c
+language: julia
+os:
+  - osx
+julia:
+  - 0.3
+  - 0.4
 notifications:
   email: false
-env:
-  matrix:
-   - JULIAVERSION="juliareleases"
-   - JULIAVERSION="julianightlies"
+
 before_install:
- - curl http://julialang.org/install-julia.sh | sh -s $JULIAVERSION
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 script:
  - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.clone("FactCheck"); Pkg.test("AppleAccelerate")'
