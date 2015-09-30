@@ -13,7 +13,7 @@ functions, though there does appear to be some reduced accuracy.
 The following functions are supported:
  * *Rounding*: `ceil`, `floor`, `trunc`, `round`
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
- * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`
+ * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `cis`
  * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
  * *Other*: `sqrt`, `copysign`, `exponent`, `abs`, `rem`
 
@@ -29,7 +29,6 @@ Some additional functions that are also available:
 * `pow(x,y)`: power (`x .^ y` in Base)
 * `fdiv(x,y)`: divide (`x ./ y` in Base)
 * `sincos(x)`: returns `(sin(x), cos(x))`
-* `cosisin(x)`: returns `cos(x)+im*sin(x)`
 
 ## Example
 

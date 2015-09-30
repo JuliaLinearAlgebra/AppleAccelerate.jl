@@ -124,7 +124,7 @@ facts("Extra") do
     @fact AppleAccelerate.fdiv(X,Y) => roughly(X./Y)
 
     @fact [AppleAccelerate.sincos(X)...] => roughly([sin(X);cos(X)])
-    @fact AppleAccelerate.cosisin(X) => roughly(cos(X)+im*sin(X))
+    @fact AppleAccelerate.cis(X) => roughly(cis(X))
 end
 
 

@@ -113,7 +113,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # complex return
-    for f in (:cosisin,)
+    for f in (:cis,)
         f! = symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
