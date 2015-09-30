@@ -113,7 +113,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # complex return
-    for f in (:cis,)
+    for (f,fa) in ((:cis,:cosisin,)
         f! = symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
@@ -121,7 +121,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Void,
+                ccall(($(string("vv",fa,suff)),libacc),Void,
                       (Ptr{Complex{$T}},Ptr{$T},Ptr{Cint}),out,X,&length(X))
                 out
             end
