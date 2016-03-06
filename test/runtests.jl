@@ -125,7 +125,7 @@ end
         @test fa(X,Y) ≈ fb(X,Y)
     end
 
-    # @fact AppleAccelerate.rem(X,Y) => [rem(X[i], Y[i]) for i=1:length(X)] # no vectorized rem
+    @test AppleAccelerate.rem(X,Y) == [rem(X[i], Y[i]) for i=1:length(X)]
 
 end
 
@@ -139,7 +139,8 @@ end
     @test AppleAccelerate.pow(Y,X) ≈ Y.^X
     @test AppleAccelerate.fdiv(X,Y) ≈ X./Y
 
-#    @test [AppleAccelerate.sincos(X)...] ≈ [sin(X);cos(X)]
+    @test AppleAccelerate.sincos(X)[1] ≈ sin(X)
+    @test AppleAccelerate.sincos(X)[2] ≈ cos(X)
     @test AppleAccelerate.cis(X) ≈ cis(X)
 
 end
@@ -149,9 +150,9 @@ end
     X = randn(N)
     Y = abs(randn(N))
 
-    AppleAccelerate.@replaceBase(sin,atan2,./,.^)
-    # @test sin(X) => AppleAccelerate.sin(X)
-    # @test atan2(X,Y) => AppleAccelerate.atan2(X,Y)
-    # @test X ./ Y => AppleAccelerate.fdiv(X,Y)
-    # @test Y .^ X => AppleAccelerate.pow(Y,X)
+    AppleAccelerate.@replaceBase(sin, atan2, ./)
+    @test sin(X) == AppleAccelerate.sin(X)
+    @test atan2(X, Y) == AppleAccelerate.atan2(X, Y)
+    @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
+
 end
