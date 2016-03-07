@@ -2,7 +2,6 @@ language: julia
 os:
   - osx
 julia:
-  - 0.3
   - 0.4
   - nightly
 notifications:
@@ -11,4 +10,4 @@ notifications:
 before_install:
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 script:
- - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.clone("FactCheck"); Pkg.test("AppleAccelerate")'
+ - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.test("AppleAccelerate")'

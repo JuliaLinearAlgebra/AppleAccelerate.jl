@@ -130,13 +130,50 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 end
 
 
+for (T, suff) in ((Float64, "D"), (Float32, ""))
+
+    @eval begin
+        function conv(X::Array{$T}, K::Array{$T})
+            ksize = length(K)
+            xsize = length(X)
+            rsize = xsize + ksize - 1
+            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
+            result = Array($T, rsize)
+            ccall(($(string("vDSP_conv", suff), libacc)),  Void,
+                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
+                  x_padded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
+            return result
+        end
+    end
+
+
+    @eval begin
+        function xcorr(X::Array{$T}, K::Array{$T})
+            ksize = length(K)
+            xsize = length(X)
+            rsize = xsize + ksize - 1
+            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
+            result = Array($T, rsize)
+            ccall(($(string("vDSP_conv", suff), libacc)),  Void,
+                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
+                  x_padded, 1, K, 1, result, 1,  rsize, ksize)
+            return result
+        end
+    end
+
+    @eval begin
+        function xcorr(X::Array{$T})
+            return xcorr(X, X)
+        end
+    end
+end
+
+
 function plan_dct(n,k::Integer)
     @assert isinteger(Base.log2(n))
     @assert 2≤k≤4
     ccall(("vDSP_DCT_CreateSetup",libacc),Ptr{Void},(Ptr{Void},Cint,Cint),C_NULL,n,k)
 end
-
-
 
 
 function dct(r::Vector{Float32},plan)
@@ -148,7 +185,6 @@ function dct(r::Vector{Float32},plan)
 end
 
 dct(r::Vector{Float32},k::Integer=2)=dct(r,plan_dct(length(r),k))
-
 
 
 if VERSION>=v"0.4.0-rc1"
@@ -170,17 +206,20 @@ macro replaceBase(fs...)
         end
         e = quote
             if tupletypelength(methods($f).defs.sig) == 1
-                (Base.$f)(X::Array{Float64}) = ($fa)(X)
-                (Base.$f)(X::Array{Float32}) = ($fa)(X)
+                (Base.$f)(X::Array{Float64, 1}) = ($fa)(X)
+                (Base.$f)(X::Array{Float32, 1}) = ($fa)(X)
             else
-                (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
-                (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float64, 1}, Y::Array{Float64, 1}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float32, 1}, Y::Array{Float32, 1}) = ($fa)(X,Y)
             end
         end
         push!(b.args,e)
     end
     b
 end
+
+
+
 
 
 # const     FFT_FORWARD         = +1
