@@ -1,142 +1,158 @@
 using AppleAccelerate
-using FactCheck
+
+if VERSION >= v"0.5-"
+    using Base.Test
+else
+    using BaseTestNext
+    const Test = BaseTestNext
+end
 
 srand(7)
-
 N = 1_000
 
-facts("Rounding") do
+@testset "Rounding" begin
     X = 100*randn(N)
-    for f in [:floor,:ceil,:trunc,:round]
+    @testset "Testing $f" for f in [:floor,:ceil,:trunc,:round]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => fb(X) "Mismatch for $f"
+        @test fa(X) ≈ fb(X)
     end
 end
 
-              
-facts("Logarithmic/exponential") do
-    X = 100*randn(N)
-    for f in [:exp,:exp2,:expm1]
-        @eval fb = $f
-        @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
-    end
+
+@testset "Logarithmic" begin
     X = exp(10*randn(N))
-    for f in [:log,:log2,:log10]
+    @testset "Testing $f" for f in [:log,:log2,:log10]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(X) ≈ fb(X)
     end
-    X = expm1(10*randn(N))
-    for f in [:log1p]
+
+    Y = expm1(10*randn(N))
+    @testset "Testing $f" for f in [:log1p]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(Y) ≈ fb(Y)
     end
 end
 
-facts("Trigonometric") do
-    X = 10*randn(N)
-    for f in [:sin,:sinpi,:cos,:cospi,:tan,:atan] # tanpi not defined in Base
+
+@testset "Exponential" begin
+    X = 100*randn(N)
+    @testset "Testing $f" for f in [:exp,:exp2,:expm1]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(X) ≈ fb(X)
+    end
+end
+
+
+@testset "Trigonometric" begin
+    X = 10*randn(N)
+    @testset "Testing $f" for f in [:sin,:sinpi,:cos,:cospi,:tan,:atan] # tanpi not defined in Base
+        @eval fb = $f
+        @eval fa = AppleAccelerate.$f
+        @test fa(X) ≈ fb(X)
     end
 
     Y = 10*randn(N)
-    for f in [:atan2]
+    @testset "Testing $f" for f in [:atan2]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X,Y) => roughly(fb(X,Y)) "Mismatch for $f"
+        @test fa(X,Y) ≈ fb(X,Y)
     end
 
-    X = 2*rand(N)-1
-    for f in [:asin,:acos]
+    Z = 2*rand(N)-1
+    @testset "Testing $f" for f in [:asin,:acos]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(Z) ≈ fb(Z)
     end
 end
 
 
-facts("Hyperbolic") do
+@testset "Hyperbolic" begin
     X = 10*randn(N)
-    for f in [:sinh,:cosh,:tanh,:asinh] 
+    @testset "Testing $f" for f in [:sinh,:cosh,:tanh,:asinh]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(X) ≈ fb(X)
     end
 
-    X = exp(10*randn(N))+1
-    for f in [:acosh] 
+    Y = exp(10*randn(N))+1
+    @testset "Testing $f" for f in [:acosh]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(Y) ≈ fb(Y)
     end
 
-    X = 2*rand(N)-1
-    for f in [:atanh] 
+    Z = 2*rand(N)-1
+    @testset "Testing $f" for f in [:atanh]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(Z) ≈ fb(Z)
     end
 end
 
-facts("DCT") do
+
+@testset "DCT" begin
     r=rand(Float32,2^16)
     d1=dct(r)
     d2=AppleAccelerate.dct(r)
-    @fact norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32) --> true
+    @test norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32)
 end
 
-facts("Misc.") do
-    X = exp(10*randn(N))
-    for f in [:sqrt]
-        @eval fb = $f
-        @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
-    end
 
-    X = 10*randn(N)
-    for f in [:exponent, :abs]
+@testset "Misc" begin
+    X = exp(10*randn(N))
+    @testset "Testing $f" for f in [:sqrt]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X) => roughly(fb(X)) "Mismatch for $f"
+        @test fa(X) ≈ fb(X)
     end
 
     Y = 10*randn(N)
-    for f in [:copysign]
+    @testset "Testing $f" for f in [:exponent, :abs]
         @eval fb = $f
         @eval fa = AppleAccelerate.$f
-        @fact fa(X,Y) => roughly(fb(X,Y)) "Mismatch for $f"
+        @test fa(Y) ≈ fb(Y)
     end
-    @fact AppleAccelerate.rem(X,Y) => [rem(X[i], Y[i]) for i=1:length(X)] # no vectorized rem
+
+    Z = 10*randn(N)
+    @testset "Testing $f" for f in [:copysign]
+        @eval fb = $f
+        @eval fa = AppleAccelerate.$f
+        @test fa(X,Y) ≈ fb(X,Y)
+    end
+
+    @test AppleAccelerate.rem(X,Y) == [rem(X[i], Y[i]) for i=1:length(X)]
+
 end
 
-facts("Extra") do
+
+@testset "Extra" begin
     X = randn(N)
     Y = abs(randn(N))
 
-    @fact AppleAccelerate.rec(X) => roughly(1./X)
-    @fact AppleAccelerate.rsqrt(Y) => roughly(1./sqrt(Y))
-    @fact AppleAccelerate.pow(Y,X) => roughly(Y.^X)
-    @fact AppleAccelerate.fdiv(X,Y) => roughly(X./Y)
+    @test AppleAccelerate.rec(X) ≈ 1./X
+    @test AppleAccelerate.rsqrt(Y) ≈ 1./sqrt(Y)
+    @test AppleAccelerate.pow(Y,X) ≈ Y.^X
+    @test AppleAccelerate.fdiv(X,Y) ≈ X./Y
 
-    @fact [AppleAccelerate.sincos(X)...] => roughly([sin(X);cos(X)])
-    @fact AppleAccelerate.cis(X) => roughly(cis(X))
+    @test AppleAccelerate.sincos(X)[1] ≈ sin(X)
+    @test AppleAccelerate.sincos(X)[2] ≈ cos(X)
+    @test AppleAccelerate.cis(X) ≈ cis(X)
+
 end
 
 
-facts("Replace Base") do
+@testset "Replace Base" begin
     X = randn(N)
     Y = abs(randn(N))
 
-    AppleAccelerate.@replaceBase(sin,atan2,./,.^)
-    @fact sin(X) => AppleAccelerate.sin(X)
-    @fact atan2(X,Y) => AppleAccelerate.atan2(X,Y)
-    @fact X ./ Y => AppleAccelerate.fdiv(X,Y)
-    @fact Y .^ X => AppleAccelerate.pow(Y,X)
-end
+    AppleAccelerate.@replaceBase(sin, atan2, ./)
+    @test sin(X) == AppleAccelerate.sin(X)
+    @test atan2(X, Y) == AppleAccelerate.atan2(X, Y)
+    @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
 
-FactCheck.exitstatus()
+end
