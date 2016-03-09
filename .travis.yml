@@ -10,4 +10,4 @@ notifications:
 before_install:
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 script:
- - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.clone("BaseTestNext"); Pkg.test("AppleAccelerate")'
+ - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.test("AppleAccelerate")'
