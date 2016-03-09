@@ -173,15 +173,13 @@ for T in (Float32, Float64)
 end
 
 
-for T in (Float32, Float64)
-    @testset "Replace Base::$T" begin
-        X::Array{T} = randn(N)
-        Y::Array{T} = abs(randn(N))
+AppleAccelerate.@replaceBase(sin, atan2, ./)
 
-        AppleAccelerate.@replaceBase(sin, atan2, ./)
-        @test Base.sin(X) == AppleAccelerate.sin(X)
-        @test Base.atan2(X, Y) == AppleAccelerate.atan2(X, Y)
-        @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
+@testset "Replace Base::$T" for T in (Float32, Float64)
+    X::Array{T} = randn(N)
+    Y::Array{T} = abs(randn(N))
 
-    end
+    @test Base.sin(X) == AppleAccelerate.sin(X)
+    @test Base.atan2(X, Y) == AppleAccelerate.atan2(X, Y)
+    @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
 end

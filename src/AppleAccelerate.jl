@@ -204,14 +204,22 @@ macro replaceBase(fs...)
         else
             fa = f
         end
-        e = quote
-            if tupletypelength(methods($f).defs.sig) == 1
-                (Base.$f)(X::Array{Float64, 1}) = ($fa)(X)
-                (Base.$f)(X::Array{Float32, 1}) = ($fa)(X)
-            else
-                (Base.$f)(X::Array{Float64, 1}, Y::Array{Float64, 1}) = ($fa)(X,Y)
-                (Base.$f)(X::Array{Float32, 1}, Y::Array{Float32, 1}) = ($fa)(X,Y)
+        if fa in (:ceil,:floor,:sqrt,:rsqrt,:rec,
+                  :exp,:exp2,:expm1,:log,:log1p,:log2,:log10,
+                  :sin,:sinpi,:cos,:cospi,:tan,:tanpi,:asin,:acos,:atan,
+                  :sinh,:cosh,:tanh,:asinh,:acosh,:atanh,
+                  :trunc,:round,:exponent,:abs,:sincos,:cis)
+            e = quote
+                (Base.$f)(X::Array{Float64}) = ($fa)(X)
+                (Base.$f)(X::Array{Float32}) = ($fa)(X)
             end
+        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv)
+            e = quote
+                (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
+            end
+        else
+            error("Function $f not defined by Accelerate")
         end
         push!(b.args,e)
     end
