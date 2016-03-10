@@ -6,8 +6,3 @@ julia:
   - nightly
 notifications:
   email: false
-
-before_install:
- - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
-script:
- - julia -e 'versioninfo(); Pkg.init(); Pkg.clone(pwd()); Pkg.test("AppleAccelerate")'
