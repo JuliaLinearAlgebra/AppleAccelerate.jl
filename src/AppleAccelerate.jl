@@ -1,3 +1,4 @@
+__precompile__()
 module AppleAccelerate
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
