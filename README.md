@@ -4,9 +4,9 @@
 
 This provides a Julia interface to some of
 [OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
-the moment, the package only provides an interface to the
+the moment, the package consists mostly of an interface to the
 [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
-which provide a vectorised form of many common mathematical functions. In
+which provide a vectorised form of many common mathematical functions, however the package does provide access to several other vectorized operations and more are being added on a regular basis.   In
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
@@ -15,6 +15,7 @@ The following functions are supported:
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
  * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `cis`
  * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+ * *Convolution*: `conv`, `xcorr`
  * *Other*: `sqrt`, `copysign`, `exponent`, `abs`, `rem`
 
 Note there are some slight differences from behaviour in Base:
