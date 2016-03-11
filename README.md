@@ -6,7 +6,7 @@ This provides a Julia interface to some of
 [OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
 the moment, the package consists mostly of an interface to the
 [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
-which provide a vectorised form of many common mathematical functions, however the package does provide access to several other vectorized operations, and more are being added on a regular basis.   In
+which provide a vectorised form of many common mathematical functions, however the package does provide access to several other vectorized operations and more are being added on a regular basis.   In
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
