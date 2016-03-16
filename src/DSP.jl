@@ -1,6 +1,6 @@
 ## DSP.jl ##
 
-immutable DFT_Setup{T}
+immutable DFTSetup{T}
     setup::Ptr{Void}
     direction::Integer
 end
@@ -51,7 +51,7 @@ DCT 'length' must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4. If you have
 object, that can be passed in as 'previous'. The returned DCT setup will share the underlying data
 storage of the previous setup object.
 
-Returns: DFT_Setup
+Returns: DFTSetup
 """
 function plan_dct(length::Integer,  dct_type::Integer, previous=C_NULL)
     if dct_type < 2 &&  dct_type > 4
@@ -62,17 +62,17 @@ function plan_dct(length::Integer,  dct_type::Integer, previous=C_NULL)
     setup::Ptr{Void} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Void},
                              (Ptr{Void}, UInt64, UInt64),
                              previous, length, dct_type)
-    return DFT_Setup{Float32}(setup, 0)
+    return DFTSetup{Float32}(setup, 0)
 end
 
 
 """
 Computes the DCT of a given input vector X using the parameters setup in
-the DCT_setup object.
+the DFTSetup object.
 
 Returns: Vector{Float32}
 """
-function dct(X::Vector{Float32}, setup::DFT_Setup)
+function dct(X::Vector{Float32}, setup::DFTSetup)
     Y = similar(X)
     ccall(("vDSP_DCT_Execute", libacc),  Void,
           (Ptr{Void},  Ptr{Float32},  Ptr{Float32}),
@@ -94,9 +94,9 @@ end
 
 
 """
-Deinitializes a DFT_Setup object created by plan_dct
+Deinitializes a DFTSetup object created by plan_dct
 """
-function plan_destroy(setup::DFT_Setup)
+function plan_destroy(setup::DFTSetup)
     ccall(("vDSP_DFT_DestroySetup", libacc), Void,
           (Ptr{Void},),
           setup.setup)
