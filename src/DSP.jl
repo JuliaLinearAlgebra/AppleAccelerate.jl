@@ -1,14 +1,30 @@
 ## DSP.jl ##
 
+## === TYPES === ##
+immutable Biquad{T}
+    setup::Ptr{Void}
+    sections::Integer
+
+end
+
+
+## === FUNCTIONS == ##
+"""
+Convolution/Cross-Correlation
+"""
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
+    """
+    Returns the convolution of a 1-D vector X with a 1-D kernel vector K.
+    Returns vector of size length(X) + length(K) -1.
+    """
     @eval begin
-        function conv(X::Array{$T}, K::Array{$T})
+        function conv(X::Vector{$T}, K::Vector{$T})
             ksize = length(K)
             xsize = length(X)
             rsize = xsize + ksize - 1
-            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            result = Array($T, rsize)
+            x_padded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
+            result = Vector($T, rsize)
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
                   x_padded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
@@ -17,23 +33,91 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     end
 
 
+    """
+    Cross-correlation of two 1-D signals X & Y. Returned vector is of size
+    length(X) + length(Y) - -1.
+    """
     @eval begin
-        function xcorr(X::Array{$T}, K::Array{$T})
-            ksize = length(K)
+        function xcorr(X::Vector{$T}, Y::Vector{$T})
+            ysize = length(Y)
             xsize = length(X)
-            rsize = xsize + ksize - 1
-            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            result = Array($T, rsize)
+            rsize = xsize + ysize - 1
+            x_padded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
+            result = Vector($T, rsize)
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
-                  x_padded, 1, K, 1, result, 1,  rsize, ksize)
+                  x_padded, 1, Y, 1, result, 1,  rsize, ysize)
             return result
         end
     end
 
+
+    """
+    Performs auto-correlation of a 1-D signal with itself. Returned vector
+    is of size 2*length(X) - 1
+    """
     @eval begin
-        function xcorr(X::Array{$T})
+        function xcorr(X::Vector{$T})
             return xcorr(X, X)
+        end
+    end
+end
+
+
+"""
+Biquadratic/IIR filtering
+"""
+for (T, suff) in ((Float64, "D"), (Float32, ""))
+
+    """
+    Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
+    can be initialized with a single call to biquad_create_setup. coefficients must
+    contain 5 coefficients for each section. The three feed-forward coefficients are
+    specified first, followed by the two feedback coefficients. Returns a Biquad object.
+    """
+    @eval begin
+        function biquad_create_setup(coefficients::Vector{$T},  sections::Integer)
+            if length(coefficients) != 5*sections
+                error("Incomplete biquad specification provided - coefficients must
+                            contain 5 elements for each filter section")
+                return
+            end
+            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Void},
+                          (Ptr{$T}, UInt64),
+                          coefficients, sections)
+            return Biquad{$T}(setup, sections)
+        end
+    end
+
+
+    """
+    Filters an input array X with the specified Biquad filter and filter delay values provided
+    in delays; only numelem elements are filtered. After execution, delays contains the final
+    state data of the filter.
+    """
+    @eval begin
+        function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Integer, biquad::Biquad)
+            if length(delays) != (2*(biquad.sections)+2)
+                error("Incomplete delay specification provided - delays must contain 2*M +2
+                                values where M is the number of sections in the biquad")
+            end
+            result::Vector{$T} = similar(X, $T, length(X))
+            ccall(($(string("vDSP_biquad", suff), libacc)),  Void,
+                  (Ptr{Void},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
+                  biquad.setup, delays, X,  1, result,  1,  numelem)
+        end
+    end
+
+
+    """
+    Frees all resources associated with a particular Biquad previously
+    created through a call to biquad_create_setup
+    """
+    @eval begin
+        function biquad_destroy(biquad::Biquad{$T})
+            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Void,
+                  (Ptr{Void}, ),
+                  biquad.setup)
         end
     end
 end
