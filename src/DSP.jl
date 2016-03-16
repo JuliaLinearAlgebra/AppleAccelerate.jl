@@ -53,7 +53,7 @@ storage of the previous setup object.
 
 Returns: DFT_Setup
 """
-function dct_setup(length::Integer,  dct_type::Integer, previous=C_NULL)
+function plan_dct(length::Integer,  dct_type::Integer, previous=C_NULL)
     if dct_type < 2 &&  dct_type > 4
         error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
     elseif !(isinteger(Base.log2(length)))
@@ -88,8 +88,18 @@ This function does not require a separate call to dct_setup.
 Returns: Vector{Float32}
 """
 function dct(X::Vector{Float32}, dct_type::Integer=2)
-    setup = dct_setup(length(X), dct_type)
+    setup = plan_dct(length(X), dct_type)
     return dct(X, setup)
+end
+
+
+"""
+Deinitializes a DFT_Setup object created by plan_dct
+"""
+function plan_destroy(setup::DFT_Setup)
+    ccall(("vDSP_DFT_DestroySetup", libacc), Void,
+          (Ptr{Void},),
+          setup.setup)
 end
 
 

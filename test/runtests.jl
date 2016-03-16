@@ -102,8 +102,10 @@ end
 @testset "DCT::Float32" begin
     r=rand(Float32,2^16)
     d1=dct(r)
-    d2=AppleAccelerate.dct(r)
+    plan_accel = AppleAccelerate.plan_dct(length(r), 2)
+    d2=AppleAccelerate.dct(r, plan_accel)
     @test norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32)
+    AppleAccelerate.plan_destroy(plan_accel)
 end
 
 
