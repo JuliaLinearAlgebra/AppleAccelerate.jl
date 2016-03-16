@@ -13,8 +13,9 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 
     """
     Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
+    Result vector should have at least length(X) + length(K) - 1 elements
 
-    Returns: Void. Computation result is stored in 'result'.
+    Returns: 'result'. Computation result is also stored in 'result' argument.
     """
     @eval begin
         function conv!(result::Vector{$T}, X::Vector{$T}, K::Vector{$T})
@@ -28,6 +29,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
                   xpadded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
+            return result
         end
     end
 
@@ -49,19 +51,21 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     In-place convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
 
-    Returns: Void. 'X' is overwritten with computation result.
+    Returns: 'X'. 'X' is overwritten with computation result.
     """
     @eval begin
         function conv!(X::Vector{$T}, K::Vector{$T})
             conv!(X, K, X)
+            return X
         end
     end
 
 
     """
     Cross-correlation of two Vector{T}'s 'X' and 'Y'.
+    Result vector should have at least length(X) + length(Y) - 1 elements
 
-    Returns: Void. The result of the computation is stored in 'result'
+    Returns: 'result'. The result of the computation is also stored in 'result'
     """
     @eval begin
         function xcorr!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
@@ -75,6 +79,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
                   xpadded, 1, Y, 1, result, 1,  rsize, ysize)
+            return result
         end
     end
 
@@ -96,11 +101,12 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     In-place cross-correlation of two Vector{T}'s 'X' and 'Y'.
 
-    Returns: Void. 'X' is overwritten with the result of the cross-correlation.
+    Returns: 'X'. 'X' is overwritten with the result of the cross-correlation.
     """
     @eval begin
         function xcorr!(X::Vector{$T}, Y::Vector{$T})
             xcorr!(X, Y, X)
+            return X
         end
     end
 
