@@ -99,7 +99,7 @@ for T in (Float32, Float64)
 end
 
 
-@testset "DCT" begin
+@testset "DCT::Float32" begin
     r=rand(Float32,2^16)
     d1=dct(r)
     d2=AppleAccelerate.dct(r)

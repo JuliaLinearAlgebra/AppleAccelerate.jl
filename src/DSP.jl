@@ -1,5 +1,10 @@
 ## DSP.jl ##
 
+immutable DFT_Setup{T}
+    setup::Ptr{Void}
+    direction::Integer
+end
+
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
     @eval begin
@@ -39,24 +44,53 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 end
 
 
-function plan_dct(n,k::Integer)
-    @assert isinteger(Base.log2(n))
-    @assert 2≤k≤4
-    ccall(("vDSP_DCT_CreateSetup",libacc),Ptr{Void},(Ptr{Void},Cint,Cint),C_NULL,n,k)
+## == Discrete Cosine Transform (DCT) == ##
+"""
+Initializes a new DCT setup object. 'dct_type' must be 2, 3, 4 corresponding to Type II, III and IV.
+DCT 'length' must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4. If you have a previous DCT setup
+object, that can be passed in as 'previous'. The returned DCT setup will share the underlying data
+storage of the previous setup object.
+
+Returns: DFT_Setup
+"""
+function dct_setup(length::Integer,  dct_type::Integer, previous=C_NULL)
+    if dct_type < 2 &&  dct_type > 4
+        error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
+    elseif !(isinteger(Base.log2(length)))
+        error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")
+    end
+    setup::Ptr{Void} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Void},
+                             (Ptr{Void}, UInt64, UInt64),
+                             previous, length, dct_type)
+    return DFT_Setup{Float32}(setup, 0)
 end
 
 
-function dct(r::Vector{Float32},plan)
-    n=length(r)
-    @assert isinteger(Base.log2(n))
-    out=Array(Float32,n)
-    ccall(("vDSP_DCT_Execute",libacc),Void,(Ptr{Void},Ptr{Float32},Ptr{Float32}),plan,r,out)
-    out
+"""
+Computes the DCT of a given input vector X using the parameters setup in
+the DCT_setup object.
+
+Returns: Vector{Float32}
+"""
+function dct(X::Vector{Float32}, setup::DFT_Setup)
+    Y = similar(X)
+    ccall(("vDSP_DCT_Execute", libacc),  Void,
+          (Ptr{Void},  Ptr{Float32},  Ptr{Float32}),
+          setup.setup,  X, Y)
+    return Y
 end
 
-dct(r::Vector{Float32},k::Integer=2)=dct(r,plan_dct(length(r),k))
 
+"""
+Computes the DCT of a given input vector X using a DCT Type 'dct_type' (defaults to type II).
+This function does not require a separate call to dct_setup.
 
+Returns: Vector{Float32}
+"""
+function dct(X::Vector{Float32}, dct_type::Integer=2)
+    setup = dct_setup(length(X), dct_type)
+    return dct(X, setup)
+end
 
 
 # const     FFT_FORWARD         = +1
