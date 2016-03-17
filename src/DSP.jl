@@ -54,7 +54,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function conv!(X::Vector{$T}, K::Vector{$T})
-            conv!(X, K, X)
+            conv!(X, X, K)
         end
     end
 
@@ -89,7 +89,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function xcorr(X::Vector{$T}, Y::Vector{$T})
-            result = Array($T, (length(X) + length(Y) - 1))
+            result = Array($T, length(X) + length(Y) - 1)
             xcorr!(result, X, Y)
         end
     end
@@ -102,7 +102,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function xcorr!(X::Vector{$T}, Y::Vector{$T})
-            xcorr!(X, Y, X)
+            xcorr!(X, X, Y)
         end
     end
 
