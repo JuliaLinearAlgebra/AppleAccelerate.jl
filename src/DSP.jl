@@ -39,6 +39,130 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 end
 
 
+## == WINDOW GENERATION == ##
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    """
+    Generates a Blackman window of length 'length' and stores it in `result'. By
+    default, a full window is created, but if flag=1, only the first (n+1)/2 points
+    will be calculated.
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function blackman!(result::Vector{$T},  length::Integer, flag::Integer=0)
+            ccall(($(string("vDSP_blkman_window", suff), libacc)), Void,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
+            return result
+        end
+    end
+
+    """
+    Generates a Blackman window of length 'length'. Default return type
+    is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+    will be returned.
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function blackman(length::Integer, rtype::DataType=Float64)
+            result::Vector{rtype} = Array(rtype, length)
+            blackman!(result, length, 0)
+        end
+    end
+
+    """
+    Generates a Hamming window of length 'length' and stores it in `result'. By
+    default, a full window is created, but if flag=1, only the first (n+1)/2 points
+    will be calculated.
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hamming!(result::Vector{$T},  length::Integer, flag::Integer=0)
+            ccall(($(string("vDSP_hamm_window", suff), libacc)), Void,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
+            return result
+        end
+    end
+
+    """
+    Generates a Hamming window of length 'length'. Default return type
+    is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+    will be returned.
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hamming(length::Integer, rtype::DataType=Float64)
+            result::Vector{rtype} = Array(rtype, length)
+            hamming!(result, length, 0)
+        end
+    end
+
+
+    """
+    Generates a Hanning window of length 'length' and stores it in `result'.
+    Different window options can be set using the flag argument; default value
+    is zero (denormalized Hanning window)
+
+    flag = 0: Returns a denormalized Hanning window
+    flag = 1: Returns a denormalized Hanning window with only (n+1)/2 points
+    flag = 2: Returns a normalized Hanning window
+    flag = 3: Returns a normalized Hanning window with only (n+1)/2 points
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hanning!(result::Vector{$T},  length::Integer, flag::Integer=0)
+            ccall(($(string("vDSP_hann_window", suff), libacc)), Void,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
+            return result
+        end
+    end
+
+    """
+    Generates a denormalized Hanning window of length 'length'. Default
+    return type is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+    will be returned.
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hanning(length::Integer, rtype::DataType=Float64)
+            result::Vector{rtype} = Array(rtype, length)
+            hanning!(result, length, 0)
+        end
+    end
+
+    """
+    Alias function for hanning!
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hann!(result::Vector{$T}, length::Integer, flag::Integer=0)
+            hanning!(result, length, flag)
+        end
+    end
+
+    """
+    Alias function for hanning
+
+    Returns: Vector{$T}
+    """
+    @eval begin
+        function hann(length::Integer, rtype::DataType=Float64)
+            hanning(length, rtype)
+        end
+    end
+
+end
+
+
 function plan_dct(n,k::Integer)
     @assert isinteger(Base.log2(n))
     @assert 2≤k≤4
@@ -97,4 +221,4 @@ dct(r::Vector{Float32},k::Integer=2)=dct(r,plan_dct(length(r),k))
 #            plan,     vals,                 SIGNAL_STRIDE,   ret,                  SIGNAL_STRIDE,logn,       FFT_FORWARD)
 #
 #     retr+im*reti
-# end
+# End
