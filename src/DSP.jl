@@ -11,6 +11,12 @@ type DFTSetup{T}
     end
 end
 
+immutable Biquad{T}
+    setup::Ptr{Void}
+    sections::Integer
+end
+
+## === FUNCTIONS == ##
 
 ## === FUNCTIONS == ##
 for (T, suff) in ((Float64, "D"), (Float32, ""))
@@ -61,7 +67,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             conv!(X, X, K)
         end
     end
-
 
     """
     Cross-correlation of two Vector{T}'s 'X' and 'Y'.
@@ -121,9 +126,69 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             xcorr(X, X)
         end
     end
-
 end
 
+## == Biquadratic/IIR filtering
+for (T, suff) in ((Float64, "D"), (Float32, ""))
+
+    """
+    Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
+    can be initialized with a single call to biquad_create_setup. coefficients must
+    contain 5 coefficients for each section. The three feed-forward coefficients are
+    specified first, followed by the two feedback coefficients. Returns a Biquad object.
+
+    Returns: Biquad{T}
+    """
+    @eval begin
+        function createbiquad(coefficients::Vector{$T},  sections::Integer)
+            if length(coefficients) < 5*sections
+                error("Incomplete biquad specification provided - coefficients must
+                            contain 5 elements for each filter section")
+            end
+            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Void},
+                          (Ptr{$T}, UInt64),
+                          coefficients, sections)
+            return Biquad{$T}(setup, sections)
+        end
+    end
+
+
+    """
+    Filters an input array X with the specified Biquad filter and filter delay values provided
+    in delays; only numelem elements are filtered. After execution, delays contains the final
+    state data of the filter.
+
+    Returns: Vector{T}
+    """
+    @eval begin
+        function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Integer, biquad::Biquad)
+            if length(delays) < (2*(biquad.sections)+2)
+                error("Incomplete delay specification provided - delays must contain 2*M + 2
+                                values where M is the number of sections in the biquad")
+            end
+            result::Vector{$T} = similar(X)
+            ccall(($(string("vDSP_biquad", suff), libacc)),  Void,
+                  (Ptr{Void},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
+                  biquad.setup, delays, X,  1, result,  1,  numelem)
+            return result
+        end
+    end
+
+
+    """
+    Frees all resources associated with a particular Biquad previously
+    created through a call to biquad_create_setup
+
+    Returns: Void
+    """
+    @eval begin
+        function destroybiquad(biquad::Biquad{$T})
+            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Void,
+                  (Ptr{Void}, ),
+                  biquad.setup)
+        end
+    end
+end
 
 ## == WINDOW GENERATION == ##
 for (T, suff) in ((Float32, ""), (Float64, "D"))
