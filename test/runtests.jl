@@ -107,7 +107,7 @@ end
 end
 
 
-for T in (Float32, Float64)
+for T in (Float32,  Float64)
     @testset "Convolution & Correlation::$T" begin
         X::Array{T} = randn(N)
         Y::Array{T} = randn(N)
@@ -121,6 +121,39 @@ for T in (Float32, Float64)
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fb(X, copy(X)) ≈ fa(X)
+        end
+    end
+end
+
+
+for T in (Float32, Float64)
+    @testset "Window Functions::$T" begin
+        N = 64
+        @testset "Testing blackman::$T" begin
+            Wa = AppleAccelerate.blackman(N, T)
+            Wb = Array(T, N)
+            for n in 1:N
+                Wb[n] = 0.42-(0.5cos(2pi*(n-1)/N)) + (0.08cos(4pi*(n-1)/N))
+            end
+            @test Wa ≈ Wb
+        end
+
+        @testset "Testing hamming::$T" begin
+            Wa = AppleAccelerate.hamming(N, T)
+            Wb = Array(T, N)
+            for n in 1:N
+                Wb[n] = 0.54-0.46cos(2pi*(n-1)/N)
+            end
+            @test Wa ≈ Wb
+        end
+
+        @testset "Testing hanning::$T" begin
+            Wa = AppleAccelerate.hanning(N, T)
+            Wb = Array(T, N)
+            for n in 1:N
+                Wb[n] = 0.5(1.0-cos(2pi*(n-1)/N))
+            end
+            @test Wa ≈ Wb
         end
     end
 end
