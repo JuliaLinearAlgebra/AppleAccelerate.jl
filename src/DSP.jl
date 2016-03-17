@@ -1,41 +1,116 @@
 ## DSP.jl ##
 
+## === FUNCTIONS == ##
+
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
+    """
+    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
+    Result vector should have at least length(X) + length(K) - 1 elements
+
+    Returns: 'result'. Computation result is also stored in 'result' argument.
+    """
     @eval begin
-        function conv(X::Array{$T}, K::Array{$T})
+        function conv!(result::Vector{$T}, X::Vector{$T}, K::Vector{$T})
             ksize = length(K)
             xsize = length(X)
-            rsize = xsize + ksize - 1
-            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            result = Array($T, rsize)
+            rsize = length(result)
+            if (rsize < xsize + ksize - 1)
+                error("'result' must have at least length(X) + length(K) - 1 elements")
+            end
+            xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
-                  x_padded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
+                  xpadded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
             return result
         end
     end
 
 
+    """
+    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
+
+    Returns: Vector{T} with length = length(X) + length(K) - 1
+    """
     @eval begin
-        function xcorr(X::Array{$T}, K::Array{$T})
-            ksize = length(K)
+        function conv(X::Vector{$T}, K::Vector{$T})
+            result = Array($T, length(X) + length(K) - 1)
+            conv!(result, X, K)
+        end
+    end
+
+
+    """
+    In-place convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
+
+    Returns: 'X'. 'X' is overwritten with computation result.
+    """
+    @eval begin
+        function conv!(X::Vector{$T}, K::Vector{$T})
+            conv!(X, X, K)
+        end
+    end
+
+
+    """
+    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
+    Result vector should have at least length(X) + length(Y) - 1 elements
+
+    Returns: 'result'. The result of the computation is also stored in 'result'
+    """
+    @eval begin
+        function xcorr!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+            ysize = length(Y)
             xsize = length(X)
-            rsize = xsize + ksize - 1
-            x_padded::Array{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            result = Array($T, rsize)
+            rsize = length(result)
+            if (rsize < xsize + ysize - 1)
+                error("'result' must have at least length(X) + length(Y) - 1 elements")
+            end
+            xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
             ccall(($(string("vDSP_conv", suff), libacc)),  Void,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
-                  x_padded, 1, K, 1, result, 1,  rsize, ksize)
+                  xpadded, 1, Y, 1, result, 1,  rsize, ysize)
             return result
         end
     end
 
+
+    """
+    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
+
+    Returns: Vector{T} with length(X) + length(Y) - 1
+    """
     @eval begin
-        function xcorr(X::Array{$T})
-            return xcorr(X, X)
+        function xcorr(X::Vector{$T}, Y::Vector{$T})
+            result = Array($T, length(X) + length(Y) - 1)
+            xcorr!(result, X, Y)
         end
     end
+
+
+    """
+    In-place cross-correlation of two Vector{T}'s 'X' and 'Y'.
+
+    Returns: 'X'. 'X' is overwritten with the result of the cross-correlation.
+    """
+    @eval begin
+        function xcorr!(X::Vector{$T}, Y::Vector{$T})
+            xcorr!(X, X, Y)
+        end
+    end
+
+
+    """
+    Performs auto-correlation of a 1-D signal with itself.
+
+    Returns: Vector{T} with length = 2*length(X) - 1
+    """
+    @eval begin
+        function xcorr(X::Vector{$T})
+            xcorr(X, X)
+        end
+    end
+
 end
 
 
