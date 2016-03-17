@@ -1,8 +1,14 @@
 ## DSP.jl ##
 
-immutable DFTSetup{T}
+type DFTSetup{T}
     setup::Ptr{Void}
     direction::Integer
+
+    function DFTSetup(setup::Ptr{Void}, direction::Integer)
+        dftsetup = new(setup, direction)
+        finalizer(dftsetup, plan_destroy)
+        dftsetup
+    end
 end
 
 for (T, suff) in ((Float64, "D"), (Float32, ""))
