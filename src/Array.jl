@@ -123,3 +123,32 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         end
     end
 end
+
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    for (f, fa) in ((:maximum, :maxv), (:minimum, :minv), (:mean, :meanv),
+                    (:meansqr, :measqv), (:meanmag,  :meamgv), (:sum, :sve))
+        @eval begin
+            function ($f)(X::Array{$T})
+                val::$T = 0.0
+                ccall(($(string("vDSP_", fa, suff), libacc)),  Void,
+                      (Ptr{$T}, Int64,  Ref{$T}, UInt64),
+                      X, 1, val, length(X))
+                return val
+            end
+        end
+    end
+
+    for (f, fa) in ((:findmax, :maxvi), (:findmin, :minvi))
+        @eval begin
+            function ($f)(X::Array{$T})
+                index::Int = 0
+                val::$T = 0.0
+                ccall(($(string("vDSP_", fa, suff), libacc)),  Void,
+                      (Ptr{$T}, Int64,  Ref{$T}, Ref{$T}, UInt64),
+                      X, 1, val, index, length(X))
+                return (val, index)
+            end
+        end
+    end
+end

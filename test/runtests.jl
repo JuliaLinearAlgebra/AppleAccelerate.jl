@@ -10,11 +10,38 @@ end
 srand(7)
 N = 1_000
 
+for T in (Float32, Float64)
+    @testset "Array Properties::$T" begin
+        X::Array{T} = randn(N)
+        @testset "Testing $f::$T" for f in [:maximum, :minimum, :mean, :sum]
+            @eval fb = $f
+            @eval fa = AppleAccelerate.$f
+            @test fa(X) ≈ fb(X)
+        end
+
+        @testset "Testing $f::$T" for f in [:findmax, :findmin]
+            @eval fb = $f
+            @eval fa = AppleAccelerate.$f
+            @test fa(X)[1] ≈ fb(X)[1]
+            @test fa(X)[2] ≈ fb(X)[2]
+        end
+
+        @testset "Testing meansqr::$T" begin
+            AppleAccelerate.meansqr(X) ≈ mean(X .*X)
+        end
+
+        @testset "Testing meanmag::$T" begin
+            AppleAccelerate.meanmag(X) ≈ mean(abs(X))
+        end
+
+    end
+end
+
 
 for T in (Float32, Float64)
     @testset "Rounding::$T" begin
         X::Array{T} = 100*randn(N)
-        @testset "Testing $f:$T" for f in [:floor,:ceil,:trunc,:round]
+        @testset "Testing $f::$T" for f in [:floor,:ceil,:trunc,:round]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fa(X) ≈ fb(X)
