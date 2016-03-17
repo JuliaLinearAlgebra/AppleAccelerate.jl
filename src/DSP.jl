@@ -54,9 +54,11 @@ storage of the previous setup object.
 Returns: DFTSetup
 """
 function plan_dct(length::Integer,  dct_type::Integer, previous=C_NULL)
+    n = trailing_zeros(length)
+    f = length >> n
     if dct_type < 2 &&  dct_type > 4
         error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
-    elseif !(isinteger(Base.log2(length)))
+    elseif !(n >= 4 && f in (1,3,5,15))
         error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")
     end
     setup::Ptr{Void} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Void},
@@ -73,11 +75,11 @@ the DFTSetup object.
 Returns: Vector{Float32}
 """
 function dct(X::Vector{Float32}, setup::DFTSetup)
-    Y = similar(X)
+    result = similar(X)
     ccall(("vDSP_DCT_Execute", libacc),  Void,
           (Ptr{Void},  Ptr{Float32},  Ptr{Float32}),
-          setup.setup,  X, Y)
-    return Y
+          setup.setup,  X, result)
+    return result
 end
 
 
