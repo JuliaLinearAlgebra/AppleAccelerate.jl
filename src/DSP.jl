@@ -1,12 +1,5 @@
 ## DSP.jl ##
 
-## === TYPES === ##
-immutable DFTSetup{T}
-    setup::Ptr{Void}
-
-    direction::Integer
-end
-
 ## === FUNCTIONS == ##
 
 for (T, suff) in ((Float64, "D"), (Float32, ""))
