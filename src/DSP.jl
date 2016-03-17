@@ -1,7 +1,18 @@
 ## DSP.jl ##
 
-## === FUNCTIONS == ##
+type DFTSetup{T}
+    setup::Ptr{Void}
+    direction::Int
 
+    function DFTSetup(setup::Ptr{Void}, direction::Int)
+        dftsetup = new(setup, direction)
+        finalizer(dftsetup, plan_destroy)
+        dftsetup
+    end
+end
+
+
+## === FUNCTIONS == ##
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
     """
@@ -125,7 +136,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function blackman!(result::Vector{$T},  length::Integer, flag::Integer=0)
+        function blackman!(result::Vector{$T},  length::Int, flag::Int=0)
             ccall(($(string("vDSP_blkman_window", suff), libacc)), Void,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
@@ -141,7 +152,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function blackman(length::Integer, rtype::DataType=Float64)
+        function blackman(length::Int, rtype::DataType=Float64)
             result::Vector{rtype} = Array(rtype, length)
             blackman!(result, length, 0)
         end
@@ -155,7 +166,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hamming!(result::Vector{$T},  length::Integer, flag::Integer=0)
+        function hamming!(result::Vector{$T},  length::Int, flag::Int=0)
             ccall(($(string("vDSP_hamm_window", suff), libacc)), Void,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
@@ -171,7 +182,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hamming(length::Integer, rtype::DataType=Float64)
+        function hamming(length::Int, rtype::DataType=Float64)
             result::Vector{rtype} = Array(rtype, length)
             hamming!(result, length, 0)
         end
@@ -191,7 +202,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hanning!(result::Vector{$T},  length::Integer, flag::Integer=0)
+        function hanning!(result::Vector{$T},  length::Int, flag::Int=0)
             ccall(($(string("vDSP_hann_window", suff), libacc)), Void,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
@@ -207,7 +218,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hanning(length::Integer, rtype::DataType=Float64)
+        function hanning(length::Int, rtype::DataType=Float64)
             result::Vector{rtype} = Array(rtype, length)
             hanning!(result, length, 0)
         end
@@ -219,7 +230,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hann!(result::Vector{$T}, length::Integer, flag::Integer=0)
+        function hann!(result::Vector{$T}, length::Int, flag::Int=0)
             hanning!(result, length, flag)
         end
     end
@@ -230,7 +241,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hann(length::Integer, rtype::DataType=Float64)
+        function hann(length::Int, rtype::DataType=Float64)
             hanning(length, rtype)
         end
     end
@@ -238,24 +249,65 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 end
 
 
-function plan_dct(n,k::Integer)
-    @assert isinteger(Base.log2(n))
-    @assert 2≤k≤4
-    ccall(("vDSP_DCT_CreateSetup",libacc),Ptr{Void},(Ptr{Void},Cint,Cint),C_NULL,n,k)
+## == Discrete Cosine Transform (DCT) == ##
+"""
+Initializes a new DCT setup object. 'dct_type' must be 2, 3, 4 corresponding to Type II, III and IV.
+DCT 'length' must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4. If you have a previous DCT setup
+object, that can be passed in as 'previous'. The returned DCT setup will share the underlying data
+storage of the previous setup object.
+
+Returns: DFTSetup
+"""
+function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
+    n = trailing_zeros(length)
+    f = length >> n
+    if dct_type < 2 &&  dct_type > 4
+        error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
+    elseif !(n >= 4 && f in (1,3,5,15))
+        error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")
+    end
+    setup::Ptr{Void} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Void},
+                             (Ptr{Void}, UInt64, UInt64),
+                             previous, length, dct_type)
+    return DFTSetup{Float32}(setup, 0)
 end
 
 
-function dct(r::Vector{Float32},plan)
-    n=length(r)
-    @assert isinteger(Base.log2(n))
-    out=Array(Float32,n)
-    ccall(("vDSP_DCT_Execute",libacc),Void,(Ptr{Void},Ptr{Float32},Ptr{Float32}),plan,r,out)
-    out
+"""
+Computes the DCT of a given input vector X using the parameters setup in
+the DFTSetup object.
+
+Returns: Vector{Float32}
+"""
+function dct(X::Vector{Float32}, setup::DFTSetup)
+    result = similar(X)
+    ccall(("vDSP_DCT_Execute", libacc),  Void,
+          (Ptr{Void},  Ptr{Float32},  Ptr{Float32}),
+          setup.setup,  X, result)
+    return result
 end
 
-dct(r::Vector{Float32},k::Integer=2)=dct(r,plan_dct(length(r),k))
+
+"""
+Computes the DCT of a given input vector X using a DCT Type 'dct_type' (defaults to type II).
+This function does not require a separate call to dct_setup.
+
+Returns: Vector{Float32}
+"""
+function dct(X::Vector{Float32}, dct_type::Int=2)
+    setup = plan_dct(length(X), dct_type)
+    return dct(X, setup)
+end
 
 
+"""
+Deinitializes a DFTSetup object created by plan_dct
+"""
+function plan_destroy(setup::DFTSetup)
+    ccall(("vDSP_DFT_DestroySetup", libacc), Void,
+          (Ptr{Void},),
+          setup.setup)
+end
 
 
 # const     FFT_FORWARD         = +1
