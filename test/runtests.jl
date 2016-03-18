@@ -10,32 +10,7 @@ end
 srand(7)
 N = 1_000
 
-for T in (Float32, Float64)
-    @testset "Array Properties::$T" begin
-        X::Array{T} = randn(N)
-        @testset "Testing $f::$T" for f in [:maximum, :minimum, :mean, :sum]
-            @eval fb = $f
-            @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
-        end
 
-        @testset "Testing $f::$T" for f in [:findmax, :findmin]
-            @eval fb = $f
-            @eval fa = AppleAccelerate.$f
-            @test fa(X)[1] ≈ fb(X)[1]
-            @test fa(X)[2] ≈ fb(X)[2]
-        end
-
-        @testset "Testing meansqr::$T" begin
-            AppleAccelerate.meansqr(X) ≈ mean(X .*X)
-        end
-
-        @testset "Testing meanmag::$T" begin
-            AppleAccelerate.meanmag(X) ≈ mean(abs(X))
-        end
-
-    end
-end
 
 
 for T in (Float32, Float64)
@@ -186,6 +161,32 @@ for T in (Float32, Float64)
     end
 end
 
+for T in (Float32, Float64)
+    @testset "Array Properties::$T" begin
+        X::Array{T} = randn(N)
+        @testset "Testing $f::$T" for f in [:maximum, :minimum, :mean, :sum]
+            @eval fb = $f
+            @eval fa = AppleAccelerate.$f
+            @test fa(X) ≈ fb(X)
+        end
+
+        @testset "Testing $f::$T" for f in [:findmax, :findmin]
+            @eval fb = $f
+            @eval fa = AppleAccelerate.$f
+            @test fa(X)[1] ≈ fb(X)[1]
+            @test fa(X)[2] ≈ fb(X)[2]
+        end
+
+        @testset "Testing meansqr::$T" begin
+            @test AppleAccelerate.meansqr(X) ≈ mean(X .*X)
+        end
+
+        @testset "Testing meanmag::$T" begin
+            @test AppleAccelerate.meanmag(X) ≈ mean(abs(X))
+        end
+
+    end
+end
 
 for T in (Float32, Float64)
     @testset "Misc::$T" begin
