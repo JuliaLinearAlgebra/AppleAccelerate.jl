@@ -11,9 +11,15 @@ type DFTSetup{T}
     end
 end
 
-immutable Biquad{T}
+type Biquad{T}
     setup::Ptr{Void}
-    sections::Integer
+    sections::Int
+
+    function Biquad(setup::Ptr{Void}, sections::Int)
+        biquadsetup = new(setup, sections)
+        finalizer(biquadsetup, biquaddestroy)
+        biquadsetup
+    end
 end
 
 ## === FUNCTIONS == ##
@@ -129,7 +135,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 end
 
 ## == Biquadratic/IIR filtering
-for (T, suff) in ((Float64, "D"), (Float32, ""))
+for (T, suff) in ((Float64, "D"), )
 
     """
     Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
@@ -140,7 +146,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: Biquad{T}
     """
     @eval begin
-        function createbiquad(coefficients::Vector{$T},  sections::Integer)
+        function biquadcreate(coefficients::Vector{$T},  sections::Int)
             if length(coefficients) < 5*sections
                 error("Incomplete biquad specification provided - coefficients must
                             contain 5 elements for each filter section")
@@ -161,7 +167,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: Vector{T}
     """
     @eval begin
-        function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Integer, biquad::Biquad)
+        function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Int, biquad::Biquad{$T})
             if length(delays) < (2*(biquad.sections)+2)
                 error("Incomplete delay specification provided - delays must contain 2*M + 2
                                 values where M is the number of sections in the biquad")
@@ -177,12 +183,13 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 
     """
     Frees all resources associated with a particular Biquad previously
-    created through a call to biquad_create_setup
+    created through a call to biquad_create_setup. This is called automatically
+    when the setup object is no longer visible to the garbage collector.
 
     Returns: Void
     """
     @eval begin
-        function destroybiquad(biquad::Biquad{$T})
+        function biquaddestroy(biquad::Biquad{$T})
             ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Void,
                   (Ptr{Void}, ),
                   biquad.setup)

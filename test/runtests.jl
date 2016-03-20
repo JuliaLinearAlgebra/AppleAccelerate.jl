@@ -129,15 +129,15 @@ for T in (Float32,  Float64)
     end
 end
 
-for T in (Float32, Float64)
+for T in (Float64, )
     @testset "Biquadratic Flitering::$T" begin
         @testset "Single Section::$T" begin
             X::Vector{T} = randn(10)
             d::Vector{T} = zeros(4)
-            c::Vector{T} = [0.5, 0.5, 0.5, 0.5, 0.5]
+            c::Vector{T} = [x%0.5 for x in randn(5)]
             fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
-            fa = AppleAccelerate.createbiquad(c, 1)
-            @test filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
+            fa = AppleAccelerate.biquadcreate(c, 1)
+            @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
         end
     end
 end
