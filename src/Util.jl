@@ -32,7 +32,7 @@ macro replaceBase(fs...)
                 (Base.$f)(X::Array{Float64}) = ($fa)(X)
                 (Base.$f)(X::Array{Float32}) = ($fa)(X)
             end
-        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv)
+        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv, :vadd, :vsub, :vmul)
             e = quote
                 (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
                 (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
