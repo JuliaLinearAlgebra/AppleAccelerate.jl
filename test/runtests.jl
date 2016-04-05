@@ -11,7 +11,16 @@ srand(7)
 N = 1_000
 
 
-
+for T in (Float32, Float64)
+    @testset "Element-wise Operators::$T" begin
+        X::Vector{T} = randn(N)
+        Y::Vector{T} = randn(N)
+        @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
+        @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
+        @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
+        @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+    end
+end
 
 for T in (Float32, Float64)
     @testset "Rounding::$T" begin

@@ -14,6 +14,12 @@ macro replaceBase(fs...)
             fa = :fdiv
         elseif f == :.^
             fa = :pow
+        elseif f == :.+
+            fa = :vadd
+        elseif f == :.-
+            fa = :vsub
+        elseif f == :.*
+            fa = :vmul
         else
             fa = f
         end
@@ -26,13 +32,13 @@ macro replaceBase(fs...)
                 (Base.$f)(X::Array{Float64}) = ($fa)(X)
                 (Base.$f)(X::Array{Float32}) = ($fa)(X)
             end
-        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv)
+        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv, :vadd, :vsub, :vmul)
             e = quote
                 (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
                 (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
             end
         else
-            error("Function $f not defined by Accelerate")
+            error("Function $f not defined by AppleAccelerate.jl")
         end
         push!(b.args,e)
     end

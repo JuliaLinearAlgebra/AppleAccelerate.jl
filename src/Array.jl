@@ -124,7 +124,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 end
 
-
+# Functions over single vectors that return scalars/tuples
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     for (f, fa) in ((:maximum, :maxv), (:minimum, :minv), (:mean, :meanv),
@@ -153,3 +153,43 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 end
+
+# Element-wise operations over two vectors
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    for (f, name) in ((:vadd, "addition"),  (:vsub, "subtraction"),
+                      (:vdiv, "division"), (:vmul, "multiplication"))
+        f! = symbol("$(f)!")
+
+        @eval begin
+            @doc """
+            `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, Y::Vector{$($T)})`
+
+            Implements element-wise **$($name)** over two **Vector{$($T)}** and overwrites
+            the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
+            """ ->
+            function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+                ccall(($(string("vDSP_", f, suff), libacc)),  Void,
+                      (Ptr{$T}, Int64, Ptr{$T},  Int64, Ptr{$T}, Int64,  UInt64),
+                      Y, 1, X, 1, result, 1, length(result))
+                return result
+            end
+        end
+
+        @eval begin
+            @doc """
+            `$($f)(X::Vector{$($T)}, Y::Vector{$($T)})`
+
+            Implements element-wise **$($name)** over two **Vector{$($T)}**. Allocates
+            memory to store result. *Returns:* **Vector{$($T)}**
+            """ ->
+            function ($f)(X::Vector{$T}, Y::Vector{$T})
+                result = similar(X)
+                ($f!)(result, X, Y)
+                return result
+            end
+        end
+    end
+end
+
+
