@@ -1,4 +1,5 @@
 using AppleAccelerate
+using DSP
 
 if VERSION >= v"0.5-"
     using Base.Test
@@ -121,8 +122,8 @@ end
 
 for T in (Float32,  Float64)
     @testset "Convolution & Correlation::$T" begin
-        X::Array{T} = randn(N)
-        Y::Array{T} = randn(N)
+        X::Vector{T} = randn(N)
+        Y::Vector{T} = randn(N)
         @testset "Testing $f::$T" for f in [:conv, :xcorr]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
@@ -133,6 +134,19 @@ for T in (Float32,  Float64)
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fb(X, copy(X)) ≈ fa(X)
+        end
+    end
+end
+
+for T in (Float64, )
+    @testset "Biquadratic Flitering::$T" begin
+        @testset "Single Section::$T" begin
+            X::Vector{T} = randn(10)
+            d::Vector{T} = zeros(4)
+            c::Vector{T} = [x%0.5 for x in randn(5)]
+            fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
+            fa = AppleAccelerate.biquadcreate(c, 1)
+            @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
         end
     end
 end
