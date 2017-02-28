@@ -10,7 +10,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array($T,size(X))
+                out = Array{$T}(size(X))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{$T}, X::Array{$T})
@@ -27,7 +27,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array($T,size(X))
+                out = Array{$T}(size(X))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{$T}, X::Array{$T})
@@ -44,7 +44,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = Array{$T}(size(X))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
@@ -61,7 +61,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = Array{$T}(size(X))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
@@ -79,7 +79,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = Array{$T}(size(X))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
@@ -95,8 +95,8 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out1 = Array($T,size(X))
-                out2 = Array($T,size(X))
+                out1 = Array{$T}(size(X))
+                out2 = Array{$T}(size(X))
                 ($f!)(out1, out2, X)
             end
             function ($f!)(out1::Array{$T}, out2::Array{$T}, X::Array{$T})
@@ -112,7 +112,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array(Complex{$T},size(X))
+                out = Array{Complex{$T}}(size(X))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
