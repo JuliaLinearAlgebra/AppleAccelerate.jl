@@ -1,10 +1,6 @@
 ## Util.jl##
 
-if VERSION>=v"0.4.0-rc1"
-    tupletypelength(a)=length(a.parameters)
-else
-    tupletypelength(a)=length(a)
-end
+tupletypelength(a)=length(a.parameters)
 
 
 macro replaceBase(fs...)
