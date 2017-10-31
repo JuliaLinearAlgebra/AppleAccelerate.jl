@@ -1,6 +1,6 @@
 # AppleAccelerate.jl
 
-[![Build Status](https://travis-ci.org/JuliaLang/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/JuliaLang/AppleAccelerate.jl)
+[![Build Status](https://travis-ci.org/JuliaMath/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/JuliaMath/AppleAccelerate.jl)
 
 This provides a Julia interface to some of
 [OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
