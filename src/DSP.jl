@@ -4,7 +4,7 @@ type DFTSetup{T}
     setup::Ptr{Void}
     direction::Int
 
-    function DFTSetup(setup::Ptr{Void}, direction::Int)
+    function DFTSetup{T}(setup::Ptr{Void}, direction::Int) where T
         dftsetup = new(setup, direction)
         finalizer(dftsetup, plan_destroy)
         dftsetup
@@ -15,7 +15,7 @@ type Biquad{T}
     setup::Ptr{Void}
     sections::Int
 
-    function Biquad(setup::Ptr{Void}, sections::Int)
+    function Biquad{T}(setup::Ptr{Void}, sections::Int) where T
         biquadsetup = new(setup, sections)
         finalizer(biquadsetup, biquaddestroy)
         biquadsetup
