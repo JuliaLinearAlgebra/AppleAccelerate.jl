@@ -1,5 +1,7 @@
 using AppleAccelerate
+using Base.Test
 using DSP
+
 
 srand(7)
 N = 1_000
