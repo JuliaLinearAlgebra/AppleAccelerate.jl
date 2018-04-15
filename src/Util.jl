@@ -28,10 +28,16 @@ macro replaceBase(fs...)
                 (Base.$f)(X::Array{Float64}) = ($fa)(X)
                 (Base.$f)(X::Array{Float32}) = ($fa)(X)
             end
-        elseif fa in (:copysign,:atan2,:pow,:rem,:fdiv, :vadd, :vsub, :vmul)
+        elseif fa in (:copysign,:atan2,:rem)
             e = quote
-                (Base.$f)(X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
-                (Base.$f)(X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float32}, Y::Array{Float32}) = ($fa)(X,Y)
+                (Base.$f)(X::Array{Float64}, Y::Array{Float64}) = ($fa)(X,Y)
+            end
+        elseif fa in (:fdiv,:pow,:vadd,:vsub,:vmul)
+            fb = Symbol(replace(string(f), r"^\.(.*)", s"\1"))
+            e = quote
+                Base.broadcast(::typeof(Base.$fb), X::Array{Float64}, Y::Array{Float64}) = ($fa)(X,Y)
+                Base.broadcast(::typeof(Base.$fb), X::Array{Float32}, Y::Array{Float32}) = ($fa)(X,Y)
             end
         else
             error("Function $f not defined by AppleAccelerate.jl")

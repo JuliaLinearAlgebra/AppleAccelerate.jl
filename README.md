@@ -1,6 +1,6 @@
 # AppleAccelerate.jl
 
-[![Build Status](https://travis-ci.org/JuliaLang/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/JuliaLang/AppleAccelerate.jl)
+[![Build Status](https://travis-ci.org/JuliaMath/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/JuliaMath/AppleAccelerate.jl)
 
 This provides a Julia interface to some of
 [OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
@@ -26,10 +26,10 @@ Note there are some slight differences from behaviour in Base:
 
 Some additional functions that are also available:
 * `rec(x)`: reciprocal (`1.0 ./ x`)
-* `rsqrt(x)`: reciprocal square-root (`1.0 ./ sqrt(x)`)
+* `rsqrt(x)`: reciprocal square-root (`1.0 ./ sqrt.(x)`)
 * `pow(x,y)`: power (`x .^ y` in Base)
 * `fdiv(x,y)`: divide (`x ./ y` in Base)
-* `sincos(x)`: returns `(sin(x), cos(x))`
+* `sincos(x)`: returns `(sin.(x), cos.(x))`
 
 ## Example
 
@@ -38,7 +38,7 @@ be accessed via the namespace:
 ```julia
 using AppleAccelerate
 X = randn(1_000_000)
-@time Y = exp(X) # standard libm function
+@time Y = exp.(X) # standard libm function
 @time Y = AppleAccelerate.exp(X) # Accelerate array-oriented function
 ```
 
@@ -52,7 +52,7 @@ AppleAccelerate.@replaceBase(.^, ./) # use parenthesised form for infix ops
 Output arrays can be specified as first arguments of the functions suffixed
 with `!`:
 ```julia
-out = Array(Float64,1_000_000)
+out = Array{Float64}(1_000_000)
 @time AppleAccelerate.exp!(out, X)
 ```
 

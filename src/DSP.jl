@@ -57,7 +57,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function conv(X::Vector{$T}, K::Vector{$T})
-            result = Array($T, length(X) + length(K) - 1)
+            result = Array{$T}(length(X) + length(K) - 1)
             conv!(result, X, K)
         end
     end
@@ -104,7 +104,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function xcorr(X::Vector{$T}, Y::Vector{$T})
-            result = Array($T, length(X) + length(Y) - 1)
+            result = Array{$T}(length(X) + length(Y) - 1)
             xcorr!(result, X, Y)
         end
     end
@@ -225,7 +225,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function blackman(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(length)
             blackman!(result, length, 0)
         end
     end
@@ -255,7 +255,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hamming(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(length)
             hamming!(result, length, 0)
         end
     end
@@ -291,7 +291,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hanning(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(length)
             hanning!(result, length, 0)
         end
     end
