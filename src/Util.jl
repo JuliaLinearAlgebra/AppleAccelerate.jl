@@ -19,27 +19,43 @@ macro replaceBase(fs...)
         else
             fa = f
         end
+        fa! = Symbol("$(fa)!")
         if fa in (:ceil,:floor,:sqrt,:rsqrt,:rec,
                   :exp,:exp2,:expm1,:log,:log1p,:log2,:log10,
                   :sin,:sinpi,:cos,:cospi,:tan,:tanpi,:asin,:acos,
                   :sinh,:cosh,:tanh,:asinh,:acosh,:atanh,
-                  :trunc,:round,:exponent,:abs,:sincos,:cis)
+                  :trunc,:round,:exponent,:abs,:sincos)
 
             e = quote
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float64}) = ($fa)(X)
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float32}) = ($fa)(X)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copyto!)(dest::Array{Float64, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copyto!)(dest::Array{Float32, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
             end
         elseif fa in (:copysign,:pow,:rem,:fdiv, :vadd, :vsub, :vmul)
             e = quote
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}, Array{Float64, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}, Array{Float32, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copyto!)(dest::Array{Float64, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}, Array{Float64, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copyto!)(dest::Array{Float32, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}, Array{Float32, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
             end
         elseif fa == :atan
             e = quote
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float64}) = ($fa)(X)
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float32}) = ($fa)(X)
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float64},Y::Array{Float64}) = ($fa)(X,Y)
-                (Base.Broadcast.broadcasted)(f::typeof(Base.$f),X::Array{Float32},Y::Array{Float32}) = ($fa)(X,Y)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copyto!)(dest::Array{Float64, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copyto!)(dest::Array{Float32, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}, Array{Float64, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}, Array{Float32, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copyto!)(dest::Array{Float64, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}, Array{Float64, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copyto!)(dest::Array{Float32, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}, Array{Float32, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+            end
+        elseif fa == :cis
+            e = quote
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copy)(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa)(bc.args...)
+                (Base.copyto!)(dest::Array{Complex{Float64}, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float64, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
+                (Base.copyto!)(dest::Array{Complex{Float32}, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof(Base.$f), Tuple{Array{Float32, N}}}) where {Style, Axes, N} = ($fa!)(dest, bc.args...)
             end
         else
             error("Function $f not defined by AppleAccelerate.jl")

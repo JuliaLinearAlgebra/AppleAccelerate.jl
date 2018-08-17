@@ -266,3 +266,22 @@ AppleAccelerate.@replaceBase(sin, atan, /)
     @test Base.atan.(X, Y) == AppleAccelerate.atan(X, Y)
     @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
 end
+
+@testset "Replace Base In-Place::$T" for T in (Float32, Float64)
+    X = randn(T, N)
+    Y = abs.(randn(T, N))
+    destX_base = similar(X)
+    destX_accl = similar(X)
+
+    destX_base .= Base.sin.(X)
+    AppleAccelerate.sin!(destX_accl, X)
+    @test destX_base == destX_accl
+
+    destX_base .= Base.atan.(X, Y)
+    AppleAccelerate.atan!(destX_accl, X, Y)
+    @test destX_base == destX_accl
+
+    destX_base .= X ./ Y
+    AppleAccelerate.fdiv!(destX_accl, X, Y)
+    @test destX_base == destX_accl
+end
