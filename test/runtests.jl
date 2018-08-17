@@ -1,21 +1,19 @@
 using AppleAccelerate
 using DSP
+using Test
+using Random
+using FFTW
+using LinearAlgebra
+using Statistics
 
-if VERSION >= v"0.5-"
-    using Base.Test
-else
-    using BaseTestNext
-    const Test = BaseTestNext
-end
-
-srand(7)
+Random.seed!(7)
 N = 1_000
 
 
 for T in (Float32, Float64)
     @testset "Element-wise Operators::$T" begin
-        X::Vector{T} = randn(N)
-        Y::Vector{T} = randn(N)
+        X = randn(T, N)
+        Y = randn(T, N)
         @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
         @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
         @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
@@ -25,11 +23,11 @@ end
 
 for T in (Float32, Float64)
     @testset "Rounding::$T" begin
-        X::Array{T} = 100*randn(N)
+        X = 100*randn(T, N)
         @testset "Testing $f::$T" for f in [:floor,:ceil,:trunc,:round]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
     end
 end
@@ -37,11 +35,11 @@ end
 
 for T in (Float32, Float64)
     @testset "Logarithmic::$T" begin
-        X::Array{T} = exp(10*randn(N))
+        X = exp.(10*randn(T, N))
         @testset "Testing $f::$T" for f in [:log,:log2,:log10, :log1p]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
     end
 end
@@ -50,36 +48,36 @@ end
 for T in (Float32, Float64)
     @testset "Exponential::$T" begin
         @testset "Testing $f::$T" for f in [:exp,:exp2,:expm1]
-            X::Array{T} = 10*randn(N)
+            X = 10*randn(T, N)
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
     end
 end
 
 
 for T in (Float32, Float64)
-    X::Array{T} = 10*randn(N)
+    X = 10*randn(T, N)
     @testset "Trigonometric::$T" begin
         @testset "Testing $f::$T" for f in [:sin,:sinpi,:cos,:cospi,:tan,:atan] # tanpi not defined in Base
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
 
-        Y::Array{T} = 10*randn(N)
-        @testset "Testing $f::$T" for f in [:atan2]
+        Y = 10*randn(T, N)
+        @testset "Testing $f::$T" for f in [:atan]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X,Y) ≈ fb(X,Y)
+            @test fa(X,Y) ≈ fb.(X,Y)
         end
 
-        Z::Array{T} = 2*rand(N)-1
+        Z = 2*rand(T, N).-1
         @testset "Testing $f::$T" for f in [:asin,:acos]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(Z) ≈ fb(Z)
+            @test fa(Z) ≈ fb.(Z)
         end
     end
 end
@@ -87,25 +85,25 @@ end
 
 for T in (Float32, Float64)
     @testset "Hyperbolic::$T" begin
-        X = 10*randn(N)
+        X = 10*randn(T, N)
         @testset "Testing $f::$T" for f in [:sinh,:cosh,:tanh,:asinh]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
 
-        Y = exp(10*randn(N))+1
+        Y = exp.(10*randn(T, N)).+1
         @testset "Testing $f::$T" for f in [:acosh]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(Y) ≈ fb(Y)
+            @test fa(Y) ≈ fb.(Y)
         end
 
-        Z = 2*rand(N)-1
+        Z = 2*rand(T, N).-1
         @testset "Testing $f::$T" for f in [:atanh]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(Z) ≈ fb(Z)
+            @test fa(Z) ≈ fb.(Z)
         end
     end
 end
@@ -116,14 +114,14 @@ end
     d1=dct(r)
     plan_accel = AppleAccelerate.plan_dct(length(r), 2)
     d2=AppleAccelerate.dct(r, plan_accel)
-    @test norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32)
+    @test norm(d1[2]/d2[2]*d2[2:end] - d1[2:end])≤1000eps(Float32)
 end
 
 
 for T in (Float32,  Float64)
     @testset "Convolution & Correlation::$T" begin
-        X::Vector{T} = randn(N)
-        Y::Vector{T} = randn(N)
+        X = randn(T, N)
+        Y = randn(T, N)
         @testset "Testing $f::$T" for f in [:conv, :xcorr]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
@@ -141,12 +139,12 @@ end
 for T in (Float64, )
     @testset "Biquadratic Flitering::$T" begin
         @testset "Single Section::$T" begin
-            X::Vector{T} = randn(10)
-            d::Vector{T} = zeros(4)
-            c::Vector{T} = [x%0.5 for x in randn(5)]
+            X = randn(T, 10)
+            d = zeros(T, 4)
+            c = [x%0.5 for x in randn(T, 5)]
             fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
-            fa = AppleAccelerate.biquadcreate(c, 1)
-            @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
+            fbq = AppleAccelerate.biquadcreate(c, 1)
+            @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fbq)
         end
     end
 end
@@ -154,10 +152,10 @@ end
 
 for T in (Float32, Float64)
     @testset "Window Functions::$T" begin
-        N = 64
+        global N = 64
         @testset "Testing blackman::$T" begin
             Wa = AppleAccelerate.blackman(N, T)
-            Wb = Array(T, N)
+            Wb = Array{T}(undef, N)
             for n in 1:N
                 Wb[n] = 0.42-(0.5cos(2pi*(n-1)/N)) + (0.08cos(4pi*(n-1)/N))
             end
@@ -166,7 +164,7 @@ for T in (Float32, Float64)
 
         @testset "Testing hamming::$T" begin
             Wa = AppleAccelerate.hamming(N, T)
-            Wb = Array(T, N)
+            Wb = Array{T}(undef, N)
             for n in 1:N
                 Wb[n] = 0.54-0.46cos(2pi*(n-1)/N)
             end
@@ -175,7 +173,7 @@ for T in (Float32, Float64)
 
         @testset "Testing hanning::$T" begin
             Wa = AppleAccelerate.hanning(N, T)
-            Wb = Array(T, N)
+            Wb = Array{T}(undef, N)
             for n in 1:N
                 Wb[n] = 0.5(1.0-cos(2pi*(n-1)/N))
             end
@@ -186,7 +184,7 @@ end
 
 for T in (Float32, Float64)
     @testset "Array Properties::$T" begin
-        X::Array{T} = randn(N)
+        X = randn(T, N)
         @testset "Testing $f::$T" for f in [:maximum, :minimum, :mean, :sum]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
@@ -205,7 +203,7 @@ for T in (Float32, Float64)
         end
 
         @testset "Testing meanmag::$T" begin
-            @test AppleAccelerate.meanmag(X) ≈ mean(abs(X))
+            @test AppleAccelerate.meanmag(X) ≈ mean(abs.(X))
         end
 
     end
@@ -213,28 +211,28 @@ end
 
 for T in (Float32, Float64)
     @testset "Misc::$T" begin
-        X::Array{T} = exp(10*randn(N))
+        X = exp.(10*randn(T, N))
         @testset "Testing $f::$T" for f in [:sqrt]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X) ≈ fb(X)
+            @test fa(X) ≈ fb.(X)
         end
 
-        Y::Array{T} = 10*randn(N)
+        Y = 10*randn(T, N)
         @testset "Testing $f::$T" for f in [:exponent, :abs]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(Y) ≈ fb(Y)
+            @test fa(Y) ≈ fb.(Y)
         end
 
-        Z::Array{T} = 10*randn(N)
+        Z = 10*randn(T, N)
         @testset "Testing $f::$T" for f in [:copysign]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
-            @test fa(X,Y) ≈ fb(X,Y)
+            @test fa(X,Y) ≈ fb.(X,Y)
         end
 
-        @test AppleAccelerate.rem(X,Y) == [rem(X[i], Y[i]) for i=1:length(X)]
+        @test AppleAccelerate.rem(X,Y) == rem.(X, Y)
 
     end
 end
@@ -242,29 +240,29 @@ end
 
 for T in (Float32, Float64)
     @testset "Extra::$T" begin
-        X::Array{T} = randn(N)
-        Y::Array{T} = abs(randn(N))
+        X = randn(T, N)
+        Y = abs.(randn(T, N))
 
-        @test AppleAccelerate.rec(X) ≈ 1./X
-        @test AppleAccelerate.rsqrt(Y) ≈ 1./sqrt(Y)
+        @test AppleAccelerate.rec(X) ≈ 1.0./X
+        @test AppleAccelerate.rsqrt(Y) ≈ 1.0./sqrt.(Y)
         @test AppleAccelerate.pow(Y,X) ≈ Y.^X
         @test AppleAccelerate.fdiv(X,Y) ≈ X./Y
 
-        @test AppleAccelerate.sincos(X)[1] ≈ sin(X)
-        @test AppleAccelerate.sincos(X)[2] ≈ cos(X)
-        @test AppleAccelerate.cis(X) ≈ cis(X)
+        @test AppleAccelerate.sincos(X)[1] ≈ sin.(X)
+        @test AppleAccelerate.sincos(X)[2] ≈ cos.(X)
+        @test AppleAccelerate.cis(X) ≈ cis.(X)
 
     end
 end
 
 
-AppleAccelerate.@replaceBase(sin, atan2, ./)
+AppleAccelerate.@replaceBase(sin, atan, /)
 
 @testset "Replace Base::$T" for T in (Float32, Float64)
-    X::Array{T} = randn(N)
-    Y::Array{T} = abs(randn(N))
+    X = randn(T, N)
+    Y = abs.(randn(T, N))
 
-    @test Base.sin(X) == AppleAccelerate.sin(X)
-    @test Base.atan2(X, Y) == AppleAccelerate.atan2(X, Y)
+    @test Base.sin.(X) == AppleAccelerate.sin(X)
+    @test Base.atan.(X, Y) == AppleAccelerate.atan(X, Y)
     @test X ./ Y  == AppleAccelerate.fdiv(X, Y)
 end

@@ -7,15 +7,15 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
               :exp,:exp2,:expm1,:log,:log1p,:log2,:log10,
               :sin,:sinpi,:cos,:cospi,:tan,:tanpi,:asin,:acos,:atan,
               :sinh,:cosh,:tanh,:asinh,:acosh,:atanh)
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array($T,size(X))
+                out = similar(X)
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,&length(X))
+                ccall(($(string("vv",f,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Ref{Cint}(length(X)))
                 out
             end
         end
@@ -24,32 +24,32 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     # renamed 1 arg functions
     for (f,fa) in ((:trunc,:int),(:round,:nint),(:exponent,:logb),
                    (:abs,:fabs))
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array($T,size(X))
+                out = similar(X)
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,&length(X))
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Ref{Cint}(length(X)))
                 out
             end
         end
     end
 
     # 2 arg functions
-    for f in (:copysign,:atan2)
-        f! = symbol("$(f)!")
+    for f in (:copysign,)
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = similar(X)
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,&length(X))
+                ccall(($(string("vv",f,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,Ref{Cint}(length(X)))
                 out
             end
         end
@@ -57,16 +57,16 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
     # for some bizarre reason, vvpow/vvpowf reverse the order of arguments.
     for f in (:pow,)
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = similar(X)
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,Y,X,&length(X))
+                ccall(($(string("vv",f,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,Y,X,Ref{Cint}(length(X)))
                 out
             end
         end
@@ -74,17 +74,17 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
 
     # renamed 2 arg functions
-    for (f,fa) in ((:rem,:fmod),(:fdiv,:div))
-        f! = symbol("$(f)!")
+    for (f,fa) in ((:rem,:fmod),(:fdiv,:div),(:atan,:atan2))
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T}, Y::Array{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
-                out = Array($T,size(X))
+                out = similar(X)
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,&length(X))
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out,X,Y,Ref{Cint}(length(X)))
                 out
             end
         end
@@ -92,16 +92,16 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
     # two-arg return
     for f in (:sincos,)
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out1 = Array($T,size(X))
-                out2 = Array($T,size(X))
+                out1 = similar(X)
+                out2 = similar(X)
                 ($f!)(out1, out2, X)
             end
             function ($f!)(out1::Array{$T}, out2::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Void,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out1,out2,X,&length(X))
+                ccall(($(string("vv",f,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ptr{Cint}),out1,out2,X,Ref{Cint}(length(X)))
                 out1, out2
             end
         end
@@ -109,15 +109,15 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
     # complex return
     for (f,fa) in ((:cis,:cosisin),)
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
-                out = Array(Complex{$T},size(X))
+                out = Array{Complex{$T}}(undef, size(X))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Void,
-                      (Ptr{Complex{$T}},Ptr{$T},Ptr{Cint}),out,X,&length(X))
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{Complex{$T}},Ptr{$T},Ptr{Cint}),out,X,Ref{Cint}(length(X)))
                 out
             end
         end
@@ -132,7 +132,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         @eval begin
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Void,
+                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
                       (Ptr{$T}, Int64,  Ref{$T}, UInt64),
                       X, 1, val, length(X))
                 return val[]
@@ -145,7 +145,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             function ($f)(X::Vector{$T})
                 index = Ref{Int}(0)
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Void,
+                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
                       (Ptr{$T}, Int64,  Ref{$T}, Ref{Int}, UInt64),
                       X, 1, val, index, length(X))
                 return (val[], index[]+1)
@@ -159,7 +159,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     for (f, name) in ((:vadd, "addition"),  (:vsub, "subtraction"),
                       (:vdiv, "division"), (:vmul, "multiplication"))
-        f! = symbol("$(f)!")
+        f! = Symbol("$(f)!")
 
         @eval begin
             @doc """
@@ -167,9 +167,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
             Implements element-wise **$($name)** over two **Vector{$($T)}** and overwrites
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
-            """ ->
+            """
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-                ccall(($(string("vDSP_", f, suff), libacc)),  Void,
+                ccall(($(string("vDSP_", f, suff), libacc)),  Cvoid,
                       (Ptr{$T}, Int64, Ptr{$T},  Int64, Ptr{$T}, Int64,  UInt64),
                       Y, 1, X, 1, result, 1, length(result))
                 return result
@@ -182,7 +182,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
             Implements element-wise **$($name)** over two **Vector{$($T)}**. Allocates
             memory to store result. *Returns:* **Vector{$($T)}**
-            """ ->
+            """
             function ($f)(X::Vector{$T}, Y::Vector{$T})
                 result = similar(X)
                 ($f!)(result, X, Y)
@@ -191,5 +191,3 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 end
-
-
