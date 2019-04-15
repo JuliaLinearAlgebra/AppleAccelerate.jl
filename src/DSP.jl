@@ -1,23 +1,23 @@
 ## DSP.jl ##
 
-type DFTSetup{T}
-    setup::Ptr{Void}
+mutable struct DFTSetup{T}
+    setup::Ptr{Cvoid}
     direction::Int
 
-    function DFTSetup(setup::Ptr{Void}, direction::Int)
-        dftsetup = new(setup, direction)
-        finalizer(dftsetup, plan_destroy)
+    function DFTSetup(T::DataType, setup::Ptr{Cvoid}, direction::Int)
+        dftsetup = new{T}(setup, direction)
+        finalizer(plan_destroy, dftsetup)
         dftsetup
     end
 end
 
-type Biquad{T}
-    setup::Ptr{Void}
+mutable struct Biquad{T}
+    setup::Ptr{Cvoid}
     sections::Int
 
-    function Biquad(setup::Ptr{Void}, sections::Int)
-        biquadsetup = new(setup, sections)
-        finalizer(biquadsetup, biquaddestroy)
+    function Biquad(T::DataType, setup::Ptr{Cvoid}, sections::Int)
+        biquadsetup = new{T}(setup, sections)
+        finalizer(biquaddestroy, biquadsetup)
         biquadsetup
     end
 end
@@ -42,7 +42,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
                 error("'result' must have at least length(X) + length(K) - 1 elements")
             end
             xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            ccall(($(string("vDSP_conv", suff), libacc)),  Void,
+            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
                   xpadded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
             return result
@@ -57,7 +57,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function conv(X::Vector{$T}, K::Vector{$T})
-            result = Array($T, length(X) + length(K) - 1)
+            result = Array{$T}(undef, length(X) + length(K) - 1)
             conv!(result, X, K)
         end
     end
@@ -89,7 +89,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
                 error("'result' must have at least length(X) + length(Y) - 1 elements")
             end
             xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
-            ccall(($(string("vDSP_conv", suff), libacc)),  Void,
+            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
                   (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
                   xpadded, 1, Y, 1, result, 1,  rsize, ysize)
             return result
@@ -104,7 +104,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     """
     @eval begin
         function xcorr(X::Vector{$T}, Y::Vector{$T})
-            result = Array($T, length(X) + length(Y) - 1)
+            result = Array{$T}(undef, length(X) + length(Y) - 1)
             xcorr!(result, X, Y)
         end
     end
@@ -151,10 +151,10 @@ for (T, suff) in ((Float64, "D"), )
                 error("Incomplete biquad specification provided - coefficients must
                             contain 5 elements for each filter section")
             end
-            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Void},
+            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Cvoid},
                           (Ptr{$T}, UInt64),
                           coefficients, sections)
-            return Biquad{$T}(setup, sections)
+            return Biquad($T, setup, sections)
         end
     end
 
@@ -173,8 +173,8 @@ for (T, suff) in ((Float64, "D"), )
                                 values where M is the number of sections in the biquad")
             end
             result::Vector{$T} = similar(X)
-            ccall(($(string("vDSP_biquad", suff), libacc)),  Void,
-                  (Ptr{Void},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
+            ccall(($(string("vDSP_biquad", suff), libacc)),  Cvoid,
+                  (Ptr{Cvoid},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
                   biquad.setup, delays, X,  1, result,  1,  numelem)
             return result
         end
@@ -186,12 +186,12 @@ for (T, suff) in ((Float64, "D"), )
     created through a call to biquad_create_setup. This is called automatically
     when the setup object is no longer visible to the garbage collector.
 
-    Returns: Void
+    Returns: Cvoid
     """
     @eval begin
         function biquaddestroy(biquad::Biquad{$T})
-            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Void,
-                  (Ptr{Void}, ),
+            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Cvoid,
+                  (Ptr{Cvoid}, ),
                   biquad.setup)
         end
     end
@@ -209,7 +209,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function blackman!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_blkman_window", suff), libacc)), Void,
+            ccall(($(string("vDSP_blkman_window", suff), libacc)), Cvoid,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
             return result
@@ -225,7 +225,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function blackman(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(undef, length)
             blackman!(result, length, 0)
         end
     end
@@ -239,7 +239,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hamming!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_hamm_window", suff), libacc)), Void,
+            ccall(($(string("vDSP_hamm_window", suff), libacc)), Cvoid,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
             return result
@@ -255,7 +255,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hamming(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(undef, length)
             hamming!(result, length, 0)
         end
     end
@@ -275,7 +275,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hanning!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_hann_window", suff), libacc)), Void,
+            ccall(($(string("vDSP_hann_window", suff), libacc)), Cvoid,
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
             return result
@@ -291,7 +291,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hanning(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array(rtype, length)
+            result::Vector{rtype} = Array{rtype}(undef, length)
             hanning!(result, length, 0)
         end
     end
@@ -338,10 +338,10 @@ function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     elseif !(n >= 4 && f in (1,3,5,15))
         error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")
     end
-    setup::Ptr{Void} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Void},
-                             (Ptr{Void}, UInt64, UInt64),
+    setup::Ptr{Cvoid} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Cvoid},
+                             (Ptr{Cvoid}, UInt64, UInt64),
                              previous, length, dct_type)
-    return DFTSetup{Float32}(setup, 0)
+    return DFTSetup(Float32, setup, 0)
 end
 
 
@@ -353,8 +353,8 @@ Returns: Vector{Float32}
 """
 function dct(X::Vector{Float32}, setup::DFTSetup)
     result = similar(X)
-    ccall(("vDSP_DCT_Execute", libacc),  Void,
-          (Ptr{Void},  Ptr{Float32},  Ptr{Float32}),
+    ccall(("vDSP_DCT_Execute", libacc),  Cvoid,
+          (Ptr{Cvoid},  Ptr{Float32},  Ptr{Float32}),
           setup.setup,  X, result)
     return result
 end
@@ -376,8 +376,8 @@ end
 Deinitializes a DFTSetup object created by plan_dct
 """
 function plan_destroy(setup::DFTSetup)
-    ccall(("vDSP_DFT_DestroySetup", libacc), Void,
-          (Ptr{Void},),
+    ccall(("vDSP_DFT_DestroySetup", libacc), Cvoid,
+          (Ptr{Cvoid},),
           setup.setup)
 end
 
@@ -401,7 +401,7 @@ end
 # function plan_fft(n,radix::Integer=2)
 #     @assert isinteger(log2(n))
 #     logn=round(Int,log2(n))
-#     ccall(("vDSP_create_fftsetupD",libacc),Ptr{Void},(Cuint,Cint),logn,radix)
+#     ccall(("vDSP_create_fftsetupD",libacc),Ptr{Cvoid},(Cuint,Cint),logn,radix)
 # end
 #
 # function newfft(r::Vector{Complex128},plan)
@@ -411,12 +411,12 @@ end
 #
 #     realp,imagp=real(r),imag(r)         # keep references to avoid garbage collection
 #     vals=DSPDoubleSplitComplex(realp,imagp)
-#     retr,reti=Array(Float64,n),Array(Float64,n)        # keep references to avoid garbage collection
+#     retr,reti=Array{Float64}(undef,n),Array{Float64}(undef,n)        # keep references to avoid garbage collection
 #     ret=DSPDoubleSplitComplex(retr,reti)
 #
 #
-#     ccall(("vDSP_fft_zopD",libacc),Void,
-#           (Ptr{Void},DSPDoubleSplitComplex,vDSP_Stride,     DSPDoubleSplitComplex,vDSP_Stride,  vDSP_Length,FFTDirection),
+#     ccall(("vDSP_fft_zopD",libacc),Cvoid,
+#           (Ptr{Cvoid},DSPDoubleSplitComplex,vDSP_Stride,     DSPDoubleSplitComplex,vDSP_Stride,  vDSP_Length,FFTDirection),
 #            plan,     vals,                 SIGNAL_STRIDE,   ret,                  SIGNAL_STRIDE,logn,       FFT_FORWARD)
 #
 #     retr+im*reti
