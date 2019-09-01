@@ -38,16 +38,22 @@ be accessed via the namespace:
 ```julia
 using AppleAccelerate
 using BenchmarkTools
-X = randn(1_000_000)
+X = randn(1_000_000);
 @btime exp.($X); # standard libm function
 @btime AppleAccelerate.exp($X); # Accelerate array-oriented function
 ```
 
 The `@replaceBase` macro replaces the relevant Base methods directly
 ```julia
+@btime sin.($X); # standard libm function
 AppleAccelerate.@replaceBase sin cos tan
-AppleAccelerate.@replaceBase(.^, ./) # use parenthesised form for infix ops
-@btime sin($X) # will use AppleAccelerate methods for vectorised operations
+@btime sin($X);  # will use AppleAccelerate methods for vectorised operations
+
+X = randn(1_000_000);
+Y = fill(3.0, 1_000_000);
+@btime $X .^ $Y;
+AppleAccelerate.@replaceBase(^, /) # use parenthesised form for infix ops
+@btime $X ^ $Y;
 ```
 
 Output arrays can be specified as first arguments of the functions suffixed
