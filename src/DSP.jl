@@ -24,7 +24,6 @@ end
 
 ## === FUNCTIONS == ##
 
-## === FUNCTIONS == ##
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
     """
@@ -198,6 +197,58 @@ for (T, suff) in ((Float64, "D"), )
 end
 
 ## == WINDOW GENERATION == ##
+
+"""
+    blackman(length, [rtype=Float64])
+
+Generates a Blackman window of length 'length'. Default return type
+is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+will be returned.
+"""
+@eval begin
+    function blackman(length::Int, rtype::DataType=Float64)
+        result::Vector{rtype} = Array{rtype}(undef, length)
+        blackman!(result, length, 0)
+    end
+end
+
+"""
+    hamming(length, [rtype=Float64])
+
+Generates a Hamming window of length 'length'. Default return type
+is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+will be returned.
+"""
+@eval begin
+    function hamming(length::Int, rtype::DataType=Float64)
+        result::Vector{rtype} = Array{rtype}(undef, length)
+        hamming!(result, length, 0)
+    end
+end
+
+"""
+    hanning(length, [rtype=Float64])
+
+Generates a denormalized Hanning window of length 'length'. Default
+return type is Vector{Float64}, but if rtype=Float32, Vector{Float32}
+will be returned.
+"""
+@eval begin
+    function hanning(length::Int, rtype::DataType=Float64)
+        result::Vector{rtype} = Array{rtype}(undef, length)
+        hanning!(result, length, 0)
+    end
+end
+
+"""
+Alias function for `hanning`
+"""
+@eval begin
+    function hann(length::Int, rtype::DataType=Float64)
+        hanning(length, rtype)
+    end
+end
+
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     """
@@ -216,19 +267,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    """
-    Generates a Blackman window of length 'length'. Default return type
-    is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-    will be returned.
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function blackman(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array{rtype}(undef, length)
-            blackman!(result, length, 0)
-        end
-    end
 
     """
     Generates a Hamming window of length 'length' and stores it in `result'. By
@@ -245,21 +283,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return result
         end
     end
-
-    """
-    Generates a Hamming window of length 'length'. Default return type
-    is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-    will be returned.
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function hamming(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array{rtype}(undef, length)
-            hamming!(result, length, 0)
-        end
-    end
-
 
     """
     Generates a Hanning window of length 'length' and stores it in `result'.
@@ -283,20 +306,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     """
-    Generates a denormalized Hanning window of length 'length'. Default
-    return type is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-    will be returned.
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function hanning(length::Int, rtype::DataType=Float64)
-            result::Vector{rtype} = Array{rtype}(undef, length)
-            hanning!(result, length, 0)
-        end
-    end
-
-    """
     Alias function for hanning!
 
     Returns: Vector{$T}
@@ -304,17 +313,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function hann!(result::Vector{$T}, length::Int, flag::Int=0)
             hanning!(result, length, flag)
-        end
-    end
-
-    """
-    Alias function for hanning
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function hann(length::Int, rtype::DataType=Float64)
-            hanning(length, rtype)
         end
     end
 
