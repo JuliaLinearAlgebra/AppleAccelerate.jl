@@ -1,11 +1,15 @@
 __precompile__()
 module AppleAccelerate
 
-const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
+using Libdl
 
-if !isfile(libacc)
-    error("Accelerate framework not found at $(libacc)")
+try
+    global const libacc = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate")
+catch
+    error("Accelerate framework not found.")
 end
+
+get_fptr(s) = dlsym(libacc, s)
 
 include("Array.jl")
 include("DSP.jl")
