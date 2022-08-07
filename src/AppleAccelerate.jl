@@ -1,7 +1,8 @@
-__precompile__()
 module AppleAccelerate
 
 using Libdl
+
+if Sys.isapple()
 
 try
     global const libacc = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate")
@@ -14,5 +15,7 @@ get_fptr(s) = dlsym(libacc, s)
 include("Array.jl")
 include("DSP.jl")
 include("Util.jl")
+
+end
 
 end # module
