@@ -27,8 +27,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
             # In-place mutating variant
             function ($f!)(out::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ref{Cint}),out,X,length(X))
+                fptr = get_fptr($(string("vv", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Ptr{$T}, Ref{Cint}), out, X, length(X))
                 out
             end
         end
@@ -52,8 +53,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,X,Y,length(X))
+                fptr = get_fptr($(string("vv", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Ptr{$T}, Ptr{$T}, Ref{Cint}), out, X, Y, length(X))
                 out
             end
         end
@@ -69,8 +71,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,Y,X,length(X))
+                fptr = get_fptr($(string("vv", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Ptr{$T}, Ptr{$T}, Ref{Cint}), out, Y, X, length(X))
                 out
             end
         end
@@ -86,8 +89,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out1, out2, X)
             end
             function ($f!)(out1::Array{$T}, out2::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out1,out2,X,length(X))
+                fptr = get_fptr($(string("vv", f, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Ptr{$T}, Ptr{$T}, Ref{Cint}), out1, out2, X, length(X))
                 out1, out2
             end
         end
@@ -102,8 +106,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{Complex{$T}},Ptr{$T},Ref{Cint}),out,X,length(X))
+                fptr = get_fptr($(string("vv", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{Complex{$T}}, Ptr{$T}, Ref{Cint}), out, X, length(X))
                 out
             end
         end
@@ -135,9 +140,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         @eval begin
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64,  Ref{$T}, UInt64),
-                      X, 1, val, length(X))
+                fptr = get_fptr($(string("vDSP_", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Int64, Ref{$T}, UInt64),
+                    X, 1, val, length(X))
                 return val[]
             end
         end
@@ -148,10 +154,11 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             function ($f)(X::Vector{$T})
                 index = Ref{Int}(0)
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64,  Ref{$T}, Ref{Int}, UInt64),
-                      X, 1, val, index, length(X))
-                return (val[], index[]+1)
+                fptr = get_fptr($(string("vDSP_", fa, suff)))
+                ccall(fptr, Cvoid,
+                    (Ptr{$T}, Int64, Ref{$T}, Ref{Int}, UInt64),
+                    X, 1, val, index, length(X))
+                return (val[], index[] + 1)
             end
         end
     end
@@ -172,7 +179,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-                ccall(($(string("vDSP_", f, suff), libacc)),  Cvoid,
+                fptr = get_fptr($(string("vDSP_", f, suff)))
+                ccall(fptr,  Cvoid,
                       (Ptr{$T}, Int64, Ptr{$T},  Int64, Ptr{$T}, Int64,  UInt64),
                       Y, 1, X, 1, result, 1, length(result))
                 return result
