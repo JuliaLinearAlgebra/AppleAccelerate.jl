@@ -10,6 +10,12 @@ which provide a vectorised form of many common mathematical functions, however t
 general, the performance is significantly better than using standard libm
 functions, though there does appear to be some reduced accuracy.
 
+# OS Requirements
+
+MacOS 12 is required in order to run AppleAccelerate.jl. On older MacOS versions, your mileage may vary.
+
+# Supported Functions
+
 The following functions are supported:
  * *Rounding*: `ceil`, `floor`, `trunc`, `round`
  * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
