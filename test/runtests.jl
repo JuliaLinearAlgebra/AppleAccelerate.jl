@@ -1,9 +1,10 @@
 using AppleAccelerate
 using DSP, Test, Random, LinearAlgebra, Statistics
 
+if Sys.isapple()
+
 Random.seed!(7)
 N = 1_000
-
 
 for T in (Float32, Float64)
     @testset "Element-wise Operators::$T" begin
@@ -264,3 +265,5 @@ AppleAccelerate.@replaceBase(sin, atan, /)
     @test Base.atan.(X, Y) == AppleAccelerate.atan(X, Y)
     @test X ./ Y  == AppleAccelerate.div_float(X, Y)
 end
+
+end # Sys.isapple()

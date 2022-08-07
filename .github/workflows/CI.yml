@@ -16,7 +16,7 @@ jobs:
           - '1'
           - 'nightly'
         os:
-#          - ubuntu-latest
+          - ubuntu-latest
           - macOS-12
 #          - windows-latest
         arch:
