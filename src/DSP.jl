@@ -40,11 +40,10 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             if (rsize < xsize + ksize - 1)
                 error("'result' must have at least length(X) + length(K) - 1 elements")
             end
-            xpadded::Vector{$T} = [zeros($T, ksize - 1); X; zeros($T, ksize)]
-            fptr = get_fptr($(string("vDSP_conv", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                xpadded, 1, pointer(K, ksize), -1, result, 1, rsize, ksize)
+            xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
+            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
+                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
+                  xpadded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
             return result
         end
     end
@@ -88,11 +87,10 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             if (rsize < xsize + ysize - 1)
                 error("'result' must have at least length(X) + length(Y) - 1 elements")
             end
-            xpadded::Vector{$T} = [zeros($T, ysize - 1); X; zeros($T, ysize)]
-            fptr = get_fptr($(string("vDSP_conv", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                xpadded, 1, Y, 1, result, 1, rsize, ysize)
+            xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
+            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
+                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
+                  xpadded, 1, Y, 1, result, 1,  rsize, ysize)
             return result
         end
     end
@@ -136,7 +134,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 end
 
 ## == Biquadratic/IIR filtering
-for (T, suff) in ((Float64, "D"),)
+for (T, suff) in ((Float64, "D"), )
 
     """
     Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
@@ -147,15 +145,14 @@ for (T, suff) in ((Float64, "D"),)
     Returns: Biquad{T}
     """
     @eval begin
-        function biquadcreate(coefficients::Vector{$T}, sections::Int)
-            if length(coefficients) < 5 * sections
+        function biquadcreate(coefficients::Vector{$T},  sections::Int)
+            if length(coefficients) < 5*sections
                 error("Incomplete biquad specification provided - coefficients must
                             contain 5 elements for each filter section")
             end
-            fptr = get_fptr($(string("vDSP_biquad_CreateSetup", suff)))
-            setup = ccall(fptr, Ptr{Cvoid},
-                (Ptr{$T}, UInt64),
-                coefficients, sections)
+            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Cvoid},
+                          (Ptr{$T}, UInt64),
+                          coefficients, sections)
             return Biquad($T, setup, sections)
         end
     end
@@ -170,15 +167,14 @@ for (T, suff) in ((Float64, "D"),)
     """
     @eval begin
         function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Int, biquad::Biquad{$T})
-            if length(delays) < (2 * (biquad.sections) + 2)
+            if length(delays) < (2*(biquad.sections)+2)
                 error("Incomplete delay specification provided - delays must contain 2*M + 2
                                 values where M is the number of sections in the biquad")
             end
             result::Vector{$T} = similar(X)
-            fptr = get_fptr($(string("vDSP_biquad", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{Cvoid}, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                biquad.setup, delays, X, 1, result, 1, numelem)
+            ccall(($(string("vDSP_biquad", suff), libacc)),  Cvoid,
+                  (Ptr{Cvoid},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
+                  biquad.setup, delays, X,  1, result,  1,  numelem)
             return result
         end
     end
@@ -193,10 +189,9 @@ for (T, suff) in ((Float64, "D"),)
     """
     @eval begin
         function biquaddestroy(biquad::Biquad{$T})
-            fptr = get_fptr($(string("vDSP_biquad_DestroySetup", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{Cvoid},),
-                biquad.setup)
+            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Cvoid,
+                  (Ptr{Cvoid}, ),
+                  biquad.setup)
         end
     end
 end
@@ -210,7 +205,7 @@ Generates a Blackman window of length 'length'. Default return type
 is Vector{Float64}, but if rtype=Float32, Vector{Float32}
 will be returned.
 """
-function blackman(length::Int, rtype::DataType = Float64)
+function blackman(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
     blackman!(result, length, 0)
 end
@@ -222,7 +217,7 @@ Generates a Hamming window of length 'length'. Default return type
 is Vector{Float64}, but if rtype=Float32, Vector{Float32}
 will be returned.
 """
-function hamming(length::Int, rtype::DataType = Float64)
+function hamming(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
     hamming!(result, length, 0)
 end
@@ -234,7 +229,7 @@ Generates a denormalized Hanning window of length 'length'. Default
 return type is Vector{Float64}, but if rtype=Float32, Vector{Float32}
 will be returned.
 """
-function hanning(length::Int, rtype::DataType = Float64)
+function hanning(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
     hanning!(result, length, 0)
 end
@@ -242,7 +237,7 @@ end
 """
 Alias function for `hanning`
 """
-function hann(length::Int, rtype::DataType = Float64)
+function hann(length::Int, rtype::DataType=Float64)
     hanning(length, rtype)
 end
 
@@ -256,11 +251,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function blackman!(result::Vector{$T}, length::Int, flag::Int = 0)
-            fptr = get_fptr($(string("vDSP_blkman_window", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{$T}, UInt64, Int64),
-                result, length, flag)
+        function blackman!(result::Vector{$T},  length::Int, flag::Int=0)
+            ccall(($(string("vDSP_blkman_window", suff), libacc)), Cvoid,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
             return result
         end
     end
@@ -274,11 +268,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hamming!(result::Vector{$T}, length::Int, flag::Int = 0)
-            fptr = get_fptr($(string("vDSP_hamm_window", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{$T}, UInt64, Int64),
-                result, length, flag)
+        function hamming!(result::Vector{$T},  length::Int, flag::Int=0)
+            ccall(($(string("vDSP_hamm_window", suff), libacc)), Cvoid,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
             return result
         end
     end
@@ -296,11 +289,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hanning!(result::Vector{$T}, length::Int, flag::Int = 0)
-            fptr = get_fptr($(string("vDSP_hann_window", suff)))
-            ccall(fptr, Cvoid,
-                (Ptr{$T}, UInt64, Int64),
-                result, length, flag)
+        function hanning!(result::Vector{$T},  length::Int, flag::Int=0)
+            ccall(($(string("vDSP_hann_window", suff), libacc)), Cvoid,
+                  (Ptr{$T}, UInt64,  Int64),
+                  result, length, flag)
             return result
         end
     end
@@ -311,7 +303,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hann!(result::Vector{$T}, length::Int, flag::Int = 0)
+        function hann!(result::Vector{$T}, length::Int, flag::Int=0)
             hanning!(result, length, flag)
         end
     end
@@ -328,18 +320,17 @@ storage of the previous setup object.
 
 Returns: DFTSetup
 """
-function plan_dct(length::Int, dct_type::Int, previous = C_NULL)
+function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     n = trailing_zeros(length)
     f = length >> n
-    if dct_type < 2 && dct_type > 4
+    if dct_type < 2 &&  dct_type > 4
         error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
-    elseif !(n >= 4 && f in (1, 3, 5, 15))
+    elseif !(n >= 4 && f in (1,3,5,15))
         error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")
     end
-    fptr = get_fptr("vDSP_DCT_CreateSetup")
-    setup::Ptr{Cvoid} = ccall(fptr, Ptr{Cvoid},
-        (Ptr{Cvoid}, UInt64, UInt64),
-        previous, length, dct_type)
+    setup::Ptr{Cvoid} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Cvoid},
+                             (Ptr{Cvoid}, UInt64, UInt64),
+                             previous, length, dct_type)
     return DFTSetup(Float32, setup, 0)
 end
 
@@ -352,11 +343,9 @@ Returns: Vector{Float32}
 """
 function dct(X::Vector{Float32}, setup::DFTSetup)
     result = similar(X)
-    fptr = get_fptr("vDSP_DCT_Execute")
-
-    ccall(fptr, Cvoid,
-        (Ptr{Cvoid}, Ptr{Float32}, Ptr{Float32}),
-        setup.setup, X, result)
+    ccall(("vDSP_DCT_Execute", libacc),  Cvoid,
+          (Ptr{Cvoid},  Ptr{Float32},  Ptr{Float32}),
+          setup.setup,  X, result)
     return result
 end
 
@@ -367,7 +356,7 @@ This function does not require a separate call to dct_setup.
 
 Returns: Vector{Float32}
 """
-function dct(X::Vector{Float32}, dct_type::Int = 2)
+function dct(X::Vector{Float32}, dct_type::Int=2)
     setup = plan_dct(length(X), dct_type)
     return dct(X, setup)
 end
@@ -377,10 +366,9 @@ end
 Deinitializes a DFTSetup object created by plan_dct
 """
 function plan_destroy(setup::DFTSetup)
-    fptr = get_fptr("vDSP_DFT_DestroySetup")
-    ccall(fptr, Cvoid,
-        (Ptr{Cvoid},),
-        setup.setup)
+    ccall(("vDSP_DFT_DestroySetup", libacc), Cvoid,
+          (Ptr{Cvoid},),
+          setup.setup)
 end
 
 
