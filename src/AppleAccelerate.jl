@@ -32,7 +32,7 @@ end
 Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true`.
 Attempts to load the ILP64 symbols if `load_ilp64` is `true`, and errors out if unable.
 """
-function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64::Bool = true)
+function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64::Bool = true, use_external_lapack::Bool = true)
     # Silently exit on non-Accelerate-capable platforms
     @static if !Sys.isapple()
         return
@@ -44,7 +44,7 @@ function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64:
 
     # Check to see if we can load ILP64 symbols
     if load_ilp64 && dlsym_e(libacc_hdl, "dgemm\$NEWLAPACK\$ILP64") == C_NULL
-        error("Unable to load ILP64 interface from '$(libacc)'; are you running macOS 13.3+?")
+        error("Unable to load ILP64 interface from '$(libacc)'; You are running macOS version $(get_macos_version()), you need v13.3+")
     end
 
     # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
@@ -52,11 +52,6 @@ function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64:
     if load_ilp64
         forward_accelerate(:ilp64; new_lapack=true, verbose)
     end
-
-    # dsptrf has a bug in the current $NEWLAPACK symbols; to work around this, we
-    # overlay an external LAPACK_jll on top.  Eventually, we may read in the
-    # Info.plist, determine the version, and stop doing this.
-    use_external_lapack = true
 
     # Next, load an external LAPACK, if requested
     if use_external_lapack
@@ -90,7 +85,9 @@ function __init__()
     # Default to loading the ILP64 interface on macOS 13.3+
     ver = get_macos_version()
     load_ilp64 = ver !== nothing && ver >= v"13.3"
-    load_accelerate(; load_ilp64)
+    # dsptrf has a bug in the initial release of the $NEWLAPACK symbols, so if we're
+    # on a version older than macOS 13.4, use an external LAPACK:
+    load_accelerate(; load_ilp64, use_external_lapack = ver < v"13.4")
 end
 
 end # module
