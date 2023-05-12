@@ -58,7 +58,7 @@ function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64:
         if load_ilp64
             BLAS.lbt_forward(LAPACK_jll.liblapack_path; suffix_hint="64_", verbose)
         end
-        BLAS.lbt_forward(LAPACK32_jll.liblapack_path; verbose)
+        BLAS.lbt_forward(LAPACK32_jll.liblapack32_path; verbose)
     end
 end
 
@@ -84,10 +84,17 @@ end
 function __init__()
     # Default to loading the ILP64 interface on macOS 13.3+
     ver = get_macos_version()
-    load_ilp64 = ver !== nothing && ver >= v"13.3"
+    ver == nothing && return
+    load_ilp64 = ver >= v"13.3"
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols, so if we're
     # on a version older than macOS 13.4, use an external LAPACK:
     load_accelerate(; load_ilp64, use_external_lapack = ver < v"13.4")
+end
+
+if Sys.isapple()
+    include("Array.jl")
+    include("DSP.jl")
+    include("Util.jl")
 end
 
 end # module
