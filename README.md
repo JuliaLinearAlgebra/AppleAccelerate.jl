@@ -1,9 +1,7 @@
 # AppleAccelerate.jl
 
-[![Build Status](https://travis-ci.org/JuliaMath/AppleAccelerate.jl.svg?branch=master)](https://travis-ci.org/JuliaMath/AppleAccelerate.jl)
-
 This provides a Julia interface to some of
-[OS X's Accelerate framework](https://developer.apple.com/library/mac/documentation/Accelerate/Reference/AccelerateFWRef/). At
+[OS X's Accelerate framework](https://developer.apple.com/documentation/accelerate). At
 the moment, the package consists mostly of an interface to the
 [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
 which provide a vectorised form of many common mathematical functions, however the package does provide access to several other vectorized operations and more are being added on a regular basis.   In
