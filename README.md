@@ -10,7 +10,7 @@ functions, though there does appear to be some reduced accuracy.
 
 ## OS Requirements
 
-MacOS 12 is required in order to run AppleAccelerate.jl. On older MacOS versions, your mileage may vary.
+MacOS 13.3 is required in order to run AppleAccelerate.jl. On older MacOS versions, your mileage may vary.
 
 ## Supported Functions
 

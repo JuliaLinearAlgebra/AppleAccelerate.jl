@@ -1,23 +1,100 @@
 module AppleAccelerate
 
-using Libdl
+using LinearAlgebra
+using Libdl, LAPACK_jll, LAPACK32_jll
 
-if Sys.isapple()
+# For now, only use BLAS from Accelerate (that is to say, vecLib)
+global const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
+global const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
 
-    try
-        global const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
-        let accel_lib = dlopen(libacc)
-            dlclose(accel_lib)
+function forward_accelerate(interface::Symbol;
+                            new_lapack::Bool = interface == :ilp64,
+                            clear::Bool = false,
+                            verbose::Bool = false)
+    kwargs = Dict{Symbol,String}()
+    if new_lapack
+        if interface == :ilp64
+            kwargs[:suffix_hint] = "\x1a\$NEWLAPACK\$ILP64"
+        else
+            kwargs[:suffix_hint] = "\x1a\$NEWLAPACK"
         end
-    catch
-        error("Accelerate framework not found.")
+    else
+        if interface == :ilp64
+            throw(ArgumentError("ILP64 accelerate requires new_lapack"))
+        end
+    end
+    BLAS.lbt_forward(libacc; clear, verbose, kwargs...)
+end
+
+"""
+    load_accelerate(;clear = true, verbose = false)
+
+Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true`.
+Attempts to load the ILP64 symbols if `load_ilp64` is `true`, and errors out if unable.
+"""
+function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64::Bool = true, use_external_lapack::Bool = true)
+    # Silently exit on non-Accelerate-capable platforms
+    @static if !Sys.isapple()
+        return
+    end
+    libacc_hdl = dlopen_e(libacc)
+    if libacc_hdl == C_NULL
+        return
     end
 
+    # Check to see if we can load ILP64 symbols
+    if load_ilp64 && dlsym_e(libacc_hdl, "dgemm\$NEWLAPACK\$ILP64") == C_NULL
+        error("Unable to load ILP64 interface from '$(libacc)'; You are running macOS version $(get_macos_version()), you need v13.3+")
+    end
 
+    # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
+    forward_accelerate(:lp64; new_lapack=true, clear, verbose)
+    if load_ilp64
+        forward_accelerate(:ilp64; new_lapack=true, verbose)
+    end
+
+    # Next, load an external LAPACK, if requested
+    if use_external_lapack
+        if load_ilp64
+            BLAS.lbt_forward(LAPACK_jll.liblapack_path; suffix_hint="64_", verbose)
+        end
+        BLAS.lbt_forward(LAPACK32_jll.liblapack32_path; verbose)
+    end
+end
+
+function get_macos_version()
+    @static if !Sys.isapple()
+        return nothing
+    end
+
+    plist_lines = split(String(read("/System/Library/CoreServices/SystemVersion.plist")), "\n")
+    vers_idx = findfirst(l -> occursin("ProductVersion", l), plist_lines)
+    if vers_idx === nothing
+        return nothing
+    end
+
+    m = match(r">([\d\.]+)<", plist_lines[vers_idx+1])
+    if m === nothing
+        return nothing
+    end
+
+    return VersionNumber(only(m.captures))
+end
+
+function __init__()
+    # Default to loading the ILP64 interface on macOS 13.3+
+    ver = get_macos_version()
+    ver == nothing && return
+    load_ilp64 = ver >= v"13.3"
+    # dsptrf has a bug in the initial release of the $NEWLAPACK symbols, so if we're
+    # on a version older than macOS 13.4, use an external LAPACK:
+    load_accelerate(; load_ilp64, use_external_lapack = ver < v"13.4")
+end
+
+if Sys.isapple()
     include("Array.jl")
     include("DSP.jl")
     include("Util.jl")
-
 end
 
 end # module
