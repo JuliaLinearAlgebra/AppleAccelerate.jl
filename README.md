@@ -2,15 +2,16 @@
 
 This provides a Julia interface to some of the
 [macOS Accelerate framework](https://developer.apple.com/documentation/accelerate). At
-the moment, the package consists mostly of an interface to the
-[array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
-which provide a vectorised form of many common mathematical functions, however the package does provide access to several other vectorized operations and more are being added on a regular basis.   In
-general, the performance is significantly better than using standard libm
-functions, though there does appear to be some reduced accuracy.
+the moment, this package provides:
+1. Access to Accelerate BLAS and LAPACK using the [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) framework,
+2. An interface to the [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
+which provide a vectorised form for many common mathematical functions
+
+The performance is significantly better than using standard libm functions in some cases, though there does appear to be some reduced accuracy.
 
 ## OS Requirements
 
-MacOS 13.3 is required in order to run AppleAccelerate.jl. On older MacOS versions, your mileage may vary.
+MacOS 13.3 is required in order to run AppleAccelerate.jl, especially for the libblastrampoline forwarding. On older MacOS versions, your mileage may vary.
 
 ## Supported Functions
 
@@ -36,6 +37,17 @@ Some additional functions that are also available:
 * `sincos(x)`: returns `(sin(x), cos(x))`
 
 ## Example
+
+To use the Accelerate BLAS and LAPACK, simply load the library:
+```julia
+julia> peakflops(4096)
+3.6024175318268243e11
+
+julia> using AppleAccelerate
+
+julia> peakflops(4096)
+5.832806459434183e11
+```
 
 To avoid naming conflicts with Base, methods are not exported and so need to
 be accessed via the namespace:
