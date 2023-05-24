@@ -3,15 +3,11 @@ uuid = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
 version = "0.4.0"
 
 [deps]
-LAPACK32_jll = "17f450c3-bd24-55df-bb84-8c51b4b939e3"
-LAPACK_jll = "51474c39-65e3-53ba-86ba-03b1b862ec14"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [compat]
 julia = "1.9"
-LAPACK32_jll = "3.11"
-LAPACK_jll = "3.11"
 
 [extras]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"

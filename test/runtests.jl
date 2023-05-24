@@ -295,12 +295,15 @@ display(config.loaded_libs)
 
 using Test
 @testset "Accelerate Forwarding Sanity Tests" begin
-    @test LinearAlgebra.peakflops() > 0
-    @test endswith(BLAS.lbt_find_backing_library("dgemm_", :lp64).libname, "Accelerate")
-    @test endswith(BLAS.lbt_find_backing_library("dgemm_", :ilp64).libname, "Accelerate")
+    ver = AppleAccelerate.get_macos_version()
+    if ver >= v"13.4"
+        @test LinearAlgebra.peakflops() > 0
+        @test endswith(BLAS.lbt_find_backing_library("dgemm_", :lp64).libname, "Accelerate")
+        @test endswith(BLAS.lbt_find_backing_library("dgemm_", :ilp64).libname, "Accelerate")
 
-    # Accelerate has `_rook` symbols:
-    @test endswith(BLAS.lbt_find_backing_library("dsytrf_rook_", :ilp64).libname, "Accelerate")
+        # Accelerate has `_rook` symbols:
+        @test endswith(BLAS.lbt_find_backing_library("dsytrf_rook_", :ilp64).libname, "Accelerate")
+    end
 end
 
 @testset "CBLAS dot test" begin

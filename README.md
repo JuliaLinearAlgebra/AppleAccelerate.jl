@@ -11,7 +11,7 @@ The performance is significantly better than using standard libm functions in so
 
 ## OS Requirements
 
-MacOS 13.3 is required in order to run AppleAccelerate.jl, especially for the libblastrampoline forwarding. On older MacOS versions, your mileage may vary.
+MacOS 13.4 is required in order to run AppleAccelerate.jl, especially for the libblastrampoline forwarding. On older MacOS versions, your mileage may vary.
 
 ## Supported Functions
 

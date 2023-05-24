@@ -1,7 +1,7 @@
 module AppleAccelerate
 
-using LinearAlgebra
-using Libdl, LAPACK_jll, LAPACK32_jll
+using LinearAlgebra, Libdl
+#using LAPACK_jll, LAPACK32_jll # Needed if use_external_lapack == true
 
 # For now, only use BLAS from Accelerate (that is to say, vecLib)
 global const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
@@ -44,7 +44,7 @@ function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64:
 
     # Check to see if we can load ILP64 symbols
     if load_ilp64 && dlsym_e(libacc_hdl, "dgemm\$NEWLAPACK\$ILP64") == C_NULL
-        error("Unable to load ILP64 interface from '$(libacc)'; You are running macOS version $(get_macos_version()), you need v13.3+")
+        error("Unable to load ILP64 interface from '$(libacc)'; You are running macOS version $(get_macos_version()), you need v13.4+")
     end
 
     # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
@@ -82,13 +82,13 @@ function get_macos_version()
 end
 
 function __init__()
-    # Default to loading the ILP64 interface on macOS 13.3+
+    Sys.isapple() || return
     ver = get_macos_version()
-    ver == nothing && return
-    load_ilp64 = ver >= v"13.3"
-    # dsptrf has a bug in the initial release of the $NEWLAPACK symbols, so if we're
-    # on a version older than macOS 13.4, use an external LAPACK:
-    load_accelerate(; load_ilp64, use_external_lapack = ver < v"13.4")
+    # Default to loading the ILP64 interface on macOS 13.3+
+    # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
+    # Thus use macOS 13.4 for ILP64 and a correct LAPACK
+    ver < v"13.4" && return
+    load_accelerate(; load_ilp64=true, use_external_lapack=false)
 end
 
 if Sys.isapple()
