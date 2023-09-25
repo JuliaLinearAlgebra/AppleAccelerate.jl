@@ -3,6 +3,8 @@ module AppleAccelerate
 using LinearAlgebra, Libdl
 #using LAPACK_jll, LAPACK32_jll # Needed if use_external_lapack == true
 
+import Base: log2, round
+
 # For now, only use BLAS from Accelerate (that is to say, vecLib)
 global const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 global const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
