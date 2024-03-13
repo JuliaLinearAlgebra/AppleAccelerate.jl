@@ -15,16 +15,28 @@ for T in (Float32, Float64)
     @testset "Element-wise Operators::$T" begin
         X::Vector{T} = randn(N)
         Y::Vector{T} = randn(N)
+        Z::Vector{T} = similar(X)
         # Vector-vector
         @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
         @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
         @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
         @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+
+        # Vector-vector non-allocating
+        AppleAccelerate.vadd!(Z, X, Y)
+        @test (X .+ Y) ≈ Z
+        AppleAccelerate.vsub!(Z, X, Y)
+        @test (X .- Y) ≈ Z
+        AppleAccelerate.vmul!(Z, X, Y)
+        @test (X .* Y) ≈ Z
+        AppleAccelerate.vdiv!(Z, X, Y)
+        @test (X ./ Y) ≈ Z
+
         # Vector-vector broadcasting
-        @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
-        @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
-        @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
-        @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+        @test (X .+ Y) ≈ AppleAccelerate.vadd.(X, Y)
+        @test (X .- Y) ≈ AppleAccelerate.vsub.(X, Y)
+        @test (X .* Y) ≈ AppleAccelerate.vmul.(X, Y)
+        @test (X ./ Y) ≈ AppleAccelerate.vdiv.(X, Y)
 
         #Vector-scalar
         c::T         = randn()
@@ -33,6 +45,18 @@ for T in (Float32, Float64)
         @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
         @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
         @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        #Vector-scalar non-allocating
+        AppleAccelerate.vsadd!(Y, X, c)
+        @test (X .+ c) ≈ Y
+        AppleAccelerate.vssub!(Y, X, c)
+        @test (X .- c) ≈ Y
+        AppleAccelerate.svsub!(Y, X, c)
+        @test (c .- X) ≈ Y
+        AppleAccelerate.vsmul!(Y, X, c)
+        @test (X .* c) ≈ Y
+        AppleAccelerate.vsdiv!(Y, X, c)
+        @test (X ./ c) ≈ Y
 
         #Vector-scalar broadcasting
         @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
