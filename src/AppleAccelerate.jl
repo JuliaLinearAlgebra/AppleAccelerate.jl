@@ -92,9 +92,9 @@ function __init__()
 end
 
 if Sys.isapple()
+    include("Util.jl")
     include("Array.jl")
     include("DSP.jl")
-    include("Util.jl")
 end
 
 end # module
