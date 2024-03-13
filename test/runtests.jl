@@ -20,14 +20,26 @@ for T in (Float32, Float64)
         @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
         @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
         @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+        # Vector-vector broadcasting
+        @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
+        @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
+        @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
+        @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
 
         #Vector-scalar
         c::T         = randn()
-        @test (X .+ c) ≈ AppleAccelerate.vsadd(X, c)
-        @test (X .- c) ≈ AppleAccelerate.vssub(X, c)
-        @test (c .- X) ≈ AppleAccelerate.svsub(X, c)
-        @test (X .* c) ≈ AppleAccelerate.vsmul(X, c)
-        @test (X ./ c) ≈ AppleAccelerate.vsdiv(X, c)
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        #Vector-scalar broadcasting
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
     end
 end
 
