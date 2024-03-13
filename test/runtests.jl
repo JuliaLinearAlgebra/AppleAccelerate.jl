@@ -64,6 +64,8 @@ for T in (Float32, Float64)
         @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
         @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
         @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        @test (X .+ Y .+ Y) ≈ AppleAccelerate.vadd.(X, Y .+ Y)
     end
 end
 
