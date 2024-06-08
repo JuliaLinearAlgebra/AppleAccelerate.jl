@@ -10,14 +10,62 @@ end
 Random.seed!(7)
 N = 1_000
 
+@testset "AppleAccelerate.jl" begin
 for T in (Float32, Float64)
     @testset "Element-wise Operators::$T" begin
         X::Vector{T} = randn(N)
         Y::Vector{T} = randn(N)
+        Z::Vector{T} = similar(X)
+        # Vector-vector
         @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
         @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
         @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
         @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+
+        # Vector-vector non-allocating
+        AppleAccelerate.vadd!(Z, X, Y)
+        @test (X .+ Y) ≈ Z
+        AppleAccelerate.vsub!(Z, X, Y)
+        @test (X .- Y) ≈ Z
+        AppleAccelerate.vmul!(Z, X, Y)
+        @test (X .* Y) ≈ Z
+        AppleAccelerate.vdiv!(Z, X, Y)
+        @test (X ./ Y) ≈ Z
+
+        # Vector-vector broadcasting
+        @test (X .+ Y) ≈ AppleAccelerate.vadd.(X, Y)
+        @test (X .- Y) ≈ AppleAccelerate.vsub.(X, Y)
+        @test (X .* Y) ≈ AppleAccelerate.vmul.(X, Y)
+        @test (X ./ Y) ≈ AppleAccelerate.vdiv.(X, Y)
+
+        #Vector-scalar
+        c::T         = randn()
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        #Vector-scalar non-allocating
+        AppleAccelerate.vsadd!(Y, X, c)
+        @test (X .+ c) ≈ Y
+        AppleAccelerate.vssub!(Y, X, c)
+        @test (X .- c) ≈ Y
+        AppleAccelerate.svsub!(Y, X, c)
+        @test (c .- X) ≈ Y
+        AppleAccelerate.vsmul!(Y, X, c)
+        @test (X .* c) ≈ Y
+        AppleAccelerate.vsdiv!(Y, X, c)
+        @test (X ./ c) ≈ Y
+
+        #Vector-scalar broadcasting
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        @test (X .+ Y .+ Y) ≈ AppleAccelerate.vadd.(X, Y .+ Y)
     end
 end
 
@@ -198,12 +246,28 @@ for T in (Float32, Float64)
             @test fa(X)[2] ≈ fb(X)[2]
         end
 
-        @testset "Testing meansqr::$T" begin
-            @test AppleAccelerate.meansqr(X) ≈ mean(X .*X)
+        @testset "Testing meanmag::$T" begin
+            @test AppleAccelerate.meanmag(X) ≈ mean(abs, X)
         end
 
-        @testset "Testing meanmag::$T" begin
-            @test AppleAccelerate.meanmag(X) ≈ mean(abs.(X))
+        @testset "Testing meansqr::$T" begin
+            @test AppleAccelerate.meansqr(X) ≈ mean(X .* X)
+        end
+
+        @testset "Testing meanssqr::$T" begin
+            @test AppleAccelerate.meanssqr(X) ≈ mean(X .* abs.(X))
+        end
+
+        @testset "Testing summag::$T" begin
+            @test AppleAccelerate.summag(X) ≈ sum(abs, X)
+        end
+
+        @testset "Testing sumsqr::$T" begin
+            @test AppleAccelerate.sumsqr(X) ≈ sum(abs2, X)
+        end
+
+        @testset "Testing sumssqr::$T" begin
+            @test AppleAccelerate.sumssqr(X) ≈ sum(X .* abs.(X))
         end
 
     end
@@ -270,6 +334,7 @@ Y::Array{T} = abs.(randn(N))
 @test X ./ Y  == AppleAccelerate.div_float(X, Y)
 end
 =#
+end
 
 if AppleAccelerate.get_macos_version() < v"13.3"
     @info("AppleAccelerate.jl needs macOS >= 13.3 for BLAS forwarding. Not testing forwarding capabilities.")
@@ -338,6 +403,6 @@ end
     end
 
     run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra/blas LinearAlgebra/lapack`)
-end; 
+end;
 end
 
