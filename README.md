@@ -4,7 +4,7 @@ This provides a Julia interface to some of the
 [macOS Accelerate framework](https://developer.apple.com/documentation/accelerate). At
 the moment, this package provides:
 1. Access to Accelerate BLAS and LAPACK using the [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) framework,
-2. An interface to the [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
+2. An interface to the [array-oriented functions](https://developer.apple.com/documentation/accelerate/veclib),
 which provide a vectorised form for many common mathematical functions
 
 The performance is significantly better than using standard libm functions in some cases, though there does appear to be some reduced accuracy.
