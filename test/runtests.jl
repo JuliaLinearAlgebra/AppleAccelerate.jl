@@ -1,6 +1,6 @@
 using LinearAlgebra
-using AppleAccelerate
-using DSP, Test, Random, Statistics
+using AppleAccelerate: AppleAccelerate, BNNS
+using DSP, Test, Random, Statistics, BFloat16s
 
 if !Sys.isapple()
     @info("AppleAccelerate.jl will be tested only on macOS. Exiting.")
@@ -163,6 +163,10 @@ for T in (Float32, Float64)
             @test fa.(Z) ≈ fb.(Z)
         end
     end
+end
+
+@testset "BNNS" begin
+    include("BNNS.jl")
 end
 
 

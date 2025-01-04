@@ -91,10 +91,16 @@ function __init__()
     load_accelerate(; load_ilp64=true, use_external_lapack=false)
 end
 
-if Sys.isapple()
+@static if Sys.isapple()
     include("Util.jl")
     include("Array.jl")
     include("DSP.jl")
 end
+
+module BNNS
+@static if Sys.isapple()
+    include("../lib/BNNS/BNNS.jl")
+end
+end # module BNNS
 
 end # module
