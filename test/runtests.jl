@@ -7,6 +7,8 @@ if !Sys.isapple()
     exit(0)
 end
 
+include("libSparseTests.jl")
+
 Random.seed!(7)
 N = 1_000
 
@@ -405,4 +407,3 @@ end
     run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra/blas LinearAlgebra/lapack`)
 end;
 end
-
