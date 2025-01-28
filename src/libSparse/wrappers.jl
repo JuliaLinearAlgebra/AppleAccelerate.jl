@@ -42,7 +42,7 @@ end
 @enum SparseScaling_t::UInt8 begin
     SpraseScalingDefault = 0
     SparseScalingUser = 1
-    SparseScalingQuilibriationInf = 2
+    SparseScalingEquilibriationInf = 2
 end
 
 @enum SparseStatus_t::Int32 begin
