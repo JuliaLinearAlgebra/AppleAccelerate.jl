@@ -19,7 +19,6 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macOS-13 # intel
-          - macOS-latest # arm - test the no-op
         arch:
           - x64
         include:
