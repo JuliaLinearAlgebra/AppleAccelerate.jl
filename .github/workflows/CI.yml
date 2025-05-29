@@ -19,23 +19,12 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macOS-13 # intel
-          - macOS-14 # arm
+          - macOS-latest # arm - test the no-op
         arch:
           - x64
-          - aarch64
-        exclude:
-          - os: ubuntu-latest
+        include:
+          - os: macOS-latest
             arch: aarch64
-          - os: windows-latest
-            arch: aarch64
-          - os: macOS-13
-            arch: x86
-          - os: macOS-13
-            arch: aarch64
-          - os: macOS-14
-            arch: x86
-          - os: macOS-14
-            arch: x64
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -59,4 +48,3 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-
