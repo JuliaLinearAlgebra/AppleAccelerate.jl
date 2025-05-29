@@ -32,7 +32,7 @@ end
 Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true`.
 Attempts to load the ILP64 symbols if `load_ilp64` is `true`, and errors out if unable.
 """
-function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64::Bool = true, use_external_lapack::Bool = true)
+function load_accelerate(;clear::Bool = false, verbose::Bool = false, load_ilp64::Bool = true, use_external_lapack::Bool = true)
     # Silently exit on non-Accelerate-capable platforms
     @static if !Sys.isapple()
         return
