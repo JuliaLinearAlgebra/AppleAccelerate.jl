@@ -1,0 +1,21 @@
+[general]
+library_name = "Symbol(\"/System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/vecLib\")"
+output_file_path = "../lib/BNNS/libBNNS.jl"
+
+minimum_macos_supported = "13"
+
+generate_isystem_symbols = false
+
+output_ignorelist = ["^(?i:(?!BNNS).)+$"]
+
+[codegen]
+# use_ccall_macro = true
+always_NUL_terminated_string = true
+
+version_function = "AppleAccelerate.get_macos_version()"
+
+[codegen.macro]
+# it's highly recommended to set this entry to "basic".
+# if you'd like to skip all of the macros, please set this entry to "disable".
+# if you'd like to translate function-like macros to Julia, please set this entry to "aggressive".
+macro_mode = "disable"
