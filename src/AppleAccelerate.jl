@@ -27,12 +27,17 @@ function forward_accelerate(interface::Symbol;
 end
 
 """
-    load_accelerate(;clear = true, verbose = false)
+    load_accelerate(; clear = false, verbose = false, load_ilp64 = true)
 
-Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true`.
-Attempts to load the ILP64 symbols if `load_ilp64` is `true`, and errors out if unable.
+Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true`. `clear`
+is `false` by default to allow for OpenBLAS to act as a fallback for operations missing
+from Accelerate, such as `gemmt`. Attempts to load the ILP64 symbols if `load_ilp64` is
+`true`, and errors out if unable.
 """
-function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64::Bool = true, use_external_lapack::Bool = true)
+function load_accelerate(; clear::Bool = false,
+                           verbose::Bool = false,
+                           load_ilp64::Bool = true,
+                           use_external_lapack::Bool = true)
     # Silently exit on non-Accelerate-capable platforms
     @static if !Sys.isapple()
         return
@@ -50,7 +55,7 @@ function load_accelerate(;clear::Bool = true, verbose::Bool = false, load_ilp64:
     # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
     forward_accelerate(:lp64; new_lapack=true, clear, verbose)
     if load_ilp64
-        forward_accelerate(:ilp64; new_lapack=true, verbose)
+        forward_accelerate(:ilp64; new_lapack=true, clear, verbose)
     end
 
     # Next, load an external LAPACK, if requested
