@@ -67,7 +67,7 @@ function load_accelerate(; clear::Bool = false,
     end
 end
 
-function get_macos_version()
+function get_macos_version(normalize=true)
     @static if !Sys.isapple()
         return nothing
     end
@@ -83,7 +83,11 @@ function get_macos_version()
         return nothing
     end
 
-    return VersionNumber(only(m.captures))
+    ver = VersionNumber(only(m.captures))
+    if normalize && ver.major == 16
+        return VersionNumber(26, ver.minor, ver.patch)
+    end
+    return ver
 end
 
 function __init__()
