@@ -7,8 +7,8 @@ tupletypelength(a)=length(a.parameters)
 
 const OPS = Dict{Symbol,Tuple{Symbol, Symbol, Symbol}}(:+ => (:vadd, :vsadd, :vsadd),
 :- => (:vsub, :vssub, :svsub),
-:* => (:vadd, :vsmul, :vsmul),
-:/ => (:vadd, :vsdiv, :vsdiv),)
+:* => (:vmul, :vsmul, :vsmul),
+:/ => (:vdiv, :vsdiv, :vsdiv),)
 
 macro replaceBase(fs...)
     b = Expr(:block)
