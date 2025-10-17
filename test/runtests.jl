@@ -389,7 +389,7 @@ end
 # to cut down on CI times, and also to restart workers that trip over
 # the testing RSS limit.  In order for distributed workers to use Accelerate,
 # we'll modify the test source code so that it imports Accelerate:
-
+#=
 @testset "Full LinearAlgebra test suite" begin; mktempdir() do dir
     cp(joinpath(Sys.BINDIR, Base.DATAROOTDIR, "julia", "test"), dir; force=true, follow_symlinks=true)
 
@@ -404,5 +404,15 @@ end
 
     run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra/blas LinearAlgebra/lapack`)
 end;
+=#
+
+# Run the BLAS & LAPACK tests from LinearAlgebra.jl
+linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+
+@testset "LinearAlgebra.jl BLAS tests" begin
+    joinpath(linalg_stdlib_test_path, "blas.jl") |> include
 end
 
+@testset "LinearAlgebra.jl LAPACK tests" begin
+    joinpath(linalg_stdlib_test_path, "lapack.jl") |> include
+end
