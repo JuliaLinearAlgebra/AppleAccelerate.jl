@@ -1,11 +1,14 @@
 module AppleAccelerate
-
 using LinearAlgebra, Libdl
-#using LAPACK_jll, LAPACK32_jll # Needed if use_external_lapack == true
 
-# For now, only use BLAS from Accelerate (that is to say, vecLib)
-global const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
-global const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
+const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
+const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
+
+# VecLib Threading API: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/thread_api.h
+@enum Threading::Cuint begin
+    BLAS_THREADING_MULTI_THREADED
+    BLAS_THREADING_SINGLE_THREADED
+end
 
 function forward_accelerate(interface::Symbol;
                             new_lapack::Bool = interface == :ilp64,
@@ -88,6 +91,27 @@ function get_macos_version(normalize=true)
         return VersionNumber(26, ver.minor, ver.patch)
     end
     return ver
+end
+
+function set_num_threads(n::LinearAlgebra.BlasInt)
+    retval::Cint = -1
+    if n == 1
+        retval = ccall((:BLASSetThreading, libacc), Cint, (Cint,), BLAS_THREADING_SINGLE_THREADED)
+    elseif n > 1
+        retval = ccall((:BLASSetThreading, libacc), Cint, (Cint,), BLAS_THREADING_MULTI_THREADED)
+    end
+    @assert retval == 0 "AppleAccelerate: Call to BlasSetThreading failed"
+end
+
+function get_num_threads()::LinearAlgebra.BlasInt
+    retval::Threading = ccall((:BLASGetThreading, AppleAccelerate.libacc), Threading, ())
+    if retval == BLAS_THREADING_SINGLE_THREADED
+        return LinearAlgebra.BlasInt(1)
+    elseif retval == BLAS_THREADING_MULTI_THREADED
+        return LinearAlgebra.BlasInt(Sys.CPU_THREADS)
+    else
+        error("AppleAccelerate: Call to BlasGetThreading failed")
+    end
 end
 
 function __init__()

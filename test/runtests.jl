@@ -384,12 +384,18 @@ end
     @test BLAS.dot(a, a) ≈ 14f0
 end
 
+@testset "BLAS threading tests" begin
+    AppleAccelerate.set_num_threads(1)
+    @test AppleAccelerate.get_num_threads() == 1
+    AppleAccelerate.set_num_threads(4)
+    @test AppleAccelerate.get_num_threads() == Sys.CPU_THREADS
+end
+
 # Run all the LinearAlgebra stdlib tests, but with Accelerate.  We still
 # use `Base.runtests()` to get multithreaded, distributed execution
 # to cut down on CI times, and also to restart workers that trip over
 # the testing RSS limit.  In order for distributed workers to use Accelerate,
 # we'll modify the test source code so that it imports Accelerate:
-
 @testset "Full LinearAlgebra test suite" begin; mktempdir() do dir
     cp(joinpath(Sys.BINDIR, Base.DATAROOTDIR, "julia", "test"), dir; force=true, follow_symlinks=true)
 
@@ -405,4 +411,3 @@ end
     run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra/blas LinearAlgebra/lapack`)
 end;
 end
-
