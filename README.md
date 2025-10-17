@@ -36,12 +36,25 @@ Some additional functions that are also available:
 * `fdiv(x,y)`: divide (`x ./ y` in Base)
 * `sincos(x)`: returns `(sin(x), cos(x))`
 
-## Setting the number of threads
+## BLAS Multi-threading
 
-Accelerate is multithreaded by default. You can set an upper limit on the number of threads through the `VECLIB_MAXIMUM_THREADS` environment variable; for example, for single-threaded execution, start Julia as follows: 
+Accelerate BLAS is multithreaded by default. Use `get_num_threads()` and `set_num_threads()`. The Accelerate API only allows the user to choose single-threaded operation or multi-threaded operation. Thus, `set_num_threads(1)` will give single-threaded operation, and any number greater than 1 will give multi-threaded operation. `get_num_threads()` will return `1` for single-threaded operation and `Sys.CPU_THREADS` for multi-threaded operation. The following example is on Apple M2 Max, where `Sys.CPU_THREADS` is `8`.
 
 ```julia
-VECLIB_MAXIMUM_THREADS=1 julia
+julia> using AppleAccelerate
+
+julia> AppleAccelerate.get_num_threads()  # Default is multi-threaded. Return value is `Sys.CPU_THREADS`
+8
+
+julia> AppleAccelerate.set_num_threads(1) # Set single-threaded operation
+
+julia> AppleAccelerate.get_num_threads()
+1
+
+julia> AppleAccelerate.set_num_threads(4) # Set multi-threaded operation, with input value > 1.
+
+julia> AppleAccelerate.get_num_threads()  # Return value is `Sys.CPU_THREADS` for multi-threaded operation
+8
 ```
 
 Accelerate does not support the `BLAS.set_num_threads(nthreads)` and `BLAS.get_num_threads()` API used by other BLAS backends (`set_num_threads` is a no-op and `get_num_threads` returns a hardcoded default). It is also important that this environment variable is set before Julia starts, and has no effect if it is set inside a Julia session.
