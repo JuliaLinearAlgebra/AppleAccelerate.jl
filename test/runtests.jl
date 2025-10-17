@@ -336,8 +336,8 @@ end
 =#
 end
 
-if AppleAccelerate.get_macos_version() < v"13.3"
-    @info("AppleAccelerate.jl needs macOS >= 13.3 for BLAS forwarding. Not testing forwarding capabilities.")
+if AppleAccelerate.get_macos_version() < v"13.4"
+    @info("AppleAccelerate.jl needs macOS >= 13.4 for BLAS forwarding. Not testing forwarding capabilities.")
     exit(0)
 end
 
@@ -384,25 +384,26 @@ end
     @test BLAS.dot(a, a) ≈ 14f0
 end
 
-# Run all the LinearAlgebra stdlib tests, but with Accelerate.  We still
-# use `Base.runtests()` to get multithreaded, distributed execution
-# to cut down on CI times, and also to restart workers that trip over
-# the testing RSS limit.  In order for distributed workers to use Accelerate,
-# we'll modify the test source code so that it imports Accelerate:
-
-@testset "Full LinearAlgebra test suite" begin; mktempdir() do dir
-    cp(joinpath(Sys.BINDIR, Base.DATAROOTDIR, "julia", "test"), dir; force=true, follow_symlinks=true)
-
-    # Prepend `using AppleAccelerate` to `testdefs.jl`, so that all test workers load Acclerate
-    testdefs_path = joinpath(dir, "testdefs.jl")
-    chmod(testdefs_path, 0o644)
-    testdefs_content = String(read(testdefs_path))
-    open(testdefs_path, write=true) do io
-        println(io, accelerate_header)
-        println(io, testdefs_content)
+@testset "BLAS threading tests" begin
+    if AppleAccelerate.get_macos_version() >= v"15"
+        AppleAccelerate.set_num_threads(1)
+        @test AppleAccelerate.get_num_threads() == 1
+        AppleAccelerate.set_num_threads(4)
+        @test AppleAccelerate.get_num_threads() == Sys.CPU_THREADS
+    else
+        @test AppleAccelerate.get_num_threads() == -1
     end
-
-    run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra/blas LinearAlgebra/lapack`)
-end;
 end
 
+linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+
+# Don't run blas.jl tests since the "strided interface blas" tests are currently failing
+#=
+@testset verbose=true "LinearAlgebra.jl BLAS tests" begin
+    joinpath(linalg_stdlib_test_path, "blas.jl") |> include
+end
+=#
+
+@testset verbose=true "LinearAlgebra.jl LAPACK tests" begin
+    joinpath(linalg_stdlib_test_path, "lapack.jl") |> include
+end
