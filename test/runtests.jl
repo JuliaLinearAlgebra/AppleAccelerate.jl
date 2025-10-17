@@ -385,10 +385,14 @@ end
 end
 
 @testset "BLAS threading tests" begin
-    AppleAccelerate.set_num_threads(1)
-    @test AppleAccelerate.get_num_threads() == 1
-    AppleAccelerate.set_num_threads(4)
-    @test AppleAccelerate.get_num_threads() == Sys.CPU_THREADS
+    if AppleAccelerate.get_macos_version() >= v"15"
+        AppleAccelerate.set_num_threads(1)
+        @test AppleAccelerate.get_num_threads() == 1
+        AppleAccelerate.set_num_threads(4)
+        @test AppleAccelerate.get_num_threads() == Sys.CPU_THREADS
+    else
+        @test AppleAccelerate.get_num_threads() == -1
+    end
 end
 
 linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
