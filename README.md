@@ -38,7 +38,13 @@ Some additional functions that are also available:
 
 ## Setting the number of threads
 
-Accelerate is multithreaded by default. You can set an upper limit on the number of threads through the `VECLIB_MAXIMUM_THREADS` environment variable; for example, for single-threaded execution, start Julia as `VECLIB_MAXIMUM_THREADS=1 julia`. Accelerate does not support the `BLAS.set_num_threads(nthreads)` and `BLAS.get_num_threads()` API used by other BLAS backends (`set_num_threads` is a no-op and `get_num_threads` returns a hardcoded default).
+Accelerate is multithreaded by default. You can set an upper limit on the number of threads through the `VECLIB_MAXIMUM_THREADS` environment variable; for example, for single-threaded execution, start Julia as follows: 
+
+```julia
+VECLIB_MAXIMUM_THREADS=1 julia
+```
+
+Accelerate does not support the `BLAS.set_num_threads(nthreads)` and `BLAS.get_num_threads()` API used by other BLAS backends (`set_num_threads` is a no-op and `get_num_threads` returns a hardcoded default). It is also important that this environment variable is set before Julia starts, and has no effect if it is set inside a Julia session.
 
 ## Example
 
