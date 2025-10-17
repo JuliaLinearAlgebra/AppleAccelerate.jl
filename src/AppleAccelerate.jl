@@ -85,9 +85,13 @@ function get_macos_version(normalize=true)
 end
 
 function set_num_threads(n::LinearAlgebra.BlasInt)
-    @static if get_macos_version() < v"15"
-        @warn "The threading API is only available in macOS 15 and later"
-        return nothing
+    @static if Sys.isapple()
+        if get_macos_version() < v"15"
+            @warn "The threading API is only available in macOS 15 and later"
+            return -1
+        end
+    else
+        return -1
     end
 
     retval::Cint = -1
@@ -101,8 +105,12 @@ function set_num_threads(n::LinearAlgebra.BlasInt)
 end
 
 function get_num_threads()::LinearAlgebra.BlasInt
-    @static if get_macos_version() < v"15"
-        @warn "The threading API is only available in macOS 15 and later"
+    @static if Sys.isapple()
+        if get_macos_version() < v"15"
+            @warn "The threading API is only available in macOS 15 and later"
+            return -1
+        end
+    else
         return -1
     end
 
