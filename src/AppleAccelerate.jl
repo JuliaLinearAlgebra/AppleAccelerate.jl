@@ -118,7 +118,7 @@ function get_num_threads()::LinearAlgebra.BlasInt
     if retval == BLAS_THREADING_SINGLE_THREADED
         return LinearAlgebra.BlasInt(1)
     elseif retval == BLAS_THREADING_MULTI_THREADED
-        return LinearAlgebra.BlasInt(Sys.CPU_THREADS)
+        return ccall((:APPLE_NTHREADS, libacc), LinearAlgebra.BlasInt, ())
     else
         @error "AppleAccelerate: Call to BlasGetThreading failed"
     end
