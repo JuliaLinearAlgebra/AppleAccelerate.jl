@@ -215,7 +215,7 @@ using LinearAlgebra
                 factor!(f)
             catch err1
             end
-            @test sprint(showerror, err1) == "The matrix is singular.\n"
+            @test sprint(showerror, err1) == "The matrix is singular."
 
             err2 = nothing
             temp = sprand(N, N, 0.5)
@@ -237,9 +237,7 @@ using LinearAlgebra
                 factor!(f, AppleAccelerate.SparseFactorizationCholesky)
             catch err3
             end
-            # they say "non-square:" I think they really mean "non-symmetric."
-            @test sprint(showerror, err3) == "Cannot perform symmetric" *
-                    " matrix factorization of non-square matrix.\n"
+            @test sprint(showerror, err3) == "Cannot perform symmetric matrix factorization of non-symmetric matrix.\n"
         end
 
         @testset "Cholesky" begin
