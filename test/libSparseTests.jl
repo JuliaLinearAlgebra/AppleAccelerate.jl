@@ -68,7 +68,7 @@ using LinearAlgebra
                 @test denseV2 ≈ sparseM * denseV
             end
         end
-        @testset "transpose" begin 
+        @testset "transpose" begin
             for T in (Float32, Float64)
                 @eval begin
                     sparseM = sprand($T, 3, 4, 0.5)
@@ -215,8 +215,8 @@ using LinearAlgebra
                 factor!(f)
             catch err1
             end
-            @test sprint(showerror, err1) == "Matrix is structurally singular\n"
-            
+            @test sprint(showerror, err1) == "The matrix is singular.\n"
+
             err2 = nothing
             temp = sprand(N, N, 0.5)
             # add big negative value to lower-right corner of positive definite.
@@ -228,7 +228,7 @@ using LinearAlgebra
             catch err2
             end
             @test err2 !== nothing
-        
+
             err3 = nothing
             nonSymmetric = sparse(temp*temp' + diagm(rand(N)) + singular)
             try
@@ -275,10 +275,10 @@ using LinearAlgebra
             # they both did the minimal norm solution...
             # @test isapprox(solve!(aa_fact2, copy(bx)), shortMatrix\b)
             @test isapprox(shortMatrix * solve!(aa_fact2, bx), b)
-            
+
             # solve!(aa_fact2, BX)
             # @test BX ≈ X
-        end 
+        end
     end
     @testset "factorize" begin
         jlM = sprand(4,4, .9)
