@@ -24,7 +24,7 @@ jobs:
         include:
           - os: macOS-latest
             arch: aarch64
-            version: 'lts'
+            version: '1.9'
           - os: macOS-latest
             arch: aarch64
             version: '1'
