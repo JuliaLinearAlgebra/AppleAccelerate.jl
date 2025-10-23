@@ -13,29 +13,6 @@ The performance is significantly better than using standard libm functions in so
 
 MacOS 13.4 is required in order to run AppleAccelerate.jl, especially for the libblastrampoline forwarding. On older MacOS versions, your mileage may vary.
 
-## Supported Functions
-
-The following functions are supported:
- * *Rounding*: `ceil`, `floor`, `trunc`, `round`
- * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
- * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `cis`
- * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
- * *Convolution*: `conv`, `xcorr`
- * *Other*: `sqrt`, `copysign`, `exponent`, `abs`, `rem`
-
-Note there are some slight differences from behaviour in Base:
- * No `DomainError`s are raised, instead `NaN` values are returned.
- * `round` breaks ties (values with a fractional part of 0.5) by choosing the
-   nearest even value.
- * `exponent` returns a floating point value of the same type (instead of an `Int`).
-
-Some additional functions that are also available:
-* `rec(x)`: reciprocal (`1.0 ./ x`)
-* `rsqrt(x)`: reciprocal square-root (`1.0 ./ sqrt(x)`)
-* `pow(x,y)`: power (`x .^ y` in Base)
-* `fdiv(x,y)`: divide (`x ./ y` in Base)
-* `sincos(x)`: returns `(sin(x), cos(x))`
-
 ## BLAS Multi-threading
 
 Accelerate BLAS is multi-threaded by default. Starting with macOS 15 (Sequoia), `get_num_threads()` and `set_num_threads()` are available. The Accelerate API only allows the user to choose single-threaded operation or multi-threaded operation. Thus, `set_num_threads(1)` will give single-threaded operation, and any number greater than 1 will give multi-threaded operation. `get_num_threads()` will return `1` for single-threaded operation and `Sys.CPU_THREADS` for multi-threaded operation. The following example is on Apple M2 Max, where `Sys.CPU_THREADS` is `8`.
@@ -76,6 +53,30 @@ julia> using AppleAccelerate
 julia> peakflops(4096)
 5.832806459434183e11
 ```
+
+## Supported Functions
+
+The following functions are supported:
+ * *Rounding*: `ceil`, `floor`, `trunc`, `round`
+ * *Logarithmic*: `exp`, `exp2`, `expm1`, `log`, `log1p`, `log2`, `log10`
+ * *Trigonometric*: `sin`, `sinpi`, `cos`, `cospi`, `tan`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `cis`
+ * *Hyperbolic*: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+ * *Convolution*: `conv`, `xcorr`
+ * *Other*: `sqrt`, `copysign`, `exponent`, `abs`, `rem`
+
+Note there are some slight differences from behaviour in Base:
+ * No `DomainError`s are raised, instead `NaN` values are returned.
+ * `round` breaks ties (values with a fractional part of 0.5) by choosing the
+   nearest even value.
+ * `exponent` returns a floating point value of the same type (instead of an `Int`).
+
+Some additional functions that are also available:
+* `rec(x)`: reciprocal (`1.0 ./ x`)
+* `rsqrt(x)`: reciprocal square-root (`1.0 ./ sqrt(x)`)
+* `pow(x,y)`: power (`x .^ y` in Base)
+* `fdiv(x,y)`: divide (`x ./ y` in Base)
+* `sincos(x)`: returns `(sin(x), cos(x))`
+
 
 To avoid naming conflicts with Base, methods are not exported and so need to
 be accessed via the namespace:
