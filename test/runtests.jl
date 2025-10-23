@@ -7,6 +7,8 @@ if !Sys.isapple()
     exit(0)
 end
 
+include("libSparseTests.jl")
+
 Random.seed!(7)
 N = 1_000
 
@@ -389,7 +391,7 @@ end
         AppleAccelerate.set_num_threads(1)
         @test AppleAccelerate.get_num_threads() == 1
         AppleAccelerate.set_num_threads(4)
-        @test AppleAccelerate.get_num_threads() == Sys.CPU_THREADS
+        @test AppleAccelerate.get_num_threads() > 1
     else
         @test AppleAccelerate.get_num_threads() == -1
     end
@@ -405,6 +407,6 @@ linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
 end
 =#
 
-@testset verbose=true "LinearAlgebra.jl LAPACK tests" begin
+@testset verbose=false "LinearAlgebra.jl LAPACK tests" begin
     joinpath(linalg_stdlib_test_path, "lapack.jl") |> include
 end

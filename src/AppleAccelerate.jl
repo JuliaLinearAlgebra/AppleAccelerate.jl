@@ -141,6 +141,11 @@ if Sys.isapple()
     include("Util.jl")
     include("Array.jl")
     include("DSP.jl")
+    include("libSparse/wrappers.jl")
+    include("libSparse/AASparseMatrices.jl")
+    include("libSparse/AAFactorizations.jl")
+    export AASparseMatrix, muladd!
+    export AAFactorization, solve, solve!, factor!
 end
 
 end # module
