@@ -116,6 +116,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N}}}) where {Style, Axes, N} = ($f)(bc.args...)
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
         end
+        if T == Float32
+            @eval Base.broadcasted(::typeof($f), arg::Union{Array{F,N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($f)(maybecopy(arg))
+        end
     end
     for (f, fa) in (twoarg_funcs...,(:pow,:pow))
         f! = Symbol("$(f)!")
@@ -124,6 +127,9 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N},Array{$T,N}}}) where {Style, Axes, N} = ($f)(bc.args...)
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},Array{$T,N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
         end
+        if T == Float32
+            @eval Base.broadcasted(::typeof($f), arg1::Union{Array{F, N},Base.Broadcast.Broadcasted}, arg2::Union{Array{F, N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($f)(maybecopy(arg1), maybecopy(arg2))
+        end
     end
 end
 
@@ -131,7 +137,9 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     for (f, fa) in ((:maximum, :maxv), (:minimum, :minv), (:mean, :meanv),
-                    (:meansqr, :measqv), (:meanmag,  :meamgv), (:sum, :sve))
+                    (:meanmag,  :meamgv), (:meansqr, :measqv), (:meanssqr, :mvessq),
+                    (:sum, :sve), (:summag, :svemg), (:sumsqr, :svesq),
+                    (:sumssqr, :svs))
         @eval begin
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0.0)
@@ -192,7 +200,133 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                 return result
             end
         end
+
+        @eval begin
+            # Broadcasting override such that f.(X) turns into f(X)
+            Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N},Array{$T,N}}}) where {Style, Axes, N} = ($f)(bc.args...)
+            Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},Array{$T,N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
+            Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::Union{Array{$T, N},Base.Broadcast.Broadcasted}) where {N} = ($f)(maybecopy(arg1), maybecopy(arg2))
+        end
     end
 end
 
+# Element-wise operations over a vector and a scalar
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    for (f, name) in ((:vsadd, "addition"), (:vsdiv, "division"), (:vsmul, "multiplication"))
+        f! = Symbol("$(f)!")
+
+        @eval begin
+            @doc """
+            `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+
+            Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T) and overwrites
+            the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
+            """ ->
+            function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+                ccall(($(string("vDSP_", f, suff), libacc)),  Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
+                      X, 1, Ref(c), result, 1, length(result))
+                return result
+            end
+        end
+
+        @eval begin
+            @doc """
+            `$($f)(X::Vector{$($T)}, c::$($T))`
+
+            Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T). Allocates
+            memory to store result. *Returns:* **Vector{$($T)}**
+            """ ->
+            function ($f)(X::Vector{$T}, c::$T)
+                result = similar(X)
+                ($f!)(result, X, c)
+                return result
+            end
+        end
+    end
+    f = :vssub
+    f! = Symbol("$(f)!")
+
+    @eval begin
+        @doc """
+        `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+
+        Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T) and overwrites
+        the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
+        """ ->
+        function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+            ccall(($(string("vDSP_vsadd", suff), libacc)),  Cvoid,
+                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
+                    X, 1, Ref(-c), result, 1, length(result))
+            return result
+        end
+    end
+
+    @eval begin
+        @doc """
+        `$($f)(X::Vector{$($T)}, c::$($T))`
+
+        Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T). Allocates
+        memory to store result. *Returns:* **Vector{$($T)}**
+        """ ->
+        function ($f)(X::Vector{$T}, c::$T)
+            result = similar(X)
+            ($f!)(result, X, c)
+            return result
+        end
+    end
+
+    f = :svsub
+    f! = Symbol("$(f)!")
+
+    @eval begin
+        @doc """
+        `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+
+        Implements vector-scalar **subtraction** over $($T) and **Vector{$($T)}** and overwrites
+        the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
+        """ ->
+        function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+            ccall(($(string("vDSP_vsadd", suff), libacc)),  Cvoid,
+                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
+                    -X, 1, Ref(c), result, 1, length(result))
+            return result
+        end
+    end
+
+    @eval begin
+        @doc """
+        `$($f)(X::Vector{$($T), c::$($T)})`
+
+        Implements vector-scalar **subtraction** over $($T) and  **Vector{$($T)}**. Allocates
+        memory to store result. *Returns:* **Vector{$($T)}**
+        """ ->
+        function ($f)(X::Vector{$T}, c::$T)
+            result = similar(X)
+            ($f!)(result, X, c)
+            return result
+        end
+    end
+
+    for f in (:vsadd, :vssub, :vsdiv, :vsmul)
+        f! = Symbol("$(f)!")
+        @eval begin
+            # Broadcasting override such that f.(X) turns into f(X)
+            Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N},$T}}) where {Style, Axes, N} = ($f)(bc.args...)
+            Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},$T}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
+            Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::$T) where {N} = ($f)(maybecopy(arg1), arg2)
+        end
+    end
+
+    f = :svsub
+    f! = Symbol("$(f)!")
+
+    @eval begin
+        # Broadcasting override such that f.(X) turns into f(X)
+        Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N}, $T}}) where {Style, Axes, N} = ($f)(bc.args...)
+        Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N}, $T}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
+        Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::$T) where {N} = ($f)(maybecopy(arg1), arg2)
+    end
+end
 

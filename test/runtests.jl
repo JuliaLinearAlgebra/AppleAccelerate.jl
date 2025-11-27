@@ -7,17 +7,67 @@ if !Sys.isapple()
     exit(0)
 end
 
+include("libSparseTests.jl")
+
 Random.seed!(7)
 N = 1_000
 
+@testset "AppleAccelerate.jl" begin
 for T in (Float32, Float64)
     @testset "Element-wise Operators::$T" begin
         X::Vector{T} = randn(N)
         Y::Vector{T} = randn(N)
+        Z::Vector{T} = similar(X)
+        # Vector-vector
         @test (X .+ Y) ≈ AppleAccelerate.vadd(X, Y)
         @test (X .- Y) ≈ AppleAccelerate.vsub(X, Y)
         @test (X .* Y) ≈ AppleAccelerate.vmul(X, Y)
         @test (X ./ Y) ≈ AppleAccelerate.vdiv(X, Y)
+
+        # Vector-vector non-allocating
+        AppleAccelerate.vadd!(Z, X, Y)
+        @test (X .+ Y) ≈ Z
+        AppleAccelerate.vsub!(Z, X, Y)
+        @test (X .- Y) ≈ Z
+        AppleAccelerate.vmul!(Z, X, Y)
+        @test (X .* Y) ≈ Z
+        AppleAccelerate.vdiv!(Z, X, Y)
+        @test (X ./ Y) ≈ Z
+
+        # Vector-vector broadcasting
+        @test (X .+ Y) ≈ AppleAccelerate.vadd.(X, Y)
+        @test (X .- Y) ≈ AppleAccelerate.vsub.(X, Y)
+        @test (X .* Y) ≈ AppleAccelerate.vmul.(X, Y)
+        @test (X ./ Y) ≈ AppleAccelerate.vdiv.(X, Y)
+
+        #Vector-scalar
+        c::T         = randn()
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        #Vector-scalar non-allocating
+        AppleAccelerate.vsadd!(Y, X, c)
+        @test (X .+ c) ≈ Y
+        AppleAccelerate.vssub!(Y, X, c)
+        @test (X .- c) ≈ Y
+        AppleAccelerate.svsub!(Y, X, c)
+        @test (c .- X) ≈ Y
+        AppleAccelerate.vsmul!(Y, X, c)
+        @test (X .* c) ≈ Y
+        AppleAccelerate.vsdiv!(Y, X, c)
+        @test (X ./ c) ≈ Y
+
+        #Vector-scalar broadcasting
+        @test (X .+ c) ≈ AppleAccelerate.vsadd.(X, c)
+        @test (X .- c) ≈ AppleAccelerate.vssub.(X, c)
+        @test (c .- X) ≈ AppleAccelerate.svsub.(X, c)
+        @test (X .* c) ≈ AppleAccelerate.vsmul.(X, c)
+        @test (X ./ c) ≈ AppleAccelerate.vsdiv.(X, c)
+
+        @test (X .+ Y .+ Y) ≈ AppleAccelerate.vadd.(X, Y .+ Y)
     end
 end
 
@@ -198,12 +248,28 @@ for T in (Float32, Float64)
             @test fa(X)[2] ≈ fb(X)[2]
         end
 
-        @testset "Testing meansqr::$T" begin
-            @test AppleAccelerate.meansqr(X) ≈ mean(X .*X)
+        @testset "Testing meanmag::$T" begin
+            @test AppleAccelerate.meanmag(X) ≈ mean(abs, X)
         end
 
-        @testset "Testing meanmag::$T" begin
-            @test AppleAccelerate.meanmag(X) ≈ mean(abs.(X))
+        @testset "Testing meansqr::$T" begin
+            @test AppleAccelerate.meansqr(X) ≈ mean(X .* X)
+        end
+
+        @testset "Testing meanssqr::$T" begin
+            @test AppleAccelerate.meanssqr(X) ≈ mean(X .* abs.(X))
+        end
+
+        @testset "Testing summag::$T" begin
+            @test AppleAccelerate.summag(X) ≈ sum(abs, X)
+        end
+
+        @testset "Testing sumsqr::$T" begin
+            @test AppleAccelerate.sumsqr(X) ≈ sum(abs2, X)
+        end
+
+        @testset "Testing sumssqr::$T" begin
+            @test AppleAccelerate.sumssqr(X) ≈ sum(X .* abs.(X))
         end
 
     end
@@ -270,9 +336,10 @@ Y::Array{T} = abs.(randn(N))
 @test X ./ Y  == AppleAccelerate.div_float(X, Y)
 end
 =#
+end
 
-if AppleAccelerate.get_macos_version() < v"13.3"
-    @info("AppleAccelerate.jl needs macOS >= 13.3 for BLAS forwarding. Not testing forwarding capabilities.")
+if AppleAccelerate.get_macos_version() < v"13.4"
+    @info("AppleAccelerate.jl needs macOS >= 13.4 for BLAS forwarding. Not testing forwarding capabilities.")
     exit(0)
 end
 
@@ -319,24 +386,27 @@ end
     @test BLAS.dot(a, a) ≈ 14f0
 end
 
-# Run all the LinearAlgebra stdlib tests, but with Accelerate.  We still
-# use `Base.runtests()` to get multithreaded, distributed execution
-# to cut down on CI times, and also to restart workers that trip over
-# the testing RSS limit.  In order for distributed workers to use Accelerate,
-# we'll modify the test source code so that it imports Accelerate:
-#=
-@testset "Full LinearAlgebra test suite" begin; mktempdir() do dir
-    cp(joinpath(Sys.BINDIR, Base.DATAROOTDIR, "julia", "test"), dir; force=true, follow_symlinks=true)
-
-    # Prepend `using AppleAccelerate` to `testdefs.jl`, so that all test workers load Acclerate
-    testdefs_path = joinpath(dir, "testdefs.jl")
-    chmod(testdefs_path, 0o644)
-    testdefs_content = String(read(testdefs_path))
-    open(testdefs_path, write=true) do io
-        println(io, accelerate_header)
-        println(io, testdefs_content)
+@testset "BLAS threading tests" begin
+    if AppleAccelerate.get_macos_version() >= v"15"
+        AppleAccelerate.set_num_threads(1)
+        @test AppleAccelerate.get_num_threads() == 1
+        AppleAccelerate.set_num_threads(4)
+        @test AppleAccelerate.get_num_threads() > 1
+    else
+        @test AppleAccelerate.get_num_threads() == -1
     end
+end
 
-    run(`$(Base.julia_cmd()) --project=$(Base.active_project()) $(dir)/runtests.jl LinearAlgebra`)
-end; end
+linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+
+# TODO: Re-enable after fixing https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/87
+# Don't run blas.jl tests since the "strided interface blas" tests are currently failing
+#=
+@testset verbose=true "LinearAlgebra.jl BLAS tests" begin
+    joinpath(linalg_stdlib_test_path, "blas.jl") |> include
+end
 =#
+
+@testset verbose=false "LinearAlgebra.jl LAPACK tests" begin
+    joinpath(linalg_stdlib_test_path, "lapack.jl") |> include
+end

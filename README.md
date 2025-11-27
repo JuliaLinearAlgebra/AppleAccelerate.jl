@@ -4,7 +4,7 @@ This provides a Julia interface to some of the
 [macOS Accelerate framework](https://developer.apple.com/documentation/accelerate). At
 the moment, this package provides:
 1. Access to Accelerate BLAS and LAPACK using the [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) framework,
-2. An interface to the [array-oriented functions](https://developer.apple.com/library/mac/documentation/Performance/Conceptual/vecLib/index.html#//apple_ref/doc/uid/TP30000414-357225),
+2. An interface to the [array-oriented functions](https://developer.apple.com/documentation/accelerate/veclib),
 which provide a vectorised form for many common mathematical functions
 
 The performance is significantly better than using standard libm functions in some cases, though there does appear to be some reduced accuracy.
@@ -12,6 +12,47 @@ The performance is significantly better than using standard libm functions in so
 ## OS Requirements
 
 MacOS 13.4 is required in order to run AppleAccelerate.jl, especially for the libblastrampoline forwarding. On older MacOS versions, your mileage may vary.
+
+## BLAS Multi-threading
+
+Accelerate BLAS is multi-threaded by default. Starting with macOS 15 (Sequoia), `get_num_threads()` and `set_num_threads()` are available. The Accelerate API only allows the user to choose single-threaded operation or multi-threaded operation. Thus, `set_num_threads(1)` will give single-threaded operation, and any number greater than 1 will give multi-threaded operation. `get_num_threads()` will return `1` for single-threaded operation and `Sys.CPU_THREADS` for multi-threaded operation. The following example is on Apple M2 Max, where `Sys.CPU_THREADS` is `8`.
+
+```julia
+julia> using AppleAccelerate
+
+julia> AppleAccelerate.get_num_threads()  # Default is multi-threaded. Return value is `Sys.CPU_THREADS`
+8
+
+julia> AppleAccelerate.set_num_threads(1) # Set single-threaded operation
+
+julia> AppleAccelerate.get_num_threads()
+1
+
+julia> AppleAccelerate.set_num_threads(4) # Set multi-threaded operation, with input value > 1.
+
+julia> AppleAccelerate.get_num_threads()  # Return value is `Sys.CPU_THREADS` for multi-threaded operation
+8
+```
+
+On older versions of macOS (< 15), the number of threads can be changed with the `VECLIB_MAXIMUM_THREADS` environment variable before starting Julia:
+
+```julia
+VECLIB_MAXIMUM_THREADS=1 julia
+```
+
+
+## Example
+
+To use the Accelerate BLAS and LAPACK, simply load the library:
+```julia
+julia> peakflops(4096)
+3.6024175318268243e11
+
+julia> using AppleAccelerate
+
+julia> peakflops(4096)
+5.832806459434183e11
+```
 
 ## Supported Functions
 
@@ -36,18 +77,6 @@ Some additional functions that are also available:
 * `fdiv(x,y)`: divide (`x ./ y` in Base)
 * `sincos(x)`: returns `(sin(x), cos(x))`
 
-## Example
-
-To use the Accelerate BLAS and LAPACK, simply load the library:
-```julia
-julia> peakflops(4096)
-3.6024175318268243e11
-
-julia> using AppleAccelerate
-
-julia> peakflops(4096)
-5.832806459434183e11
-```
 
 To avoid naming conflicts with Base, methods are not exported and so need to
 be accessed via the namespace:
