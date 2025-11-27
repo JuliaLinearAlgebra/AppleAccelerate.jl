@@ -248,13 +248,17 @@ macro generateDemangled(jlName, cName, param, retType, jlArgTypes...)
         Expr(:(::), esc(Symbol("arg$i")), T)
     end
     local jlCall = Expr(:(::), Expr(:call, esc(jlName), jlArgExprs...), retTypeWParam)
-    local cArgExprs = [Expr(:(::), Symbol("arg$i"), T) for (i,T) in enumerate(cArgTypesWParams)]
+    # Build ccall directly instead of using @ccall macro to avoid variable name conflicts
+    local cArgNames = [Symbol("arg$i") for i in 1:length(cArgTypesWParams)]
     local LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions"*
                     "/A/Frameworks/vecLib.framework/libSparse.dylib"
-    local funcAndLibrary  = Expr(:(.), LIBSPARSE, esc(cName))
-    local cCall = Expr(:(::), Expr(:call, funcAndLibrary, cArgExprs...), retTypeWParam)
-    local ccallMarco = Expr(:macrocall, Symbol("@ccall"), :(LineNumberNode(@__LINE__, @__FILE__)), cCall)
-    return Expr(Symbol("="), jlCall, ccallMarco)
+    # Construct ccall((:cName, LIBSPARSE), retType, (argTypes...), args...)
+    local cCallExpr = Expr(:call, :ccall,
+                          Expr(:tuple, esc(cName), LIBSPARSE),
+                          retTypeWParam,
+                          Expr(:tuple, cArgTypesWParams...),
+                          cArgNames...)
+    return Expr(Symbol("="), jlCall, cCallExpr)
 end
 
 # sparse * (dense matrix)
