@@ -195,7 +195,7 @@ const LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Fr
 Base.cconvert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes = m
 
 function Base.unsafe_convert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes
-    @assert stride(m, 1) == 1
+    stride(m, 1) == 1 || throw(ArgumentError("Stride of first dimension must be 1"))
     # hard-coded ATT_ORDINARY
     return DenseMatrix{T}(size(m)..., stride(m, 2), ATT_ORDINARY, pointer(m))
 end
@@ -203,7 +203,7 @@ end
 Base.cconvert(::Type{DenseVector{T}}, v::StridedVector{T}) where T<:vTypes = v
 
 function Base.unsafe_convert(::Type{DenseVector{T}}, v::StridedVector{T}) where T<:vTypes
-    @assert stride(v, 1) == 1
+    stride(v, 1) == 1 || throw(ArgumentError("Stride of first dimension must be 1"))
     return DenseVector{T}(size(v)[1], pointer(v))
 end
 
@@ -356,7 +356,7 @@ for T in (Cfloat, Cdouble)
                                                 :_Z12SparseFactorh19SparseMatrix_Double
     @eval function SparseFactorNoErrors(arg1::SparseFactorization_t,
                                 arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
-        @assert arg1 != SparseFactorizationTBD
+        arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
         @ccall(LIBSPARSE.$sparseFactorMatrix(arg1::Cuint,
                                         arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T})
     end
@@ -367,7 +367,7 @@ for T in (Cfloat, Cdouble)
                     arg2::SparseMatrix{$T},
                     arg3::SparseSymbolicFactorOptions,
                     arg4::SparseNumericFactorOptions)
-        @assert arg1 != SparseFactorizationTBD
+        arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
         @ccall(LIBSPARSE.$sparseFactorMatrixOpts(
                     arg1::Cuint,
                     arg2::SparseMatrix{$T},
