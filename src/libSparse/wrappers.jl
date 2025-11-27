@@ -248,8 +248,7 @@ macro generateDemangled(jlName, cName, param, retType, jlArgTypes...)
         Expr(:(::), esc(Symbol("arg$i")), T)
     end
     local jlCall = Expr(:(::), Expr(:call, esc(jlName), jlArgExprs...), retTypeWParam)
-    # assemble ccall body, then feed into macro.
-    local cArgExprs = [Expr(:(::), esc(Symbol("arg$i")), T) for (i,T) in enumerate(cArgTypesWParams)]
+    local cArgExprs = [Expr(:(::), Symbol("arg$i"), T) for (i,T) in enumerate(cArgTypesWParams)]
     local LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions"*
                     "/A/Frameworks/vecLib.framework/libSparse.dylib"
     local funcAndLibrary  = Expr(:(.), LIBSPARSE, esc(cName))
