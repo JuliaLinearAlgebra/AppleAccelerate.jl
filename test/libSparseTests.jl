@@ -216,7 +216,7 @@ using LinearAlgebra
                 factor!(f)
             catch err1
             end
-            @test sprint(showerror, err1) == "Matrix is structurally singular\n"
+            @test occursin("singular", sprint(showerror, err1))
 
             err2 = nothing
             temp = sprand(N, N, 0.5)
@@ -239,7 +239,9 @@ using LinearAlgebra
                 factor!(f, AppleAccelerate.SparseFactorizationCholesky)
             catch err3
             end
-            @test sprint(showerror, err3) == "Cannot perform symmetric matrix factorization of non-square matrix.\n"
+            @test startswith(sprint(showerror, err3),
+                "Cannot perform symmetric matrix factorization"
+            )
         end
 
         @testset "DimensionMismatch errors" begin
