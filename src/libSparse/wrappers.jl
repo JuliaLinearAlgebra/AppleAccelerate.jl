@@ -207,192 +207,323 @@ function Base.unsafe_convert(::Type{DenseVector{T}}, v::StridedVector{T}) where 
     return DenseVector{T}(size(v)[1], pointer(v))
 end
 
-for T in (Cfloat, Cdouble)
-    # write a macro to make this less copy-paste heavy? Most of the function
-    # bodies are straight @ccalls, replacing Strided with Dense, but a few aren't.
-
-    # also may want to add guardrails in case the mangled function names
-    # change at some later date.
-
-    # see https://discourse.julialang.org/t/apple-accelerate-sparse-solvers/110175
-    local dmMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_ :
-                        :_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::StridedMatrix{$T},
-                                                            arg3::StridedMatrix{$T})
-            @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
-                                                arg3::DenseMatrix{$T})::Cvoid
+# generates jlName([args])::retType = @ccall libSparse.cName([args])::retType
+# where [args] = arg1::jlArgTypes[1], etc. 
+# Omit parameters for parametrized types, and instead pass as param.
+# e.g. don't pass SparseMatrix{Cfloat} in jlArgTypes; just SparseMatrix, and param = Cfloat.
+macro generateDemangled(jlName, cName, param, retType, jlArgTypes...)
+    # all the parameterized types that we'll be using as arguments,
+    # where we want param to be inserted as parameter.
+    local ALL_PARAM_TYPES = [:(StridedVector), :(StridedMatrix),
+                                :(SparseMatrix), :(SparseOpaqueFactorization), :(Ptr)]
+    # all the enums we'll be using as arguments.
+    local ALL_ENUMS = [:(SparseFactorization_t), :(SparseOrder_t), :(SparseScaling_t),
+                                                    :(SparseStatus_t), :(SparseControl_t)]
+    # Assemble arg/ret types: put param inside type (if parametrized type),
+    # and convert to type for @ccall if different from jl type.
+    local jlArgTypesWParams = Vector{Any}()
+    local cArgTypesWParams = Vector{Any}()
+    for T in jlArgTypes
+        if T in ALL_PARAM_TYPES
+            push!(jlArgTypesWParams, Expr(:curly, esc(T), esc(param)))
+            if T == :(StridedVector)
+                push!(cArgTypesWParams, Expr(:curly, DenseVector, esc(param)))
+            elseif T == :(StridedMatrix)
+                push!(cArgTypesWParams, Expr(:curly, DenseMatrix,  esc(param)))
+            else
+                push!(cArgTypesWParams, Expr(:curly, esc(T), esc(param)))
+            end
+        elseif T in ALL_ENUMS
+            push!(jlArgTypesWParams, esc(T))
+            push!(cArgTypesWParams, Cuint)
+        else
+            push!(jlArgTypesWParams, esc(T))
+            push!(cArgTypesWParams, esc(T))
         end
     end
-
-    local dvMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_ :
-                        :_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::StridedVector{$T},
-                                                        arg3::StridedVector{$T})
-            @ccall LIBSPARSE.$dvMultMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
-                                            arg3::DenseVector{$T})::Cvoid
-        end
+    # due to my use case, I don't need to worry about return type translation.
+    local retTypeWParam = retType in ALL_PARAM_TYPES ? Expr(:curly, esc(retType), esc(param)) : esc(retType)
+    # assemble julia call
+    local jlArgExprs = map(enumerate(jlArgTypesWParams)) do (i, T)
+        Expr(:(::), esc(Symbol("arg$i")), T)
     end
+    local jlCall = Expr(:(::), Expr(:call, esc(jlName), jlArgExprs...), retTypeWParam)
+    # Build ccall directly instead of using @ccall macro to avoid variable name conflicts
+    local cArgNames = [Symbol("arg$i") for i in 1:length(cArgTypesWParams)]
+    local LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions"*
+                    "/A/Frameworks/vecLib.framework/libSparse.dylib"
+    # Construct ccall((:cName, LIBSPARSE), retType, (argTypes...), args...)
+    local cCallExpr = Expr(:call, :ccall,
+                          Expr(:tuple, esc(cName), LIBSPARSE),
+                          retTypeWParam,
+                          Expr(:tuple, cArgTypesWParams...),
+                          cArgNames...)
+    return Expr(Symbol("="), jlCall, cCallExpr)
+end
 
-    local sdmMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
-                                :_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval begin
-        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::StridedMatrix{$T},
-                                                    arg4::StridedMatrix{$T})
-            @ccall LIBSPARSE.$sdmMultMangled(arg1::$T, arg2::SparseMatrix{$T},
-                                                arg3::DenseMatrix{$T}, arg4::DenseMatrix{$T})::Cvoid
-        end
-    end
+# sparse * (dense matrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local sdvMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseVector_FloatS0_ :
-                                        :_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval SparseMultiply(arg1::$T,
-                        arg2::SparseMatrix{$T},
-                        arg3::StridedVector{$T},
-                        arg4::StridedVector{$T}) = @ccall (
-            LIBSPARSE.$sdvMultMangled(arg1::$T,
-                                    arg2::SparseMatrix{$T},
-                                    arg3::DenseVector{$T},
-                                    arg4::DenseVector{$T})::Cvoid
-        )
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local dmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_ :
-                                            :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval SparseMultiplyAdd(arg1::SparseMatrix{$T},
-                            arg2::StridedMatrix{$T},
-                            arg3::StridedMatrix{$T}) = @ccall (
-            LIBSPARSE.$dmMultAddMangled(arg1::SparseMatrix{$T},
-                                        arg2::DenseMatrix{$T},
-                                        arg3::DenseMatrix{$T})::Cvoid
-        )
+# sparse * (dense vector)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseMatrix, StridedVector, StridedVector)
 
-    local dvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_ :
-                                            :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval SparseMultiplyAdd(arg1::SparseMatrix{$T},
-                            arg2::StridedVector{$T},
-                            arg3::StridedVector{$T}) = @ccall(
-            LIBSPARSE.$dvMultAddMangled(arg1::SparseMatrix{$T},
-                                        arg2::DenseVector{$T},
-                                        arg3::DenseVector{$T})::Cvoid
-        )
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseMatrix, StridedVector, StridedVector)
 
-    local sdmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
-                                        :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval SparseMultiplyAdd(arg0::$T,
-                            arg1::SparseMatrix{$T},
-                            arg2::StridedMatrix{$T},
-                            arg3::StridedMatrix{$T}) = @ccall (
-            LIBSPARSE.$sdmMultAddMangled(arg0::$T,
-                                        arg1::SparseMatrix{$T},
-                                        arg2::DenseMatrix{$T},
-                                        arg3::DenseMatrix{$T})::Cvoid
-        )
+# scalar * sparse * (dense matrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_,
+    Cfloat,
+    Cvoid,
+    Cfloat, SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local sdvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_ :
-                                        :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval SparseMultiplyAdd(arg0::$T,
-                            arg1::SparseMatrix{$T},
-                            arg2::StridedVector{$T},
-                            arg3::StridedVector{$T}) = @ccall (
-            LIBSPARSE.$sdvMultAddMangled(arg0::$T,
-                                        arg1::SparseMatrix{$T},
-                                        arg2::DenseVector{$T},
-                                        arg3::DenseVector{$T})::Cvoid
-        )
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    Cdouble,  SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local mTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose18SparseMatrix_Float :
-                                            :_Z18SparseGetTranspose19SparseMatrix_Double
-    @eval SparseGetTranspose(arg1::SparseMatrix{$T}) = @ccall(
-        LIBSPARSE.$mTransposeMangled(arg1::SparseMatrix{$T})::SparseMatrix{$T}
-    )
-    # skipped: 2 subfactor transposes.
-    local ofTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose31SparseOpaqueFactorization_Float :
-                                        :_Z18SparseGetTranspose32SparseOpaqueFactorization_Double
-    @eval SparseGetTranspose(arg1::SparseOpaqueFactorization{$T}) = @ccall (
-            LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
-    )
+# scalar * sparse * (dense vector)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyf18SparseMatrix_Float17DenseVector_FloatS0_,
+    Cfloat,
+    Cvoid,
+    Cfloat, SparseMatrix, StridedVector, StridedVector)
 
-    # TODO: these SparseConvertFromCoord functions are unused and untested.
-    local convertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf :
-                                            :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd
-    @eval begin
-        function SparseConvertFromCoord(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
-                                        arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T})
-            @ccall LIBSPARSE.$convertCoordMangled(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
-                                                    arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T})::SparseMatrix{$T}
-        end
-    end
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    Cdouble,  SparseMatrix, StridedVector, StridedVector)
 
-    local uConvertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKdPvS4_ :
-                                            :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKfPvS4_
-    @eval begin
-        function SparseConvertFromCoord(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
-                    arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T}, arg9::Ptr{Cvoid}, arg10::Ptr{Cvoid})
-            @ccall LIBSPARSE.$uConvertCoordMangled(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
-                    arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T}, arg9::Ptr{Cvoid}, arg10::Ptr{Cvoid})::SparseMatrix{$T}
-        end
-    end
+# dense matrix += sparse * (dense matrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local mCleanup = T == Cfloat ? :_Z13SparseCleanup18SparseMatrix_Float :
-                                     :_Z13SparseCleanup19SparseMatrix_Double
-    @eval SparseCleanup(arg1::SparseMatrix{$T}) = @ccall (
-            LIBSPARSE.$mCleanup(arg1::SparseMatrix{$T})::Cvoid
-    )
-    
-    local ofCleanup = T == Cfloat ? :_Z13SparseCleanup31SparseOpaqueFactorization_Float :
-                                    :_Z13SparseCleanup32SparseOpaqueFactorization_Double
-    @eval SparseCleanup(arg1::SparseOpaqueFactorization{$T}) = @ccall (
-            LIBSPARSE.$ofCleanup(arg1::SparseOpaqueFactorization{$T})::Cvoid
-    )
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseMatrix, StridedMatrix, StridedMatrix)
 
-    @eval SparseFactor(arg1::SparseFactorization_t,
-                        arg2::SparseMatrix{$T},
-                        noErrors::Bool = false) = 
-                noErrors ? SparseFactor(arg1, arg2) :
-                SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(), SparseNumericFactorOptions($T)) 
+# dense vector += sparse * (dense vector)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseMatrix, StridedVector, StridedVector)
 
-    local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
-                                                :_Z12SparseFactorh19SparseMatrix_Double
-    @eval function SparseFactorNoErrors(arg1::SparseFactorization_t,
-                                arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
-        arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
-        @ccall(LIBSPARSE.$sparseFactorMatrix(arg1::Cuint,
-                                        arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T})
-    end
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseMatrix, StridedVector, StridedVector)
 
-    local sparseFactorMatrixOpts = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float27SparseSymbolicFactorOptions26SparseNumericFactorOptions :
-                                           :_Z12SparseFactorh19SparseMatrix_Double27SparseSymbolicFactorOptions26SparseNumericFactorOptions     
-    @eval function SparseFactor(arg1::SparseFactorization_t,
-                    arg2::SparseMatrix{$T},
-                    arg3::SparseSymbolicFactorOptions,
-                    arg4::SparseNumericFactorOptions)
-        arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
-        @ccall(LIBSPARSE.$sparseFactorMatrixOpts(
-                    arg1::Cuint,
-                    arg2::SparseMatrix{$T},
-                    arg3::SparseSymbolicFactorOptions,
-                    arg4::SparseNumericFactorOptions
-            )::SparseOpaqueFactorization{$T}
-        )
-    end
+# dense matrix += scalar * sparse * (dense matrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_,
+    Cfloat,
+    Cvoid,
+    Cfloat, SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
-                                            :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double
-    @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
-                            arg2::StridedMatrix{$T})
-        @ccall LIBSPARSE.$sparseSolveInplace(arg1::SparseOpaqueFactorization{$T},
-                                                arg2::DenseMatrix{$T})::Cvoid
-    end
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    Cdouble, SparseMatrix, StridedMatrix, StridedMatrix)
 
-    local sparseSolve = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatS0_ :
-                                :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoubleS0_
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::StridedMatrix{$T},
-                        arg3::StridedMatrix{$T}) = @ccall (
-        LIBSPARSE.$sparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T}, 
-                                    arg3::DenseMatrix{$T})::Cvoid
-    )
+# dense vector += scalar * sparse * (dense vector)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_,
+    Cfloat,
+    Cvoid,
+    Cfloat, SparseMatrix, StridedVector, StridedVector)
 
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    Cdouble, SparseMatrix, StridedVector, StridedVector)
+
+# transpose of matrix
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose18SparseMatrix_Float,
+    Cfloat,
+    SparseMatrix,
+    SparseMatrix)
+
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose19SparseMatrix_Double,
+    Cdouble,
+    SparseMatrix,
+    SparseMatrix)
+# (skipped: 2 subfactor transposes)
+# transpose of opaque factorization
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose31SparseOpaqueFactorization_Float,
+    Cfloat,
+    SparseOpaqueFactorization,
+    SparseOpaqueFactorization)
+
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose32SparseOpaqueFactorization_Double,
+    Cdouble,
+    SparseOpaqueFactorization,
+    SparseOpaqueFactorization)
+
+# TODO: these 4 SparseConvertFromCoord functions are unused and untested.
+@generateDemangled(SparseConvertFromCoordinate,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf,
+    Cfloat,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr)
+
+@generateDemangled(SparseConvertFromCoordinate,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd,
+    Cdouble,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr)
+
+@generateDemangled(SparseConvertFromCoord,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKdPvS4_,
+    Cfloat,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
+
+@generateDemangled(SparseConvertFromCoord,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKfPvS4_,
+    Cdouble,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
+
+# cleanup SparseMatrix
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup18SparseMatrix_Float,
+    Cfloat,
+    Cvoid,
+    SparseMatrix)
+
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup19SparseMatrix_Double,
+    Cdouble,
+    Cvoid,
+    SparseMatrix)
+
+# cleanup OpaqueFactorization.
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup31SparseOpaqueFactorization_Float,
+    Cfloat,
+    Cvoid,
+    SparseOpaqueFactorization
+)
+
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup32SparseOpaqueFactorization_Double,
+    Cdouble,
+    Cvoid,
+    SparseOpaqueFactorization
+)
+
+# factor: factorization type, matrix
+# additional outer function for error handling with the added TBD factorization type.
+# The "NoErrors" part: if the call throws, Julia won't recognize the thrown
+# object (it's objective-C, os_log_error) and just reports "illegal instruction"
+@generateDemangled(_SparseFactorNoErrors_inner,
+    :_Z12SparseFactorh18SparseMatrix_Float,
+    Cfloat,
+    SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix
+)
+
+@generateDemangled(_SparseFactorNoErrors_inner,
+    :_Z12SparseFactorh19SparseMatrix_Double,
+    Cdouble,
+    SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix
+)
+
+function SparseFactorNoErrors(arg1::SparseFactorization_t,
+                            arg2::SparseMatrix{T}) where T <: vTypes
+    arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
+    _SparseFactorNoErrors_inner(arg1, arg2)
+end
+
+# factor with non-default options
+# additional outer function for error handling with the added TBD factorization type.
+@generateDemangled(_SparseFactor_inner,
+    :_Z12SparseFactorh18SparseMatrix_Float27SparseSymbolicFactorOptions26SparseNumericFactorOptions,
+    Cfloat,
+    SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix, SparseSymbolicFactorOptions, SparseNumericFactorOptions
+)
+
+@generateDemangled(_SparseFactor_inner,
+    :_Z12SparseFactorh19SparseMatrix_Double27SparseSymbolicFactorOptions26SparseNumericFactorOptions,
+    Cdouble,
+    SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix, SparseSymbolicFactorOptions, SparseNumericFactorOptions
+)
+
+function SparseFactor(arg1::SparseFactorization_t,
+                        arg2::SparseMatrix{T},
+                        arg3::SparseSymbolicFactorOptions,
+                        arg4::SparseNumericFactorOptions) where T <: vTypes
+    arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
+    _SparseFactor_inner(arg1, arg2, arg3, arg4)
+end
+
+# in-place solve, matrix RHS
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float,
+    Cfloat,
+    Cvoid,
+    SparseOpaqueFactorization, StridedMatrix
+)
+
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double,
+    Cdouble,
+    Cvoid,
+    SparseOpaqueFactorization, StridedMatrix
+)
+
+# solve, matrix RHS (modifies 3nd argument instead of returning)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseOpaqueFactorization, StridedMatrix, StridedMatrix
+)
+
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseOpaqueFactorization, StridedMatrix, StridedMatrix
+)
+
+# in-place solve, vector RHS. The resize call prevents me from doing @generateDemangled.
+for T in (Cdouble, Cfloat)
     local sparseSolveVecInPlace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_Float :
                                 :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_Double
     @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
@@ -401,18 +532,32 @@ for T in (Cfloat, Cdouble)
                                             arg2::DenseVector{$T})::Cvoid
         resize!(arg2, arg1.symbolicFactorization.columnCount)
     end
-
-    local sparseSolveVec = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_FloatS0_ :
-                                    :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_DoubleS0_
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T},
-                    arg2::StridedVector{$T},
-                    arg3::StridedVector{$T}) = @ccall (
-        LIBSPARSE.$sparseSolveVec(arg1::SparseOpaqueFactorization{$T},
-                                arg2::DenseVector{$T},
-                                arg3::DenseVector{$T})::Cvoid
-    )
 end
 
+# solve, vector RHS. modifies 3rd argument instead of returning
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_FloatS0_,
+    Cfloat,
+    Cvoid,
+    SparseOpaqueFactorization, StridedVector,StridedVector
+)
+
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_DoubleS0_,
+    Cdouble,
+    Cvoid,
+    SparseOpaqueFactorization, StridedVector,StridedVector
+)
+
+# calls to SparseFactor default to the version with error handling.
+SparseFactor(arg1::SparseFactorization_t,
+                        arg2::SparseMatrix{T},
+                        noErrors::Bool = false) where T <: vTypes = 
+                noErrors ? SparseFactor(arg1, arg2) :
+                SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(),
+                                         SparseNumericFactorOptions(T))
+
+# could replace with generateDemangled macrocalls, but not parametrized so not much simpler.
 SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
                                 arg1::SparseOpaqueSymbolicFactorization)::Cvoid
