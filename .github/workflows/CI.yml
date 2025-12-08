@@ -13,7 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.9'
           - '1'
         os:
           - ubuntu-latest
@@ -24,7 +23,7 @@ jobs:
         include:
           - os: macOS-latest
             arch: aarch64
-            version: '1.9'
+            version: 'min'
           - os: macOS-latest
             arch: aarch64
             version: '1'

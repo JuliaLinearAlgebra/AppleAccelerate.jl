@@ -1,6 +1,6 @@
 name = "AppleAccelerate"
 uuid = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
-version = "0.4.5"
+version = "0.5.0"
 
 [deps]
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
@@ -10,7 +10,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [compat]
 DSP = "0.8.4"
-julia = "1.9"
+julia = "1.10"
 
 [extras]
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
