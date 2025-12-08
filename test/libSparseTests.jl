@@ -172,6 +172,7 @@ using LinearAlgebra
             ordinary = AASparseMatrix(sparseM)
             @test !issymmetric(ordinary) && !istril(ordinary) && !istriu(ordinary)
             symmetricM = sparse(sparseM + sparseM')
+            # verify that the julia matrix is has the desired properties.
             @assert issymmetric(symmetricM) && !istril(symmetricM) && !istriu(symmetricM)
             symmetric = AASparseMatrix(symmetricM)
             @test issymmetric(symmetric) && !istril(symmetric) && !istriu(symmetric)
@@ -215,7 +216,7 @@ using LinearAlgebra
                 factor!(f)
             catch err1
             end
-            @test sprint(showerror, err1) == "The matrix is singular."
+            @test occursin("singular", sprint(showerror, err1))
 
             err2 = nothing
             temp = sprand(N, N, 0.5)
@@ -233,11 +234,51 @@ using LinearAlgebra
             nonSymmetric = sparse(temp*temp' + diagm(rand(N)) + singular)
             try
                 f = AAFactorization(nonSymmetric)
-                @assert size(f.matrixObj)[1] == size(f.matrixObj)[2]
+                # Verify the matrix is square
+                @test size(f.matrixObj)[1] == size(f.matrixObj)[2]
                 factor!(f, AppleAccelerate.SparseFactorizationCholesky)
             catch err3
             end
-            @test sprint(showerror, err3) == "Cannot perform symmetric matrix factorization of non-symmetric matrix.\n"
+            @test startswith(sprint(showerror, err3),
+                "Cannot perform symmetric matrix factorization"
+            )
+        end
+
+        @testset "DimensionMismatch errors" begin
+            N = 4
+            M = 5
+            jlA = sprand(Float64, N, M, 0.5)
+            while rank(Array(jlA)) < min(N, M)
+                jlA = sprand(Float64, N, M, 0.5)
+            end
+            f = AAFactorization(jlA)
+            
+            # Test solve with wrong dimension vector
+            wrong_b = rand(Float64, N)  # should be M
+            @test_throws DimensionMismatch solve(f, wrong_b)
+            
+            # Test solve with wrong dimension matrix
+            wrong_B = rand(Float64, N, 3)  # should be M x 3
+            @test_throws DimensionMismatch solve(f, wrong_B)
+            
+            # Test ldiv! with wrong dimensions
+            x = rand(Float64, N)
+            b = rand(Float64, M)
+            @test_throws DimensionMismatch LinearAlgebra.ldiv!(x, f, b)
+        end
+
+        @testset "ArgumentError for in-place solve" begin
+            N = 4
+            M = 5
+            # Test that in-place solve with matrix throws ArgumentError for non-square factorization
+            jlA = sprand(Float64, N, M, 0.9)
+            while rank(Array(jlA)) < min(N, M)
+                jlA = sprand(Float64, N, M, 0.9)
+            end
+            f = AAFactorization(jlA)
+            
+            xb_matrix = rand(Float64, M, 3)
+            @test_throws ArgumentError solve!(f, xb_matrix)
         end
 
         @testset "Cholesky" begin

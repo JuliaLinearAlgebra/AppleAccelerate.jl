@@ -23,7 +23,8 @@ function AASparseMatrix(n::Int, m::Int,
             col::StridedVector{Clong}, row::StridedVector{Cint},
             data::StridedVector{T},
             attributes::att_type = ATT_ORDINARY) where T<:vTypes
-    @assert stride(col, 1) == 1 && stride(row, 1) == 1 && stride(data, 1) == 1
+    (stride(col, 1) != 1 || stride(row, 1) != 1 || stride(data, 1) != 1) &&
+        throw(ArgumentError("col, row, and data must have stride 1"))
     # I'm assuming here that pointer(row) == pointer(_row_inds),
     # ie that col, row, and data are passed by reference, not by value.
     s = SparseMatrixStructure(n, m, pointer(col),
@@ -62,7 +63,7 @@ LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (MM.matrix.structure.attri
                                         & ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
 
 function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
-    @assert all((1, 1) .<= (i,j) .<= size(M))
+    ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
     (startCol, endCol) = (M._colptr[j], M._colptr[j+1]-1) .+ 1
     rowsInCol = @view M._rowval[startCol:endCol]
     ind = searchsortedfirst(rowsInCol, i-1)
@@ -73,7 +74,7 @@ function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
 end
 
 function Base.getindex(M::AASparseMatrix, i::Int)
-    @assert 1 <= i <= size(M)[1]*size(M)[2]
+    1 <= i <= size(M)[1]*size(M)[2] || throw(BoundsError(M, i))
     return M[(i-1) % size(M)[1] + 1, div(i-1, size(M)[1]) + 1]
 end
 # Creates a new structure, referring to the same data,
@@ -83,7 +84,9 @@ Base.transpose(M::AASparseMatrix) = AASparseMatrix(SparseGetTranspose(M.matrix),
                         M._colptr, M._rowval, M._nzval)
 
 function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(x)[1] == size(A)[2]
+    size(x)[1] == size(A)[2] || throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(A)[2]) and $(size(x, 1))"))
     y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
     SparseMultiply(A.matrix, x, y)
     return y
@@ -91,7 +94,9 @@ end
 
 function Base.:(*)(alpha::T, A::AASparseMatrix{T},
                             x::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(x)[1] == size(A)[2]
+    size(x)[1] == size(A)[2] || throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(A)[2]) and $(size(x, 1))"))
     y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
     SparseMultiply(alpha, A.matrix, x, y)
     return y
@@ -102,7 +107,9 @@ Computes y += A*x in place. Note that this modifies its LAST argument.
 """
 function muladd!(A::AASparseMatrix{T}, x::StridedVecOrMat{T},
                     y::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(x) == size(y) && size(x)[1] == size(A)[2]
+    (size(x) == size(y) && size(x)[1] == size(A)[2]) || throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(A)[2]) and $(size(x, 1))"))
     SparseMultiplyAdd(A.matrix, x, y)
 end
 
@@ -111,6 +118,8 @@ Computes y += alpha*A*x in place. Note that this modifies its LAST argument.
 """
 function muladd!(alpha::T, A::AASparseMatrix{T},
                 x::StridedVecOrMat{T}, y::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(x) == size(y) && size(x)[1] == size(A)[2]
+    (size(x) == size(y) && size(x)[1] == size(A)[2]) || throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(A)[2]) and $(size(x, 1))"))
     SparseMultiplyAdd(alpha, A.matrix, x, y)
 end
