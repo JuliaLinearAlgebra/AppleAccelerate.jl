@@ -1,6 +1,9 @@
 using AppleAccelerate
 using SparseArrays
 using LinearAlgebra
+
+import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!, factor!
+
 @testset "libSparse" begin
     @testset "wrappers" begin
         @testset "SparseMultiply and SparseMultiplyAdd" begin
@@ -252,15 +255,15 @@ using LinearAlgebra
                 jlA = sprand(Float64, N, M, 0.5)
             end
             f = AAFactorization(jlA)
-            
+
             # Test solve with wrong dimension vector
             wrong_b = rand(Float64, N)  # should be M
             @test_throws DimensionMismatch solve(f, wrong_b)
-            
+
             # Test solve with wrong dimension matrix
             wrong_B = rand(Float64, N, 3)  # should be M x 3
             @test_throws DimensionMismatch solve(f, wrong_B)
-            
+
             # Test ldiv! with wrong dimensions
             x = rand(Float64, N)
             b = rand(Float64, M)
@@ -276,7 +279,7 @@ using LinearAlgebra
                 jlA = sprand(Float64, N, M, 0.9)
             end
             f = AAFactorization(jlA)
-            
+
             xb_matrix = rand(Float64, M, 3)
             @test_throws ArgumentError solve!(f, xb_matrix)
         end
