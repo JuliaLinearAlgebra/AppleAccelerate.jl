@@ -399,7 +399,7 @@ end
 
 linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
 
-@testset verbose=true "LinearAlgebra.jl BLAS tests" begin
+@testset verbose=false "LinearAlgebra.jl BLAS tests" begin
     joinpath(linalg_stdlib_test_path, "blas.jl") |> include
 end
 
