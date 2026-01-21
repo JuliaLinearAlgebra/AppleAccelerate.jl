@@ -399,13 +399,9 @@ end
 
 linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
 
-# TODO: Re-enable after fixing https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/87
-# Don't run blas.jl tests since the "strided interface blas" tests are currently failing
-#=
-@testset verbose=true "LinearAlgebra.jl BLAS tests" begin
+@testset verbose=false "LinearAlgebra.jl BLAS tests" begin
     joinpath(linalg_stdlib_test_path, "blas.jl") |> include
 end
-=#
 
 @testset verbose=false "LinearAlgebra.jl LAPACK tests" begin
     joinpath(linalg_stdlib_test_path, "lapack.jl") |> include
