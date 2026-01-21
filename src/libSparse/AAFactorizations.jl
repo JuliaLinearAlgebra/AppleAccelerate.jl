@@ -57,7 +57,9 @@ function factor!(aa_fact::AAFactorization{T},
 end
 
 function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(aa_fact.matrixObj)[2] == size(b, 1)
+    size(aa_fact.matrixObj)[2] != size(b, 1) && throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(aa_fact.matrixObj)[2]) and $(size(b, 1))"))
     factor!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
@@ -65,9 +67,12 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
 end
 
 function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes
-    @assert (xb isa StridedVector) ||
-            (size(aa_fact.matrixObj)[1] == size(aa_fact.matrixObj)[2]) "Can't in-place " *
-            "solve: x and b are different sizes and Julia cannot resize a matrix."
+    ((xb isa StridedMatrix) &&
+        (size(aa_fact.matrixObj)[1] != size(aa_fact.matrixObj)[2])) &&
+        throw(ArgumentError("Can't in-place " *
+                "solve: x and b are different sizes and Julia cannot resize a matrix."
+            )
+        )
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
     return xb # written in imitation of KLU.jl, which also returns
@@ -79,11 +84,13 @@ LinearAlgebra.ldiv!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T
 function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
                             aa_fact::AAFactorization{T},
                             b::StridedVecOrMat{T}) where T<:vTypes
-    @assert size(aa_fact.matrixObj)[2] == size(b, 1)
+    size(aa_fact.matrixObj)[2] != size(b, 1) && throw(DimensionMismatch(
+        "Matrix and right-hand side size mismatch: got "
+        * "$(size(aa_fact.matrixObj)[2]) and $(size(b, 1))"))
+    size(aa_fact.matrixObj)[2] != size(x, 1) && throw(DimensionMismatch(
+        "Matrix and output size mismatch: got "
+        * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, b, x)
     return x
 end
-
-
-

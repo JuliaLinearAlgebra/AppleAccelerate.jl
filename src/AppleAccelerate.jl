@@ -131,7 +131,7 @@ function __init__()
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
     # Thus use macOS 13.4 for ILP64, a correct LAPACK, and threading APIs
     if ver < v"13.4"
-        @info AppleAccelerate.jl needs macOS 13.4 or later
+        @info "AppleAccelerate.jl needs macOS 13.4 or later"
         return
     end
     load_accelerate(; clear = false, load_ilp64=true)
@@ -144,8 +144,6 @@ if Sys.isapple()
     include("libSparse/wrappers.jl")
     include("libSparse/AASparseMatrices.jl")
     include("libSparse/AAFactorizations.jl")
-    export AASparseMatrix, muladd!
-    export AAFactorization, solve, solve!, factor!
 end
 
 end # module
