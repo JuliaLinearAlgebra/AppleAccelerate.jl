@@ -1,4 +1,7 @@
 module AppleAccelerate
+
+@static if Sys.isapple()
+
 using LinearAlgebra, Libdl
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
@@ -69,10 +72,6 @@ numbering as 26.x; this function normalizes 16.x → 26.x for correct comparison
 Returns `nothing` on non-Apple platforms or if the version cannot be determined.
 """
 function _read_macos_version()
-    @static if !Sys.isapple()
-        return nothing
-    end
-
     plist_lines = split(String(read("/System/Library/CoreServices/SystemVersion.plist")), "\n")
     vers_idx = findfirst(l -> occursin("ProductVersion", l), plist_lines)
     if vers_idx === nothing
@@ -157,7 +156,6 @@ function get_num_threads()::LinearAlgebra.BlasInt
 end
 
 function __init__()
-    Sys.isapple() || return
     _macos_version[] = _read_macos_version()
     ver = _macos_version[]
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
@@ -169,13 +167,13 @@ function __init__()
     load_accelerate(; clear = false, load_ilp64=true)
 end
 
-if Sys.isapple()
-    include("Util.jl")
-    include("Array.jl")
-    include("DSP.jl")
-    include("libSparse/wrappers.jl")
-    include("libSparse/AASparseMatrices.jl")
-    include("libSparse/AAFactorizations.jl")
-end
+include("Util.jl")
+include("Array.jl")
+include("DSP.jl")
+include("libSparse/wrappers.jl")
+include("libSparse/AASparseMatrices.jl")
+include("libSparse/AAFactorizations.jl")
+
+end # @static if Sys.isapple()
 
 end # module
