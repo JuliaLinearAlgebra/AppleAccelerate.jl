@@ -372,42 +372,38 @@ function plan_destroy(setup::DFTSetup)
 end
 
 
-# const     FFT_FORWARD         = +1
-# const     FFT_INVERSE         = -1
-# const     SIGNAL_STRIDE       = 1
-#
-# typealias vDSP_Stride Clong
-# typealias vDSP_Length Culong
-# typealias FFTDirection Cint
-#
-# immutable DSPDoubleSplitComplex
-#     realp::Ptr{Float64}
-#     imagp::Ptr{Float64}
-# end
-#
-# DSPDoubleSplitComplex(realp::Vector{Float64},imagp::Vector{Float64})=DSPDoubleSplitComplex(pointer(realp),pointer(imagp))
-#
-#
-# function plan_fft(n,radix::Integer=2)
-#     @assert isinteger(log2(n))
-#     logn=round(Int,log2(n))
-#     ccall(("vDSP_create_fftsetupD",libacc),Ptr{Cvoid},(Cuint,Cint),logn,radix)
-# end
-#
-# function newfft(r::Vector{Complex128},plan)
-#     n=length(r)
-#     @assert isinteger(log2(n))
-#     logn=round(Int,log2(n))
-#
-#     realp,imagp=real(r),imag(r)         # keep references to avoid garbage collection
-#     vals=DSPDoubleSplitComplex(realp,imagp)
-#     retr,reti=Array{Float64}(undef,n),Array{Float64}(undef,n)        # keep references to avoid garbage collection
-#     ret=DSPDoubleSplitComplex(retr,reti)
-#
-#
-#     ccall(("vDSP_fft_zopD",libacc),Cvoid,
-#           (Ptr{Cvoid},DSPDoubleSplitComplex,vDSP_Stride,     DSPDoubleSplitComplex,vDSP_Stride,  vDSP_Length,FFTDirection),
-#            plan,     vals,                 SIGNAL_STRIDE,   ret,                  SIGNAL_STRIDE,logn,       FFT_FORWARD)
-#
-#     retr+im*reti
-# End
+const     FFT_FORWARD         = 1
+const     FFT_INVERSE         = -1
+const     SIGNAL_STRIDE       = 1
+
+struct DSPDoubleSplitComplex
+    realp::Ptr{Float64}
+    imagp::Ptr{Float64}
+end
+
+DSPDoubleSplitComplex(realp::Vector{Float64}, imagp::Vector{Float64}) = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
+
+function plan_fft(n, radix::Integer = 2)
+    logn = log2(n)
+    @assert isinteger(logn)
+    logn = round(Int, logn)
+    ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Cuint, Cint), logn, radix)
+end
+
+function newfft(r, plan)
+    n = length(r)
+    @assert isinteger(log2(n))
+    logn = round(Int, log2(n))
+
+    realp, imagp = real(r), imag(r)         # keep references to avoid garbage collection
+    vals = DSPDoubleSplitComplex(realp, imagp)
+    retr, reti = Array{Float64}(undef, n), Array{Float64}(undef, n)        # keep references to avoid garbage collection
+    ret = DSPDoubleSplitComplex(retr, reti)
+
+
+    ccall(("vDSP_fft_zopD",libacc), Cvoid,
+          (Ptr{Cvoid}, DSPDoubleSplitComplex, Cint, DSPDoubleSplitComplex, Cint, Cint, Cint),
+           plan, vals, SIGNAL_STRIDE, ret, SIGNAL_STRIDE, logn, FFT_FORWARD)
+
+    return retr + im*reti
+end
