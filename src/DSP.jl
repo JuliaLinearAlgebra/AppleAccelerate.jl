@@ -467,3 +467,65 @@ function fft(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT
 
     return complex.(retr, reti)
 end
+
+"""
+    fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction=FFT_FORWARD)
+
+Compute the 2D complex FFT of matrix `r` using the given `FFTSetup`.
+Both dimensions must be powers of 2. The `setup` must have been created with
+`n >= max(size(r)...)`.
+"""
+function fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=FFT_FORWARD)
+    nrows, ncols = size(r)
+    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    log2nr = trailing_zeros(nrows)
+    log2nc = trailing_zeros(ncols)
+
+    realp = real.(r)
+    imagp = imag.(r)
+    retr = Matrix{Float64}(undef, nrows, ncols)
+    reti = Matrix{Float64}(undef, nrows, ncols)
+
+    GC.@preserve realp imagp retr reti begin
+        input = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
+        output = DSPDoubleSplitComplex(pointer(retr), pointer(reti))
+        ccall(("vDSP_fft2d_zopD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Clong,
+               Ref{DSPDoubleSplitComplex}, Clong, Clong, Culong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, 0, output, SIGNAL_STRIDE, 0,
+              log2nr, log2nc, direction)
+    end
+
+    return complex.(retr, reti)
+end
+
+"""
+    fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction=FFT_FORWARD)
+
+Compute the 2D complex FFT of matrix `r` using the given `FFTSetup`.
+Both dimensions must be powers of 2. The `setup` must have been created with
+`n >= max(size(r)...)`.
+"""
+function fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT_FORWARD)
+    nrows, ncols = size(r)
+    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    log2nr = trailing_zeros(nrows)
+    log2nc = trailing_zeros(ncols)
+
+    realp = Float32.(real.(r))
+    imagp = Float32.(imag.(r))
+    retr = Matrix{Float32}(undef, nrows, ncols)
+    reti = Matrix{Float32}(undef, nrows, ncols)
+
+    GC.@preserve realp imagp retr reti begin
+        input = DSPSplitComplex(pointer(realp), pointer(imagp))
+        output = DSPSplitComplex(pointer(retr), pointer(reti))
+        ccall(("vDSP_fft2d_zop", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Clong,
+               Ref{DSPSplitComplex}, Clong, Clong, Culong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, 0, output, SIGNAL_STRIDE, 0,
+              log2nr, log2nc, direction)
+    end
+
+    return complex.(retr, reti)
+end

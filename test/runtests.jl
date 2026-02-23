@@ -255,6 +255,46 @@ end
     end
 end
 
+@testset "FFT2D::Float64" begin
+    for (nr, nc) in ((4, 4), (8, 16), (16, 8), (32, 32))
+        r = randn(ComplexF64, nr, nc)
+        plan = AppleAccelerate.plan_fft(max(nr, nc), Float64)
+        result = AppleAccelerate.fft2d(r, plan)
+        expected = FFTW.fft(r)
+        @test result ≈ expected
+    end
+end
+
+@testset "FFT2D::Float32" begin
+    for (nr, nc) in ((4, 4), (8, 16), (16, 8), (32, 32))
+        r = randn(ComplexF32, nr, nc)
+        plan = AppleAccelerate.plan_fft(max(nr, nc), Float32)
+        result = AppleAccelerate.fft2d(r, plan)
+        expected = FFTW.fft(r)
+        @test result ≈ expected rtol=sqrt(eps(Float32))
+    end
+end
+
+@testset "IFFT2D roundtrip" begin
+    for T in (ComplexF64, ComplexF32)
+        F = real(T)
+        @testset "$T" begin
+            for (nr, nc) in ((4, 8), (16, 16))
+                r = randn(T, nr, nc)
+                plan = AppleAccelerate.plan_fft(max(nr, nc), F)
+                fwd = AppleAccelerate.fft2d(r, plan, AppleAccelerate.FFT_FORWARD)
+                inv_result = AppleAccelerate.fft2d(fwd, plan, AppleAccelerate.FFT_INVERSE)
+                ntotal = nr * nc
+                if F == Float64
+                    @test inv_result ./ ntotal ≈ r
+                else
+                    @test inv_result ./ ntotal ≈ r rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+end
+
 
 for T in (Float32,  Float64)
     @testset "Convolution & Correlation::$T" begin
