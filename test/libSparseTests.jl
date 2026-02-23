@@ -205,16 +205,13 @@ import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!,
         @testset "QR factor/solve/ldiv" begin
             for T in (Float32, Float64)
                 @eval begin
-                    N = 3
-                    jlA = sprand($T, N, N, 0.5)
-                    while det(jlA) ≈ 0
-                        global jlA = sprand($T, N, N, 0.5)
-                    end
+                    N = 100
+                    # Generate a well-conditioned sparse matrix by adding a
+                    # diagonal shift, avoiding flaky failures from
+                    # ill-conditioned random matrices.
+                    jlA = sprand($T, N, N, 0.1) + $T(N) * I
                     test_fact = AAFactorization(jlA)
                     B = rand($T, N, N)
-                    if issymmetric(jlA)
-                        jlA[1,2] += 0.1
-                    end
                     @test solve(test_fact, B) ≈ Array(jlA) \ B
                     b = rand($T, N)
                     @test solve(test_fact, b) ≈ Array(jlA) \ b
