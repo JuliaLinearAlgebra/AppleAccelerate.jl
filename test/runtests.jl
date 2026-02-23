@@ -997,12 +997,13 @@ end
 
 @testset "BLAS threading tests" begin
     if AppleAccelerate.get_macos_version() >= v"15"
-        AppleAccelerate.set_num_threads(1)
+        @test AppleAccelerate.set_num_threads(1) == 1
         @test AppleAccelerate.get_num_threads() == 1
-        AppleAccelerate.set_num_threads(4)
+        @test AppleAccelerate.set_num_threads(4) > 1
         @test AppleAccelerate.get_num_threads() > 1
     else
-        @test AppleAccelerate.get_num_threads() == -1
+        @test AppleAccelerate.get_num_threads() == 1
+        @test AppleAccelerate.set_num_threads(1) == 1
     end
 end
 
