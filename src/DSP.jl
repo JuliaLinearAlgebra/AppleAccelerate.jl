@@ -383,27 +383,73 @@ end
 
 DSPDoubleSplitComplex(realp::Vector{Float64}, imagp::Vector{Float64}) = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
 
-function plan_fft(n, radix::Integer = 2)
-    logn = log2(n)
-    @assert isinteger(logn)
-    logn = round(Int, logn)
-    ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Cuint, Cint), logn, radix)
+struct DSPSplitComplex
+    realp::Ptr{Float32}
+    imagp::Ptr{Float32}
 end
 
-function newfft(r, plan)
+DSPSplitComplex(realp::Vector{Float32}, imagp::Vector{Float32}) = DSPSplitComplex(pointer(realp), pointer(imagp))
+
+function plan_fft(n::Integer, ::Type{Float64}=Float64, radix::Integer = 2)
+    @assert ispow2(n) "n must be a power of 2"
+    logn = trailing_zeros(n)
+    ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+end
+
+function plan_fft(n::Integer, ::Type{Float32}, radix::Integer = 2)
+    @assert ispow2(n) "n must be a power of 2"
+    logn = trailing_zeros(n)
+    ccall(("vDSP_create_fftsetup", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+end
+
+function destroy_fftsetup(plan::Ptr{Cvoid}, ::Type{Float64}=Float64)
+    ccall(("vDSP_destroy_fftsetupD", libacc), Cvoid, (Ptr{Cvoid},), plan)
+end
+
+function destroy_fftsetup(plan::Ptr{Cvoid}, ::Type{Float32})
+    ccall(("vDSP_destroy_fftsetup", libacc), Cvoid, (Ptr{Cvoid},), plan)
+end
+
+function fft(r::Vector{ComplexF64}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD)
     n = length(r)
-    @assert isinteger(log2(n))
-    logn = round(Int, log2(n))
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
 
-    realp, imagp = real(r), imag(r)         # keep references to avoid garbage collection
-    vals = DSPDoubleSplitComplex(realp, imagp)
-    retr, reti = Array{Float64}(undef, n), Array{Float64}(undef, n)        # keep references to avoid garbage collection
-    ret = DSPDoubleSplitComplex(retr, reti)
+    realp = real(r)
+    imagp = imag(r)
+    retr = Vector{Float64}(undef, n)
+    reti = Vector{Float64}(undef, n)
 
+    GC.@preserve realp imagp retr reti begin
+        input = DSPDoubleSplitComplex(realp, imagp)
+        output = DSPDoubleSplitComplex(retr, reti)
+        ccall(("vDSP_fft_zopD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
+               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
+              plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+    end
 
-    ccall(("vDSP_fft_zopD",libacc), Cvoid,
-          (Ptr{Cvoid}, DSPDoubleSplitComplex, Cint, DSPDoubleSplitComplex, Cint, Cint, Cint),
-           plan, vals, SIGNAL_STRIDE, ret, SIGNAL_STRIDE, logn, FFT_FORWARD)
+    return complex.(retr, reti)
+end
 
-    return retr + im*reti
+function fft(r::Vector{ComplexF32}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD)
+    n = length(r)
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
+
+    realp = Float32.(real(r))
+    imagp = Float32.(imag(r))
+    retr = Vector{Float32}(undef, n)
+    reti = Vector{Float32}(undef, n)
+
+    GC.@preserve realp imagp retr reti begin
+        input = DSPSplitComplex(realp, imagp)
+        output = DSPSplitComplex(retr, reti)
+        ccall(("vDSP_fft_zop", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
+               Ref{DSPSplitComplex}, Clong, Culong, Cint),
+              plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+    end
+
+    return complex.(retr, reti)
 end
