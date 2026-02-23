@@ -350,10 +350,11 @@ import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!,
         end
     end
     @testset "factorize" begin
-        jlM = sprand(4,4, .9)
+        # Use 100x100 to avoid singular matrices from small random sparse matrices
+        jlM = sprandn(100, 100, 0.3) + 10I
         aaM = AASparseMatrix(jlM)
         f = factorize(aaM)
-        b = rand(4)
+        b = rand(100)
         @test f \ b ≈ jlM \ b
     end
 end
