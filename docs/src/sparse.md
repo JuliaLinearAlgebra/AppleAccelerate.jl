@@ -53,7 +53,4 @@ Supported factorization types:
 
 ```@docs
 AppleAccelerate.AAFactorization
-AppleAccelerate.factor!
-AppleAccelerate.solve
-AppleAccelerate.solve!
 ```

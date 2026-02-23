@@ -16,14 +16,7 @@ X = AppleAccelerate.fft(x, setup)
 x_recovered = AppleAccelerate.fft(X, setup, AppleAccelerate.FFT_INVERSE)
 ```
 
-Both `ComplexF64` and `ComplexF32` inputs are supported.
-
-```@docs
-AppleAccelerate.plan_fft
-AppleAccelerate.fft
-AppleAccelerate.destroy_fftsetup
-AppleAccelerate.FFTSetup
-```
+Both `ComplexF64` and `ComplexF32` inputs are supported. Input length must be a power of 2.
 
 ## DCT (Discrete Cosine Transform)
 
@@ -36,25 +29,33 @@ AppleAccelerate.dct
 
 ## Convolution
 
-```@docs
-AppleAccelerate.conv
-AppleAccelerate.conv!
+`conv(X, K)` computes the convolution of vectors `X` and `K`. `conv!(result, X, K)` stores the result in a preallocated vector.
+
+```julia
+X = randn(Float64, 100)
+K = randn(Float64, 10)
+result = AppleAccelerate.conv(X, K)  # length = length(X) + length(K) - 1
 ```
 
 ## Cross-Correlation
 
-```@docs
-AppleAccelerate.xcorr
-AppleAccelerate.xcorr!
+`xcorr(X, Y)` computes the cross-correlation. `xcorr(X)` computes auto-correlation.
+
+```julia
+X = randn(Float64, 100)
+Y = randn(Float64, 100)
+result = AppleAccelerate.xcorr(X, Y)
 ```
 
 ## Biquad Filtering
 
 IIR filtering via cascaded biquad sections (Float64 only).
 
-```@docs
-AppleAccelerate.biquadcreate
-AppleAccelerate.biquad
+```julia
+coefficients = randn(5)  # 5 coefficients per section
+bq = AppleAccelerate.biquadcreate(coefficients, 1)
+delays = zeros(4)
+result = AppleAccelerate.biquad(X, delays, length(X), bq)
 ```
 
 ## Window Functions

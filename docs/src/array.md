@@ -2,7 +2,7 @@
 
 AppleAccelerate wraps Apple's vecLib (`vv*` and `vDSP_*` functions) to provide accelerated element-wise operations on `Array{Float32}` and `Array{Float64}`.
 
-These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix or use [`@replaceBase`](@ref) to override Base functions.
+These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix or use `@replaceBase` to override Base functions.
 
 ## Element-wise Math Functions
 
