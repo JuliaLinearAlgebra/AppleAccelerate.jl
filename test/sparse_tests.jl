@@ -4,7 +4,7 @@ using LinearAlgebra
 
 import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!, factor!
 
-@testset "libSparse" begin
+@testset "Sparse Linear Algebra" begin
     @testset "wrappers" begin
         @testset "SparseMultiply and SparseMultiplyAdd" begin
             # less copy-paste heavy way via meta programming features?
