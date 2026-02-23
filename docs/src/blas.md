@@ -4,7 +4,7 @@ AppleAccelerate forwards BLAS and LAPACK calls to Apple's Accelerate framework v
 
 ## Loading
 
-```julia
+```@example
 using AppleAccelerate
 ```
 
