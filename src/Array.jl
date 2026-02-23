@@ -332,9 +332,9 @@ end
 
 # ============================================================
 # vDSP Unary vector operations
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-
     for (f, fa) in ((:vneg, :vneg), (:vnabs, :vnabs), (:vsq, :vsq),
                     (:vssq, :vssq), (:vfrac, :vfrac), (:vabs, :vabs))
         f! = Symbol("$(f)!")
@@ -367,11 +367,20 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Negate each element: `result[i] = -X[i]`. Wraps [`vDSP_vneg`](https://developer.apple.com/documentation/accelerate/vdsp_vneg)." vneg
+@doc "Negative absolute value: `result[i] = -|X[i]|`. Wraps [`vDSP_vnabs`](https://developer.apple.com/documentation/accelerate/vdsp_vnabs)." vnabs
+@doc "Square each element: `result[i] = X[i]^2`. Wraps [`vDSP_vsq`](https://developer.apple.com/documentation/accelerate/vdsp_vsq)." vsq
+@doc "Signed square: `result[i] = X[i] * |X[i]|`. Wraps [`vDSP_vssq`](https://developer.apple.com/documentation/accelerate/vdsp_vssq)." vssq
+@doc "Fractional part: `result[i] = X[i] - trunc(X[i])`. Wraps [`vDSP_vfrac`](https://developer.apple.com/documentation/accelerate/vdsp_vfrac)." vfrac
+@doc "Absolute value: `result[i] = |X[i]|`. Wraps [`vDSP_vabs`](https://developer.apple.com/documentation/accelerate/vdsp_vabs)." vabs
+@doc "Reverse `X` in-place. Wraps [`vDSP_vrvrs`](https://developer.apple.com/documentation/accelerate/vdsp_vrvrs)." vreverse!
+@doc "Return a reversed copy of `X`. Wraps [`vDSP_vrvrs`](https://developer.apple.com/documentation/accelerate/vdsp_vrvrs)." vreverse
+
 # ============================================================
 # vDSP Two-vector element-wise operations
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-
     for (f, fa) in ((:vmax, :vmax), (:vmin, :vmin),
                     (:vmaxmg, :vmaxmg), (:vminmg, :vminmg),
                     (:vdist, :vdist))
@@ -390,8 +399,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # vtmerg: tapered merge — C[n] = A[n] + (B[n] - A[n]) * n/(N-1)
-    # Signature same as two-vector ops
     @eval begin
         function vtmerg!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
             ccall(($(string("vDSP_vtmerg", suff)), libacc), Cvoid,
@@ -406,8 +413,16 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Element-wise maximum: `result[i] = max(X[i], Y[i])`. Wraps [`vDSP_vmax`](https://developer.apple.com/documentation/accelerate/vdsp_vmax)." vmax
+@doc "Element-wise minimum: `result[i] = min(X[i], Y[i])`. Wraps [`vDSP_vmin`](https://developer.apple.com/documentation/accelerate/vdsp_vmin)." vmin
+@doc "Element-wise maximum magnitude: `result[i] = max(|X[i]|, |Y[i]|)`. Wraps [`vDSP_vmaxmg`](https://developer.apple.com/documentation/accelerate/vdsp_vmaxmg)." vmaxmg
+@doc "Element-wise minimum magnitude: `result[i] = min(|X[i]|, |Y[i]|)`. Wraps [`vDSP_vminmg`](https://developer.apple.com/documentation/accelerate/vdsp_vminmg)." vminmg
+@doc "Element-wise Euclidean distance: `result[i] = hypot(X[i], Y[i])`. Wraps [`vDSP_vdist`](https://developer.apple.com/documentation/accelerate/vdsp_vdist)." vdist
+@doc "Tapered merge of two vectors. Wraps [`vDSP_vtmerg`](https://developer.apple.com/documentation/accelerate/vdsp_vtmerg)." vtmerg
+
 # ============================================================
 # vDSP Scalar-vector divide: C[n] = A / B[n]
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -424,12 +439,15 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Scalar divided by vector: `result[i] = c / X[i]`. Wraps [`vDSP_svdiv`](https://developer.apple.com/documentation/accelerate/vdsp_svdiv)." svdiv
+
 # ============================================================
-# vDSP Compound arithmetic: 3-vector ops (A, B, C → D)
+# vDSP Compound arithmetic
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
-    # vam: (A+B)*C, vsbm: (A-B)*C
+    # 3-vector ops: (A, B, C → D)
     for (f, fa) in ((:vam, :vam), (:vsbm, :vsbm))
         f! = Symbol("$(f)!")
         @eval begin
@@ -446,7 +464,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # venvlp: signal envelope — same 3-vector pattern
     @eval begin
         function venvlp!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
             ccall(($(string("vDSP_venvlp", suff)), libacc), Cvoid,
@@ -460,7 +477,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # 4-vector ops (A, B, C, D → E)
+    # 4-vector ops: (A, B, C, D → E)
     for (f, fa) in ((:vaam, :vaam), (:vsbsbm, :vsbsbm), (:vasbm, :vasbm))
         f! = Symbol("$(f)!")
         @eval begin
@@ -477,7 +494,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # vpythg: sqrt((A-C)^2 + (B-D)^2) — same 4-vector pattern
     @eval begin
         function vpythg!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
             ccall(($(string("vDSP_vpythg", suff)), libacc), Cvoid,
@@ -491,7 +507,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # 2 vectors + 1 scalar → D: vasm: (A+B)*C_scalar, vsbsm: (A-B)*C_scalar
+    # 2 vectors + 1 scalar → D
     for (f, fa) in ((:vasm, :vasm), (:vsbsm, :vsbsm))
         f! = Symbol("$(f)!")
         @eval begin
@@ -508,7 +524,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # vsma: A*B_scalar + C
     @eval begin
         function vsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
             ccall(($(string("vDSP_vsma", suff)), libacc), Cvoid,
@@ -522,7 +537,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # vsmsa: A*B_scalar + C_scalar
     @eval begin
         function vsmsa!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
             ccall(($(string("vDSP_vsmsa", suff)), libacc), Cvoid,
@@ -536,7 +550,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 
-    # vaddsub: returns (A+B, A-B) as two vectors
     @eval begin
         function vaddsub!(add_result::Vector{$T}, sub_result::Vector{$T}, A::Vector{$T}, B::Vector{$T})
             ccall(($(string("vDSP_vaddsub", suff)), libacc), Cvoid,
@@ -552,8 +565,22 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Vector add and multiply: `result[i] = (A[i] + B[i]) * C[i]`. Wraps [`vDSP_vam`](https://developer.apple.com/documentation/accelerate/vdsp_vam)." vam
+@doc "Vector subtract and multiply: `result[i] = (A[i] - B[i]) * C[i]`. Wraps [`vDSP_vsbm`](https://developer.apple.com/documentation/accelerate/vdsp_vsbm)." vsbm
+@doc "Signal envelope. Wraps [`vDSP_venvlp`](https://developer.apple.com/documentation/accelerate/vdsp_venvlp)." venvlp
+@doc "Vector add, add, and multiply: `result[i] = (A[i] + B[i]) * (C[i] + D[i])`. Wraps [`vDSP_vaam`](https://developer.apple.com/documentation/accelerate/vdsp_vaam)." vaam
+@doc "Vector subtract, subtract, and multiply: `result[i] = (A[i] - B[i]) * (C[i] - D[i])`. Wraps [`vDSP_vsbsbm`](https://developer.apple.com/documentation/accelerate/vdsp_vsbsbm)." vsbsbm
+@doc "Vector add, subtract, and multiply: `result[i] = (A[i] + B[i]) * (C[i] - D[i])`. Wraps [`vDSP_vasbm`](https://developer.apple.com/documentation/accelerate/vdsp_vasbm)." vasbm
+@doc "Pythagorean distance: `result[i] = sqrt((A[i]-C[i])^2 + (B[i]-D[i])^2)`. Wraps [`vDSP_vpythg`](https://developer.apple.com/documentation/accelerate/vdsp_vpythg)." vpythg
+@doc "Vector add and scalar multiply: `result[i] = (A[i] + B[i]) * c`. Wraps [`vDSP_vasm`](https://developer.apple.com/documentation/accelerate/vdsp_vasm)." vasm
+@doc "Vector subtract and scalar multiply: `result[i] = (A[i] - B[i]) * c`. Wraps [`vDSP_vsbsm`](https://developer.apple.com/documentation/accelerate/vdsp_vsbsm)." vsbsm
+@doc "Vector scalar multiply and add: `result[i] = A[i] * b + C[i]`. Wraps [`vDSP_vsma`](https://developer.apple.com/documentation/accelerate/vdsp_vsma)." vsma
+@doc "Vector scalar multiply and scalar add: `result[i] = A[i] * b + c`. Wraps [`vDSP_vsmsa`](https://developer.apple.com/documentation/accelerate/vdsp_vsmsa)." vsmsa
+@doc "Simultaneous add and subtract: returns `(A .+ B, B .- A)`. Wraps [`vDSP_vaddsub`](https://developer.apple.com/documentation/accelerate/vdsp_vaddsub)." vaddsub
+
 # ============================================================
 # vDSP Scalar reductions: dot product, distance squared
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -574,11 +601,14 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Dot product: `sum(X .* Y)`. Wraps [`vDSP_dotpr`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr)." dot
+@doc "Squared Euclidean distance: `sum((X .- Y).^2)`. Wraps [`vDSP_distancesq`](https://developer.apple.com/documentation/accelerate/vdsp_distancesq)." distancesq
+
 # ============================================================
 # vDSP Clipping & thresholding
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-    # vclip: clip to [low, high]
     @eval begin
         function vclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
             ccall(($(string("vDSP_vclip", suff)), libacc), Cvoid,
@@ -590,10 +620,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vclip!(result, X, low, high)
         end
-    end
-
-    # viclip: inverted clip (pass through values outside [low, high])
-    @eval begin
         function viclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
             ccall(($(string("vDSP_viclip", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
@@ -604,10 +630,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             viclip!(result, X, low, high)
         end
-    end
-
-    # vthr: threshold — X[n] >= threshold ? X[n] : threshold
-    @eval begin
         function vthr!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
             ccall(($(string("vDSP_vthr", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
@@ -618,10 +640,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vthr!(result, X, threshold)
         end
-    end
-
-    # vthres: threshold — X[n] >= threshold ? X[n] : 0
-    @eval begin
         function vthres!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
             ccall(($(string("vDSP_vthres", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
@@ -632,10 +650,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vthres!(result, X, threshold)
         end
-    end
-
-    # vcmprs: compress — keep X[n] where gate[n] != 0
-    @eval begin
         function vcmprs!(result::Vector{$T}, X::Vector{$T}, gate::Vector{$T})
             ccall(($(string("vDSP_vcmprs", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
@@ -649,9 +663,22 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Clip values to `[low, high]`: `clamp.(X, low, high)`. Wraps [`vDSP_vclip`](https://developer.apple.com/documentation/accelerate/vdsp_vclip)." vclip
+@doc "Inverted clip: pass through values outside `[low, high]`, zero inside. Wraps [`vDSP_viclip`](https://developer.apple.com/documentation/accelerate/vdsp_viclip)." viclip
+@doc "Threshold: `result[i] = X[i] >= threshold ? X[i] : threshold`. Wraps [`vDSP_vthr`](https://developer.apple.com/documentation/accelerate/vdsp_vthr)." vthr
+@doc "Threshold to zero: `result[i] = X[i] >= threshold ? X[i] : 0`. Wraps [`vDSP_vthres`](https://developer.apple.com/documentation/accelerate/vdsp_vthres)." vthres
+@doc "Compress: gather elements of `X` where `gate` is nonzero. Wraps [`vDSP_vcmprs`](https://developer.apple.com/documentation/accelerate/vdsp_vcmprs)." vcmprs
+
 # ============================================================
 # vDSP Type conversion
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
+
+"""
+    vdouble(X::Vector{Float32}) -> Vector{Float64}
+
+Convert single-precision to double-precision. Wraps [`vDSP_vspdp`](https://developer.apple.com/documentation/accelerate/vdsp_vspdp).
+"""
 function vdouble(X::Vector{Float32})
     result = Vector{Float64}(undef, length(X))
     ccall(("vDSP_vspdp", libacc), Cvoid,
@@ -660,6 +687,11 @@ function vdouble(X::Vector{Float32})
     return result
 end
 
+"""
+    vsingle(X::Vector{Float64}) -> Vector{Float32}
+
+Convert double-precision to single-precision. Wraps [`vDSP_vdpsp`](https://developer.apple.com/documentation/accelerate/vdsp_vdpsp).
+"""
 function vsingle(X::Vector{Float64})
     result = Vector{Float32}(undef, length(X))
     ccall(("vDSP_vdpsp", libacc), Cvoid,
@@ -670,6 +702,7 @@ end
 
 # ============================================================
 # vDSP Ramp generation
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -680,7 +713,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                   Ref(start), Ref(step), result, 1, n)
             return result
         end
-
         function vrampmul!(result::Vector{$T}, X::Vector{$T}, start::$T, step::$T)
             s = Ref{$T}(start)
             ccall(($(string("vDSP_vrampmul", suff)), libacc), Cvoid,
@@ -695,11 +727,14 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Generate a ramp: `result[i] = start + i * step` for `i = 0, ..., n-1`. Wraps [`vDSP_vramp`](https://developer.apple.com/documentation/accelerate/vdsp_vramp)." vramp
+@doc "Multiply vector by a generated ramp. Wraps [`vDSP_vrampmul`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmul)." vrampmul
+
 # ============================================================
 # vDSP Integration & running operations
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-    # vrsum: running sum scaled by scale
     @eval begin
         function vrsum!(result::Vector{$T}, X::Vector{$T}, scale::$T)
             ccall(($(string("vDSP_vrsum", suff)), libacc), Cvoid,
@@ -711,10 +746,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vrsum!(result, X, scale)
         end
-    end
-
-    # vsimps: Simpson's rule integration
-    @eval begin
         function vsimps!(result::Vector{$T}, X::Vector{$T}, step::$T)
             ccall(($(string("vDSP_vsimps", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
@@ -725,10 +756,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vsimps!(result, X, step)
         end
-    end
-
-    # vtrapz: trapezoidal integration
-    @eval begin
         function vtrapz!(result::Vector{$T}, X::Vector{$T}, step::$T)
             ccall(($(string("vDSP_vtrapz", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
@@ -739,10 +766,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(X)
             vtrapz!(result, X, step)
         end
-    end
-
-    # vswsum: sliding window sum
-    @eval begin
         function vswsum!(result::Vector{$T}, X::Vector{$T}, window::Integer)
             n_out = length(X) - window + 1
             ccall(($(string("vDSP_vswsum", suff)), libacc), Cvoid,
@@ -755,10 +778,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = Vector{$T}(undef, n_out)
             vswsum!(result, X, window)
         end
-    end
-
-    # vswmax: sliding window maximum
-    @eval begin
         function vswmax!(result::Vector{$T}, X::Vector{$T}, window::Integer)
             n_out = length(X) - window + 1
             ccall(($(string("vDSP_vswmax", suff)), libacc), Cvoid,
@@ -774,11 +793,17 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Running sum scaled by `scale`. Wraps [`vDSP_vrsum`](https://developer.apple.com/documentation/accelerate/vdsp_vrsum)." vrsum
+@doc "Simpson's rule integration with step size `step`. Wraps [`vDSP_vsimps`](https://developer.apple.com/documentation/accelerate/vdsp_vsimps)." vsimps
+@doc "Trapezoidal integration with step size `step`. Wraps [`vDSP_vtrapz`](https://developer.apple.com/documentation/accelerate/vdsp_vtrapz)." vtrapz
+@doc "Sliding window sum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswsum`](https://developer.apple.com/documentation/accelerate/vdsp_vswsum)." vswsum
+@doc "Sliding window maximum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswmax`](https://developer.apple.com/documentation/accelerate/vdsp_vswmax)." vswmax
+
 # ============================================================
 # vDSP Interpolation
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-    # vintb: interpolate D[n] = A[n] + t*(B[n]-A[n])
     @eval begin
         function vintb!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, t::$T)
             ccall(($(string("vDSP_vintb", suff)), libacc), Cvoid,
@@ -790,10 +815,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = similar(A)
             vintb!(result, A, B, t)
         end
-    end
-
-    # vlint: linear interpolation lookup
-    @eval begin
         function vlint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
             ccall(($(string("vDSP_vlint", suff)), libacc), Cvoid,
                   (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
@@ -804,10 +825,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = Vector{$T}(undef, length(indices))
             vlint!(result, table, indices)
         end
-    end
-
-    # vqint: quadratic interpolation lookup
-    @eval begin
         function vqint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
             ccall(($(string("vDSP_vqint", suff)), libacc), Cvoid,
                   (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
@@ -821,8 +838,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc "Vector interpolation: `result[i] = A[i] + t * (B[i] - A[i])`. Wraps [`vDSP_vintb`](https://developer.apple.com/documentation/accelerate/vdsp_vintb)." vintb
+@doc "Linear interpolation from a lookup table using fractional `indices`. Wraps [`vDSP_vlint`](https://developer.apple.com/documentation/accelerate/vdsp_vlint)." vlint
+@doc "Quadratic interpolation from a lookup table using fractional `indices`. Wraps [`vDSP_vqint`](https://developer.apple.com/documentation/accelerate/vdsp_vqint)." vqint
+
 # ============================================================
 # vDSP Polynomial evaluation
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -839,8 +861,16 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc """
+    vpoly(coeffs, X)
+
+Evaluate polynomial at each point in `X`. Coefficients are highest degree first:
+`[a_P, a_{P-1}, ..., a_1, a_0]`. Wraps [`vDSP_vpoly`](https://developer.apple.com/documentation/accelerate/vdsp_vpoly).
+""" vpoly
+
 # ============================================================
 # vDSP Normalization
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -859,8 +889,17 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc """
+    vnormalize(X) -> (normalized, mean, stddev)
+
+Normalize vector to zero mean and unit standard deviation: `(X .- mean) ./ stddev`.
+Returns a tuple of `(normalized_vector, mean, stddev)`.
+Wraps [`vDSP_normalize`](https://developer.apple.com/documentation/accelerate/vdsp_normalize).
+""" vnormalize
+
 # ============================================================
 # vDSP Zero crossings
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -879,8 +918,17 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+@doc """
+    nzcros(X, max_crossings=0) -> (indices, count)
+
+Find zero crossings in `X`. Returns a tuple of `(crossing_indices, count)`.
+If `max_crossings <= 0`, searches for up to `length(X)` crossings.
+Wraps [`vDSP_nzcros`](https://developer.apple.com/documentation/accelerate/vdsp_nzcros).
+""" nzcros
+
 # ============================================================
 # vDSP Decibel conversion
+# See: https://developer.apple.com/documentation/accelerate/vdsp
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
@@ -897,4 +945,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 end
+
+@doc """
+    vdbcon(X, ref, power=true)
+
+Convert to decibels relative to `ref`. If `power=true`, computes `10*log10(X/ref)`;
+if `power=false`, computes `20*log10(X/ref)`.
+Wraps [`vDSP_vdbcon`](https://developer.apple.com/documentation/accelerate/vdsp_vdbcon).
+""" vdbcon
 

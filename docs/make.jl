@@ -5,11 +5,11 @@ makedocs(;
     sitename = "AppleAccelerate.jl",
     modules = [AppleAccelerate],
     pages = [
-        "Home" => "index.md",
-        "BLAS & LAPACK" => "blas.md",
+        "Getting Started" => "index.md",
         "Array Operations" => "array.md",
-        "DSP & FFT" => "dsp.md",
+        "Dense Linear Algebra" => "blas.md",
         "Sparse Linear Algebra" => "sparse.md",
+        "Signal Processing" => "dsp.md",
         "API Reference" => "api.md",
     ],
     format = Documenter.HTML(;
