@@ -157,7 +157,7 @@ function get_num_threads()::LinearAlgebra.BlasInt
 end
 
 function __init__()
-    Sys.isapple() || return
+    @static !Sys.isapple() && return
     _macos_version[] = _read_macos_version()
     ver = _macos_version[]
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
@@ -169,7 +169,7 @@ function __init__()
     load_accelerate(; clear = false, load_ilp64=true)
 end
 
-if Sys.isapple()
+@static if Sys.isapple()
     include("Util.jl")
     include("Array.jl")
     include("DSP.jl")
