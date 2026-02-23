@@ -4,6 +4,9 @@ using LinearAlgebra, Libdl
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
 
+# Cached macOS version, populated once in __init__()
+const _macos_version = Ref{Union{Nothing,VersionNumber}}(nothing)
+
 # VecLib Threading API: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/vecLib.framework/Headers/thread_api.h
 @enum Threading::Cuint begin
     BLAS_THREADING_MULTI_THREADED
@@ -40,10 +43,6 @@ from Accelerate, such as `gemmt`. Attempts to load the ILP64 symbols if `load_il
 function load_accelerate(; clear::Bool = false,
                            verbose::Bool = false,
                            load_ilp64::Bool = true)
-    # Silently exit on non-Accelerate-capable platforms
-    @static if !Sys.isapple()
-        return
-    end
     libacc_hdl = dlopen_e(libacc)
     if libacc_hdl == C_NULL
         return
@@ -51,7 +50,7 @@ function load_accelerate(; clear::Bool = false,
 
     # Check to see if we can load ILP64 symbols
     if load_ilp64 && dlsym_e(libacc_hdl, "dgemm\$NEWLAPACK\$ILP64") == C_NULL
-        @error "Unable to load ILP64 interface from '$(libacc)'; You are running macOS version $(get_macos_version()), you need v13.4+"
+        error("Unable to load ILP64 interface from '$(libacc)'; you are running macOS $(get_macos_version()), you need v13.4+")
     end
 
     # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
@@ -62,13 +61,14 @@ function load_accelerate(; clear::Bool = false,
 end
 
 """
-    get_macos_version(normalize=true)
+    _read_macos_version()
 
-Return the current macOS version as a `VersionNumber`. If `normalize` is `true`,
-macOS 16.x versions are reported as 26.x to maintain monotonic ordering.
+Read the macOS version from the system plist and return it as a `VersionNumber`.
+Early macOS Tahoe betas reported version 16.x before Apple finalized the version
+numbering as 26.x; this function normalizes 16.x → 26.x for correct comparisons.
 Returns `nothing` on non-Apple platforms or if the version cannot be determined.
 """
-function get_macos_version(normalize=true)
+function _read_macos_version()
     @static if !Sys.isapple()
         return nothing
     end
@@ -85,26 +85,41 @@ function get_macos_version(normalize=true)
     end
 
     ver = VersionNumber(only(m.captures))
-    if normalize && ver.major == 16
+    # Early macOS Tahoe developer betas reported 16.x before Apple settled on 26.x
+    if ver.major == 16
         return VersionNumber(26, ver.minor, ver.patch)
     end
     return ver
 end
 
 """
-    set_num_threads(n::BlasInt)
+    get_macos_version()
+
+Return the current macOS version as a `VersionNumber`.
+Returns `nothing` on non-Apple platforms or if the version cannot be determined.
+"""
+function get_macos_version()
+    ver = _macos_version[]
+    if ver === nothing
+        # Fallback: read directly if called before __init__ (e.g., during precompilation)
+        return _read_macos_version()
+    end
+    return ver
+end
+
+"""
+    set_num_threads(n::Integer) -> BlasInt
 
 Set the number of threads used by Accelerate BLAS. If `n == 1`, use single-threaded mode;
-if `n > 1`, use multi-threaded mode. Requires macOS 15 or later.
+if `n > 1`, use multi-threaded mode. Returns the resulting thread count (from
+[`get_num_threads`](@ref)). On macOS < 15 where the threading API is unavailable,
+warns and returns `1`.
 """
-function set_num_threads(n::LinearAlgebra.BlasInt)
-    @static if Sys.isapple()
-        if get_macos_version() < v"15"
-            @warn "The threading API is only available in macOS 15 and later"
-            return -1
-        end
-    else
-        return -1
+function set_num_threads(n::Integer)
+    ver = get_macos_version()
+    if ver === nothing || ver < v"15"
+        @warn "The Accelerate threading API requires macOS 15 or later; ignoring" maxlog=1
+        return LinearAlgebra.BlasInt(1)
     end
 
     retval::Cint = -1
@@ -113,25 +128,22 @@ function set_num_threads(n::LinearAlgebra.BlasInt)
     elseif n > 1
         retval = ccall((:BLASSetThreading, libacc), Cint, (Cint,), BLAS_THREADING_MULTI_THREADED)
     end
-    @assert retval == 0 "AppleAccelerate: Call to BlasSetThreading failed"
-    return nothing
+    @assert retval == 0 "AppleAccelerate: Call to BLASSetThreading failed"
+    return get_num_threads()
 end
 
 """
     get_num_threads() -> BlasInt
 
 Return the number of threads used by Accelerate BLAS. Returns `1` for single-threaded mode,
-or the actual thread count for multi-threaded mode. Returns `-1` on non-Apple platforms
-or macOS versions earlier than 15.
+or the actual thread count for multi-threaded mode. On macOS < 15 where the threading API
+is unavailable, warns and returns `1`.
 """
 function get_num_threads()::LinearAlgebra.BlasInt
-    @static if Sys.isapple()
-        if get_macos_version() < v"15"
-            @warn "The threading API is only available in macOS 15 and later"
-            return -1
-        end
-    else
-        return -1
+    ver = get_macos_version()
+    if ver === nothing || ver < v"15"
+        @warn "The Accelerate threading API requires macOS 15 or later" maxlog=1
+        return LinearAlgebra.BlasInt(1)
     end
 
     retval::Threading = ccall((:BLASGetThreading, libacc), Threading, ())
@@ -140,18 +152,18 @@ function get_num_threads()::LinearAlgebra.BlasInt
     elseif retval == BLAS_THREADING_MULTI_THREADED
         return ccall((:APPLE_NTHREADS, libacc), LinearAlgebra.BlasInt, ())
     else
-        @error "AppleAccelerate: Call to BlasGetThreading failed"
+        error("AppleAccelerate: BLASGetThreading returned unexpected value: $(retval)")
     end
 end
 
 function __init__()
     Sys.isapple() || return
-    ver = get_macos_version()
-    # Default to loading the ILP64 interface on macOS 13.3+
+    _macos_version[] = _read_macos_version()
+    ver = _macos_version[]
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
     # Thus use macOS 13.4 for ILP64, a correct LAPACK, and threading APIs
-    if ver < v"13.4"
-        @info "AppleAccelerate.jl needs macOS 13.4 or later"
+    if ver === nothing || ver < v"13.4"
+        @info "AppleAccelerate.jl needs macOS 13.4 or later for BLAS/LAPACK forwarding"
         return
     end
     load_accelerate(; clear = false, load_ilp64=true)
