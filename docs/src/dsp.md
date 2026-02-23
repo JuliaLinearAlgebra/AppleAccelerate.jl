@@ -23,6 +23,23 @@ nothing # hide
 
 Both `ComplexF64` and `ComplexF32` inputs are supported. Input length must be a power of 2.
 
+## 2D FFT
+
+```@example dsp
+# Create an FFT plan (must accommodate the largest dimension)
+setup = AppleAccelerate.plan_fft(32, Float64)
+
+# Forward 2D FFT
+x = randn(ComplexF64, 16, 32)
+X = AppleAccelerate.fft2d(x, setup)
+
+# Inverse 2D FFT (unnormalized — divide by nrows*ncols to recover original)
+x_recovered = AppleAccelerate.fft2d(X, setup, AppleAccelerate.FFT_INVERSE) ./ (16 * 32)
+nothing # hide
+```
+
+Both dimensions must be powers of 2. The `FFTSetup` must be created with `n >= max(nrows, ncols)`.
+
 ## DCT (Discrete Cosine Transform)
 
 Float32 only. Supports DCT types II, III, and IV.
