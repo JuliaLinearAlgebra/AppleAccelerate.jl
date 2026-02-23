@@ -2,11 +2,15 @@
 
 AppleAccelerate wraps Apple's `libSparse` library for sparse matrix operations and direct solvers.
 
+```@setup sparse
+using AppleAccelerate, SparseArrays, LinearAlgebra
+```
+
 ## AASparseMatrix
 
 A wrapper around Apple's sparse matrix format, constructed from Julia's `SparseMatrixCSC`.
 
-```julia
+```@example sparse
 using AppleAccelerate, SparseArrays
 import AppleAccelerate: AASparseMatrix, muladd!
 
@@ -15,6 +19,7 @@ A = AASparseMatrix(A_jl)
 
 x = randn(100)
 y = A * x  # Sparse matrix-vector multiply
+nothing # hide
 ```
 
 The constructor automatically detects symmetric and triangular structure and sets
@@ -30,7 +35,7 @@ AppleAccelerate.muladd!
 Lazy factorization wrapper: the factorization is computed on the first call to `solve`
 or by explicitly calling `factor!`.
 
-```julia
+```@example sparse
 import AppleAccelerate: AAFactorization, solve, solve!, factor!
 
 A = sprandn(100, 100, 0.1) + 20I
@@ -43,6 +48,7 @@ x = solve(f, b)
 # Or explicitly
 factor!(f)
 x = solve(f, b)
+nothing # hide
 ```
 
 Supported factorization types:
