@@ -218,3 +218,51 @@ AppleAccelerate overrides `Base.copy` and `Base.copyto!` for `Broadcasted` objec
 ```@docs
 AppleAccelerate.@replaceBase
 ```
+
+## Benchmarks
+
+Performance comparison of vDSP array operations vs Julia Base equivalents (`map(Base.f, X)` for unary, `@simd` loops for binary/compound). Run with `julia --project=test/bench test/bench/run_benchmarks.jl array` ([source](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_array.jl)).
+
+### Unary Math Functions
+
+Transcendental functions show the biggest gains — vDSP is 7–19× faster for `sin`/`cos` on Float32:
+
+| Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
+|----|------|---|-----------|------------|---------|
+| exp | Float64 | 100,000 | 171 | 440 | 2.6× |
+| log | Float64 | 100,000 | 191 | 652 | 3.4× |
+| sin | Float64 | 100,000 | 152 | 1,051 | 6.9× |
+| cos | Float64 | 100,000 | 160 | 1,083 | 6.8× |
+| sqrt | Float64 | 100,000 | 42 | 97 | 2.3× |
+| exp | Float32 | 100,000 | 60 | 464 | 7.8× |
+| log | Float32 | 100,000 | 80 | 542 | 6.8× |
+| sin | Float32 | 100,000 | 54 | 1,012 | 18.8× |
+| cos | Float32 | 100,000 | 55 | 1,035 | 18.9× |
+| sqrt | Float32 | 100,000 | 40 | 98 | 2.5× |
+
+### Reductions
+
+`sum`/`maximum`/`minimum` are 1.1–2× faster. Note: `dot` is slower via vDSP because Julia's `LinearAlgebra.dot` already uses the Accelerate-forwarded BLAS:
+
+| Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
+|----|------|---|-----------|------------|---------|
+| sum | Float64 | 1,000,000 | 128 | 143 | 1.1× |
+| maximum | Float64 | 1,000,000 | 128 | 136 | 1.1× |
+| minimum | Float64 | 1,000,000 | 127 | 134 | 1.1× |
+| sum | Float32 | 1,000,000 | 62 | 77 | 1.2× |
+| maximum | Float32 | 1,000,000 | 62 | 71 | 1.1× |
+| minimum | Float32 | 1,000,000 | 63 | 71 | 1.1× |
+
+### Binary Element-wise Ops
+
+Addition and multiplication are memory-bandwidth-bound for Float64; vDSP is faster for Float32 at large sizes:
+
+| Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
+|----|------|---|-----------|------------|---------|
+| vadd | Float64 | 1,000,000 | 354 | 360 | 1.0× |
+| vmul | Float64 | 1,000,000 | 343 | 340 | 1.0× |
+| vadd | Float32 | 1,000,000 | 133 | 167 | 1.3× |
+| vmul | Float32 | 1,000,000 | 87 | 167 | 1.9× |
+
+!!! note "Benchmark environment"
+    Apple M2 Max, macOS 26, single-threaded. Julia 1.12.5, AppleAccelerate v0.6.0, LinearAlgebra v1.12.0. Times are minimum of 5 trials. Julia reference uses `map(Base.f, X)` for unary ops and `@inbounds @simd` loops for binary/compound ops. Run [`bench_array.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_array.jl) to reproduce.

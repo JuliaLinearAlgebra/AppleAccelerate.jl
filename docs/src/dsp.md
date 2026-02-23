@@ -98,6 +98,45 @@ Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dim
 !!! note
     Real FFT (`rfft`, `irfft`, `brfft`) is available only via the direct `AppleAccelerate.*` API and is not wired into the AbstractFFTs extension, to avoid dispatch conflicts with other packages that call `rfft` internally on non-power-of-2 inputs.
 
+### FFT Benchmarks
+
+Pre-planned FFT performance comparing Apple vDSP against FFTW, both single-threaded. Run the full benchmark suite with `julia --project=test/bench test/bench/run_benchmarks.jl fft` ([source](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl)).
+
+**Complex 1D FFT** — vDSP and FFTW are closely matched. vDSP is notably faster at N=4096; at larger sizes FFTW has a slight edge:
+
+| Type | N | vDSP (μs) | FFTW (μs) | Speedup |
+|------|---|-----------|-----------|---------|
+| ComplexF64 | 1,024 | 7.0 | 7.1 | 1.01× |
+| ComplexF64 | 4,096 | 20.5 | 34.1 | 1.67× |
+| ComplexF64 | 65,536 | 718 | 653 | 0.91× |
+| ComplexF64 | 1,048,576 | 18,767 | 17,208 | 0.92× |
+| ComplexF32 | 1,024 | 3.1 | 3.1 | 1.01× |
+| ComplexF32 | 4,096 | 11.5 | 18.4 | 1.61× |
+| ComplexF32 | 65,536 | 329 | 323 | 0.98× |
+| ComplexF32 | 1,048,576 | 4,891 | 4,753 | 0.97× |
+
+**Real FFT** — For Float32, vDSP is faster at larger sizes (up to 2.2×). Float64 rfft favors FFTW:
+
+| Type | N | vDSP (μs) | FFTW (μs) | Speedup |
+|------|---|-----------|-----------|---------|
+| Float64 | 1,024 | 3.8 | 1.6 | 0.42× |
+| Float64 | 65,536 | 360 | 209 | 0.58× |
+| Float32 | 4,096 | 7.0 | 7.6 | 1.09× |
+| Float32 | 65,536 | 115 | 169 | 1.47× |
+| Float32 | 262,144 | 539 | 1,166 | 2.16× |
+
+**Complex 2D FFT** — Nearly identical performance:
+
+| Type | Size | vDSP (μs) | FFTW (μs) | Speedup |
+|------|------|-----------|-----------|---------|
+| ComplexF64 | 64×64 | 47 | 47 | 1.00× |
+| ComplexF64 | 256×256 | 4,659 | 4,708 | 1.01× |
+| ComplexF32 | 64×64 | 18 | 22 | 1.19× |
+| ComplexF32 | 256×256 | 321 | 325 | 1.01× |
+
+!!! note "Benchmark environment"
+    Apple M2 Max, macOS 26, single-threaded. Julia 1.12.5, AppleAccelerate v0.6.0, FFTW v1.10.0. Times are minimum of 5 trials. Both use pre-planned transforms. Run [`bench_fft.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl) to reproduce.
+
 ## DCT (Discrete Cosine Transform)
 
 Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/accelerate/discrete_cosine_transforms). Float32 only. Supports DCT types II, III, and IV.
