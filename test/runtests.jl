@@ -183,7 +183,6 @@ end
         result = AppleAccelerate.fft(r, plan)
         expected = FFTW.fft(r)
         @test result ≈ expected
-        AppleAccelerate.destroy_fftsetup(plan, Float64)
     end
 end
 
@@ -194,7 +193,6 @@ end
         result = AppleAccelerate.fft(r, plan)
         expected = FFTW.fft(r)
         @test result ≈ expected rtol=sqrt(eps(Float32))
-        AppleAccelerate.destroy_fftsetup(plan, Float32)
     end
 end
 
@@ -211,14 +209,12 @@ end
     @test abs(result[1]) < 1e-12
     @test abs(result[3]) < 1e-12
     @test abs(result[4]) < 1e-12
-    AppleAccelerate.destroy_fftsetup(plan4, Float64)
 
     # Parseval's theorem: sum(|x|^2) == sum(|X|^2) / N
     plan256 = AppleAccelerate.plan_fft(256, Float64)
     x = randn(ComplexF64, 256)
     X = AppleAccelerate.fft(x, plan256)
     @test sum(abs2, x) ≈ sum(abs2, X) / 256
-    AppleAccelerate.destroy_fftsetup(plan256, Float64)
 
     # Linearity: FFT(a*x + b*y) == a*FFT(x) + b*FFT(y)
     plan128 = AppleAccelerate.plan_fft(128, Float64)
@@ -227,7 +223,6 @@ end
     a, b = 3.0 + 1.0im, -2.0 + 0.5im
     @test AppleAccelerate.fft(ComplexF64.(a .* x1 .+ b .* x2), plan128) ≈
           a .* AppleAccelerate.fft(x1, plan128) .+ b .* AppleAccelerate.fft(x2, plan128)
-    AppleAccelerate.destroy_fftsetup(plan128, Float64)
 
     # Circular shift property: left shift by m multiplies FFT by e^{+2πi m k/N}
     plan64 = AppleAccelerate.plan_fft(64, Float64)
@@ -238,7 +233,6 @@ end
     X_shifted = AppleAccelerate.fft(x_shifted, plan64)
     phase = [exp(2π * im * m * k / 64) for k in 0:63]
     @test X_shifted ≈ X .* phase
-    AppleAccelerate.destroy_fftsetup(plan64, Float64)
 end
 
 @testset "IFFT roundtrip" begin
@@ -256,7 +250,6 @@ end
                 else
                     @test inv ./ n ≈ r rtol=sqrt(eps(Float32))
                 end
-                AppleAccelerate.destroy_fftsetup(plan, F)
             end
         end
     end

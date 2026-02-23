@@ -390,27 +390,41 @@ end
 
 DSPSplitComplex(realp::Vector{Float32}, imagp::Vector{Float32}) = DSPSplitComplex(pointer(realp), pointer(imagp))
 
-function plan_fft(n::Integer, ::Type{Float64}=Float64, radix::Integer = 2)
-    @assert ispow2(n) "n must be a power of 2"
-    logn = trailing_zeros(n)
-    ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+mutable struct FFTSetup{T}
+    plan::Ptr{Cvoid}
+
+    function FFTSetup{Float64}(n::Integer, radix::Integer = 2)
+        @assert ispow2(n) "n must be a power of 2"
+        logn = trailing_zeros(n)
+        plan = ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+        setup = new{Float64}(plan)
+        finalizer(destroy_fftsetup, setup)
+        setup
+    end
+
+    function FFTSetup{Float32}(n::Integer, radix::Integer = 2)
+        @assert ispow2(n) "n must be a power of 2"
+        logn = trailing_zeros(n)
+        plan = ccall(("vDSP_create_fftsetup", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+        setup = new{Float32}(plan)
+        finalizer(destroy_fftsetup, setup)
+        setup
+    end
 end
 
-function plan_fft(n::Integer, ::Type{Float32}, radix::Integer = 2)
-    @assert ispow2(n) "n must be a power of 2"
-    logn = trailing_zeros(n)
-    ccall(("vDSP_create_fftsetup", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+function plan_fft(n::Integer, ::Type{T}=Float64, radix::Integer = 2) where T <: Union{Float32, Float64}
+    FFTSetup{T}(n, radix)
 end
 
-function destroy_fftsetup(plan::Ptr{Cvoid}, ::Type{Float64}=Float64)
-    ccall(("vDSP_destroy_fftsetupD", libacc), Cvoid, (Ptr{Cvoid},), plan)
+function destroy_fftsetup(setup::FFTSetup{Float64})
+    ccall(("vDSP_destroy_fftsetupD", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
 end
 
-function destroy_fftsetup(plan::Ptr{Cvoid}, ::Type{Float32})
-    ccall(("vDSP_destroy_fftsetup", libacc), Cvoid, (Ptr{Cvoid},), plan)
+function destroy_fftsetup(setup::FFTSetup{Float32})
+    ccall(("vDSP_destroy_fftsetup", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
 end
 
-function fft(r::Vector{ComplexF64}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD)
+function fft(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=FFT_FORWARD)
     n = length(r)
     @assert ispow2(n) "length of input must be a power of 2"
     logn = trailing_zeros(n)
@@ -426,13 +440,13 @@ function fft(r::Vector{ComplexF64}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD
         ccall(("vDSP_fft_zopD", libacc), Cvoid,
               (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
                Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
-              plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
     end
 
     return complex.(retr, reti)
 end
 
-function fft(r::Vector{ComplexF32}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD)
+function fft(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT_FORWARD)
     n = length(r)
     @assert ispow2(n) "length of input must be a power of 2"
     logn = trailing_zeros(n)
@@ -448,7 +462,7 @@ function fft(r::Vector{ComplexF32}, plan::Ptr{Cvoid}, direction::Int=FFT_FORWARD
         ccall(("vDSP_fft_zop", libacc), Cvoid,
               (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
                Ref{DSPSplitComplex}, Clong, Culong, Cint),
-              plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
     end
 
     return complex.(retr, reti)
