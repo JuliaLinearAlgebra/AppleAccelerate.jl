@@ -56,8 +56,8 @@ nothing # hide
 using AppleAccelerate
 
 x = randn(ComplexF64, 1024)
-setup = AppleAccelerate.plan_fft(length(x))
-y = AppleAccelerate.fft(x, setup)
+X = AppleAccelerate.fft(x)
+x_recovered = AppleAccelerate.ifft(X)
 nothing # hide
 ```
 

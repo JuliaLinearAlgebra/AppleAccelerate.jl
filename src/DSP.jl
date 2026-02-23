@@ -416,6 +416,15 @@ function plan_fft(n::Integer, ::Type{T}=Float64, radix::Integer = 2) where T <: 
     FFTSetup{T}(n, radix)
 end
 
+function plan_fft(x::Vector{Complex{T}}) where T <: Union{Float32, Float64}
+    FFTSetup{T}(length(x))
+end
+
+function plan_fft(x::Matrix{Complex{T}}) where T <: Union{Float32, Float64}
+    nrows, ncols = size(x)
+    FFTSetup{T}(max(nrows, ncols))
+end
+
 function destroy_fftsetup(setup::FFTSetup{Float64})
     ccall(("vDSP_destroy_fftsetupD", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
 end
@@ -424,7 +433,9 @@ function destroy_fftsetup(setup::FFTSetup{Float32})
     ccall(("vDSP_destroy_fftsetup", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
 end
 
-function fft(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=FFT_FORWARD)
+# --- Internal 1D FFT (direction-based) ---
+
+function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     n = length(r)
     @assert ispow2(n) "length of input must be a power of 2"
     logn = trailing_zeros(n)
@@ -446,7 +457,7 @@ function fft(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=FFT
     return complex.(retr, reti)
 end
 
-function fft(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT_FORWARD)
+function _fft1d(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     n = length(r)
     @assert ispow2(n) "length of input must be a power of 2"
     logn = trailing_zeros(n)
@@ -468,14 +479,9 @@ function fft(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT
     return complex.(retr, reti)
 end
 
-"""
-    fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction=FFT_FORWARD)
+# --- Internal 2D FFT (direction-based) ---
 
-Compute the 2D complex FFT of matrix `r` using the given `FFTSetup`.
-Both dimensions must be powers of 2. The `setup` must have been created with
-`n >= max(size(r)...)`.
-"""
-function fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=FFT_FORWARD)
+function _fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     nrows, ncols = size(r)
     @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
     log2nr = trailing_zeros(nrows)
@@ -499,14 +505,7 @@ function fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int=F
     return complex.(retr, reti)
 end
 
-"""
-    fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction=FFT_FORWARD)
-
-Compute the 2D complex FFT of matrix `r` using the given `FFTSetup`.
-Both dimensions must be powers of 2. The `setup` must have been created with
-`n >= max(size(r)...)`.
-"""
-function fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=FFT_FORWARD)
+function _fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     nrows, ncols = size(r)
     @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
     log2nr = trailing_zeros(nrows)
@@ -529,3 +528,24 @@ function fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int=F
 
     return complex.(retr, reti)
 end
+
+# --- Public API: fft (forward FFT) ---
+
+fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
+fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
+fft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x))
+fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x))
+
+# --- Public API: bfft (backward/unnormalized inverse FFT) ---
+
+bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
+bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
+bfft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft(x))
+bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft(x))
+
+# --- Public API: ifft (normalized inverse FFT) ---
+
+ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
+ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
+ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
+ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))

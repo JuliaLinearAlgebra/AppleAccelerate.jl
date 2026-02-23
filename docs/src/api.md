@@ -16,7 +16,7 @@
 
 ## DSP & FFT
 
-- `plan_fft`, `fft`, `destroy_fftsetup` — FFT (Float32 and Float64)
+- `fft`, `ifft`, `bfft`, `plan_fft` — FFT (Float32 and Float64, 1D and 2D)
 - [`AppleAccelerate.plan_dct`](@ref), [`AppleAccelerate.dct`](@ref) — DCT (Float32 only)
 - `conv`, `conv!` — Convolution
 - `xcorr`, `xcorr!` — Cross-correlation
