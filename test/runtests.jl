@@ -1,6 +1,6 @@
 using LinearAlgebra
 using AppleAccelerate
-using DSP, Test, Random, Statistics
+using DSP, FFTW, Test, Random, Statistics
 
 if !Sys.isapple()
     @info("AppleAccelerate.jl will be tested only on macOS. Exiting.")
@@ -174,6 +174,85 @@ end
     plan_accel = AppleAccelerate.plan_dct(length(r), 2)
     d2=AppleAccelerate.dct(r, plan_accel)
     @test norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32)
+end
+
+@testset "FFT::Float64" begin
+    for n in (16, 256, 1024)
+        r = randn(ComplexF64, n)
+        plan = AppleAccelerate.plan_fft(n, Float64)
+        result = AppleAccelerate.fft(r, plan)
+        expected = FFTW.fft(r)
+        @test result ≈ expected
+    end
+end
+
+@testset "FFT::Float32" begin
+    for n in (16, 256, 1024)
+        r = randn(ComplexF32, n)
+        plan = AppleAccelerate.plan_fft(n, Float32)
+        result = AppleAccelerate.fft(r, plan)
+        expected = FFTW.fft(r)
+        @test result ≈ expected rtol=sqrt(eps(Float32))
+    end
+end
+
+@testset "FFT known values" begin
+    # DFT of unit impulse is all ones
+    plan4 = AppleAccelerate.plan_fft(4, Float64)
+    @test AppleAccelerate.fft(ComplexF64[1, 0, 0, 0], plan4) ≈ ComplexF64[1, 1, 1, 1]
+    # DFT of constant is scaled impulse
+    @test AppleAccelerate.fft(ComplexF64[1, 1, 1, 1], plan4) ≈ ComplexF64[4, 0, 0, 0]
+    # DFT of single frequency: e^{2πi k/N} for k=0..N-1 has DFT = N δ_{1}
+    r = [exp(2π * im * k / 4) for k in 0:3]
+    result = AppleAccelerate.fft(ComplexF64.(r), plan4)
+    @test abs(result[2]) ≈ 4.0 atol=1e-12
+    @test abs(result[1]) < 1e-12
+    @test abs(result[3]) < 1e-12
+    @test abs(result[4]) < 1e-12
+
+    # Parseval's theorem: sum(|x|^2) == sum(|X|^2) / N
+    plan256 = AppleAccelerate.plan_fft(256, Float64)
+    x = randn(ComplexF64, 256)
+    X = AppleAccelerate.fft(x, plan256)
+    @test sum(abs2, x) ≈ sum(abs2, X) / 256
+
+    # Linearity: FFT(a*x + b*y) == a*FFT(x) + b*FFT(y)
+    plan128 = AppleAccelerate.plan_fft(128, Float64)
+    x1 = randn(ComplexF64, 128)
+    x2 = randn(ComplexF64, 128)
+    a, b = 3.0 + 1.0im, -2.0 + 0.5im
+    @test AppleAccelerate.fft(ComplexF64.(a .* x1 .+ b .* x2), plan128) ≈
+          a .* AppleAccelerate.fft(x1, plan128) .+ b .* AppleAccelerate.fft(x2, plan128)
+
+    # Circular shift property: left shift by m multiplies FFT by e^{+2πi m k/N}
+    plan64 = AppleAccelerate.plan_fft(64, Float64)
+    x = randn(ComplexF64, 64)
+    m = 7
+    x_shifted = circshift(x, -m)
+    X = AppleAccelerate.fft(x, plan64)
+    X_shifted = AppleAccelerate.fft(x_shifted, plan64)
+    phase = [exp(2π * im * m * k / 64) for k in 0:63]
+    @test X_shifted ≈ X .* phase
+end
+
+@testset "IFFT roundtrip" begin
+    for T in (ComplexF64, ComplexF32)
+        F = real(T)
+        @testset "$T" begin
+            for n in (16, 256, 1024)
+                r = randn(T, n)
+                plan = AppleAccelerate.plan_fft(n, F)
+                fwd = AppleAccelerate.fft(r, plan, AppleAccelerate.FFT_FORWARD)
+                inv = AppleAccelerate.fft(fwd, plan, AppleAccelerate.FFT_INVERSE)
+                # vDSP inverse FFT does not divide by n, so we do it ourselves
+                if F == Float64
+                    @test inv ./ n ≈ r
+                else
+                    @test inv ./ n ≈ r rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
 end
 
 
