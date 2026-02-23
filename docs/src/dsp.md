@@ -3,42 +3,67 @@
 AppleAccelerate wraps vDSP functions for signal processing, including convolution, correlation, filtering, windowing, DCT, and FFT.
 
 ```@setup dsp
-using AppleAccelerate
+using AppleAccelerate, AbstractFFTs
 ```
 
 ## FFT
 
-```@example dsp
-# Create an FFT plan (reusable for same-size transforms)
-setup = AppleAccelerate.plan_fft(1024, Float64)
+The FFT API follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl): `fft`, `ifft`, `bfft`, and `plan_fft`. Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. All dimensions must be powers of 2.
 
-# Forward FFT
+```@example dsp
 x = randn(ComplexF64, 1024)
-X = AppleAccelerate.fft(x, setup)
 
-# Inverse FFT
-x_recovered = AppleAccelerate.fft(X, setup, AppleAccelerate.FFT_INVERSE)
+# Forward FFT (auto-creates plan)
+X = AppleAccelerate.fft(x)
+
+# Normalized inverse FFT
+x_recovered = AppleAccelerate.ifft(X)
+
+# Unnormalized inverse (backward) FFT
+X_back = AppleAccelerate.bfft(X)
+
+# Reusable plan for repeated transforms of the same size
+setup = AppleAccelerate.plan_fft(x)
+X = AppleAccelerate.fft(x, setup)
+x_recovered = AppleAccelerate.ifft(X, setup)
 nothing # hide
 ```
 
-Both `ComplexF64` and `ComplexF32` inputs are supported. Input length must be a power of 2.
-
-## 2D FFT
+2D FFT works the same way — `fft` dispatches on the input shape:
 
 ```@example dsp
-# Create an FFT plan (must accommodate the largest dimension)
-setup = AppleAccelerate.plan_fft(32, Float64)
-
-# Forward 2D FFT
-x = randn(ComplexF64, 16, 32)
-X = AppleAccelerate.fft2d(x, setup)
-
-# Inverse 2D FFT (unnormalized — divide by nrows*ncols to recover original)
-x_recovered = AppleAccelerate.fft2d(X, setup, AppleAccelerate.FFT_INVERSE) ./ (16 * 32)
+x2 = randn(ComplexF64, 16, 32)
+X2 = AppleAccelerate.fft(x2)
+x2_recovered = AppleAccelerate.ifft(X2)
 nothing # hide
 ```
 
-Both dimensions must be powers of 2. The `FFTSetup` must be created with `n >= max(nrows, ncols)`.
+### AbstractFFTs Integration
+
+AppleAccelerate provides a package extension for [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl), allowing you to use the standard Julia FFT interface backed by Apple's vDSP library. Load both packages to activate the extension:
+
+```@example dsp
+# 1D FFT
+x = randn(ComplexF64, 1024)
+X = fft(x)
+x_recovered = ifft(X)
+
+# 2D FFT
+x2 = randn(ComplexF64, 16, 32)
+X2 = fft(x2)
+x2_recovered = ifft(X2)
+
+# Plan-based API (works for both 1D and 2D)
+p = plan_fft(x)
+X = p * x
+x_recovered = p \ X
+nothing # hide
+```
+
+The extension supports `fft`, `ifft`, `bfft`, `plan_fft`, `plan_ifft`, `plan_bfft`, plan inversion via `inv(plan)`, and `mul!` for both 1D vectors and 2D matrices. Input must be `Vector{Complex{T}}` or `Matrix{Complex{T}}` with power-of-2 dimensions.
+
+!!! note
+    In-place plans (`plan_fft!`, `plan_bfft!`) and real FFTs (`rfft`, `irfft`) are not supported since vDSP only provides out-of-place complex FFTs. 3D and higher-dimensional arrays are not supported by vDSP and will fall through to FFTW if available.
 
 ## DCT (Discrete Cosine Transform)
 
