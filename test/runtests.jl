@@ -290,6 +290,92 @@ end
     end
 end
 
+@testset "fft! in-place" begin
+    for T in (ComplexF64, ComplexF32)
+        F = real(T)
+        @testset "1D $T" begin
+            for n in (16, 256, 1024)
+                x = randn(T, n)
+                expected = AppleAccelerate.fft(x)
+                y = copy(x)
+                AppleAccelerate.fft!(y)
+                if F == Float64
+                    @test y ≈ expected
+                else
+                    @test y ≈ expected rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+        @testset "2D $T" begin
+            for (nr, nc) in ((4, 4), (8, 16))
+                x = randn(T, nr, nc)
+                expected = AppleAccelerate.fft(x)
+                y = copy(x)
+                AppleAccelerate.fft!(y)
+                if F == Float64
+                    @test y ≈ expected
+                else
+                    @test y ≈ expected rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+end
+
+@testset "bfft! and ifft! in-place" begin
+    for T in (ComplexF64, ComplexF32)
+        F = real(T)
+        @testset "$T" begin
+            for n in (16, 256)
+                x = randn(T, n)
+                fwd = AppleAccelerate.fft(x)
+                y = copy(fwd)
+                AppleAccelerate.ifft!(y)
+                if F == Float64
+                    @test y ≈ x
+                else
+                    @test y ≈ x rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+end
+
+@testset "rfft" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            for n in (16, 256, 1024)
+                x = randn(T, n)
+                result = AppleAccelerate.rfft(x)
+                expected = FFTW.rfft(x)
+                if T == Float64
+                    @test result ≈ expected
+                else
+                    @test result ≈ expected rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+end
+
+@testset "brfft and irfft roundtrip" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            for n in (16, 256, 1024)
+                x = randn(T, n)
+                X = AppleAccelerate.rfft(x)
+                if T == Float64
+                    @test AppleAccelerate.brfft(X, n) ./ n ≈ x
+                    @test AppleAccelerate.irfft(X, n) ≈ x
+                else
+                    @test AppleAccelerate.brfft(X, n) ./ n ≈ x rtol=sqrt(eps(Float32))
+                    @test AppleAccelerate.irfft(X, n) ≈ x rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+end
+
 @testset "AbstractFFTs extension" begin
     @testset "Forward FFT matches FFTW" begin
         for T in (ComplexF64, ComplexF32)
@@ -417,15 +503,37 @@ end
         @test p \ X ≈ x
     end
 
-    @testset "2D error cases" begin
+    @testset "Error cases" begin
+        # Non-power-of-2
+        @test_throws ArgumentError plan_fft(randn(ComplexF64, 100))
+        @test_throws ArgumentError fft(randn(ComplexF64, 100))
+        # Empty
+        @test_throws ArgumentError plan_fft(ComplexF64[])
+        # Non-power-of-2 2D
         @test_throws ArgumentError plan_fft(randn(ComplexF64, 3, 4))
         @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 6))
+        # 3D+ arrays
+        @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 4, 4))
+        @test_throws ArgumentError fft(randn(ComplexF64, 4, 4, 4))
+        @test_throws ArgumentError plan_fft!(randn(ComplexF64, 4, 4, 4))
     end
 
-    @testset "Error cases" begin
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 100))
-        @test_throws ArgumentError plan_fft(ComplexF64[])
+    @testset "In-place fft!" begin
+        x = randn(ComplexF64, 256)
+        p = plan_fft!(x)
+        y = copy(x)
+        p * y
+        @test y ≈ FFTW.fft(x)
     end
+
+    @testset "In-place ifft! roundtrip" begin
+        x = randn(ComplexF64, 256)
+        fwd = copy(x)
+        fft!(fwd)
+        ifft!(fwd)
+        @test fwd ≈ x
+    end
+
 end
 
 

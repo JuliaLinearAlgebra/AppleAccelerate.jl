@@ -28,7 +28,9 @@
 
 ## DSP & FFT
 
-- `fft`, `ifft`, `bfft`, `plan_fft` — FFT (Float32 and Float64, 1D and 2D)
+- `fft`, `ifft`, `bfft`, `fft!`, `ifft!`, `bfft!` — Complex FFT (Float32 and Float64, 1D and 2D)
+- `rfft`, `irfft`, `brfft` — Real FFT (Float32 and Float64, 1D)
+- `plan_fft`, `plan_rfft` — FFT plan creation
 - [`AppleAccelerate.plan_dct`](@ref), [`AppleAccelerate.dct`](@ref) — DCT (Float32 only)
 - `conv`, `conv!` — Convolution
 - `xcorr`, `xcorr!` — Cross-correlation

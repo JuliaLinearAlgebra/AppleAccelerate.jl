@@ -549,3 +549,278 @@ ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}
 ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
 ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
+
+# --- Internal in-place 1D complex FFT ---
+
+function _fft1d!(x::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+    n = length(x)
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
+
+    realp = real.(x)
+    imagp = imag.(x)
+
+    GC.@preserve realp imagp begin
+        c = DSPDoubleSplitComplex(realp, imagp)
+        ccall(("vDSP_fft_zipD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
+              setup.plan, c, SIGNAL_STRIDE, logn, direction)
+    end
+
+    @inbounds for i in eachindex(x)
+        x[i] = complex(realp[i], imagp[i])
+    end
+    return x
+end
+
+function _fft1d!(x::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+    n = length(x)
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
+
+    realp = Float32.(real.(x))
+    imagp = Float32.(imag.(x))
+
+    GC.@preserve realp imagp begin
+        c = DSPSplitComplex(realp, imagp)
+        ccall(("vDSP_fft_zip", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Culong, Cint),
+              setup.plan, c, SIGNAL_STRIDE, logn, direction)
+    end
+
+    @inbounds for i in eachindex(x)
+        x[i] = complex(realp[i], imagp[i])
+    end
+    return x
+end
+
+# --- Internal in-place 2D complex FFT ---
+
+function _fft2d!(x::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+    nrows, ncols = size(x)
+    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    log2nr = trailing_zeros(nrows)
+    log2nc = trailing_zeros(ncols)
+
+    realp = real.(x)
+    imagp = imag.(x)
+
+    GC.@preserve realp imagp begin
+        c = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
+        ccall(("vDSP_fft2d_zipD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Clong, Culong, Culong, Cint),
+              setup.plan, c, SIGNAL_STRIDE, 0, log2nr, log2nc, direction)
+    end
+
+    @inbounds for i in eachindex(x)
+        x[i] = complex(realp[i], imagp[i])
+    end
+    return x
+end
+
+function _fft2d!(x::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+    nrows, ncols = size(x)
+    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    log2nr = trailing_zeros(nrows)
+    log2nc = trailing_zeros(ncols)
+
+    realp = Float32.(real.(x))
+    imagp = Float32.(imag.(x))
+
+    GC.@preserve realp imagp begin
+        c = DSPSplitComplex(pointer(realp), pointer(imagp))
+        ccall(("vDSP_fft2d_zip", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Clong, Culong, Culong, Cint),
+              setup.plan, c, SIGNAL_STRIDE, 0, log2nr, log2nc, direction)
+    end
+
+    @inbounds for i in eachindex(x)
+        x[i] = complex(realp[i], imagp[i])
+    end
+    return x
+end
+
+# --- Public API: fft! (in-place forward FFT) ---
+
+fft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_FORWARD)
+fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_FORWARD)
+fft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, plan_fft(x))
+fft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, plan_fft(x))
+
+# --- Public API: bfft! (in-place backward/unnormalized inverse FFT) ---
+
+bfft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_INVERSE)
+bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_INVERSE)
+bfft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, plan_fft(x))
+bfft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, plan_fft(x))
+
+# --- Public API: ifft! (in-place normalized inverse FFT) ---
+
+function ifft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
+    bfft!(x, setup)
+    x ./= length(x)
+end
+function ifft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
+    bfft!(x, setup)
+    x ./= length(x)
+end
+ifft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, plan_fft(x))
+ifft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, plan_fft(x))
+
+# --- Internal 1D real FFT ---
+# vDSP real FFT uses packed split-complex format:
+#   Forward output: realp[0]=DC, imagp[0]=Nyquist, realp[k]+i*imagp[k] for k=1..N/2-1
+#   Forward scale: output is 2x the mathematical DFT
+# We unpack to standard format: Complex vector of length N/2+1
+
+function _rfft1d(x::Vector{Float64}, setup::FFTSetup{Float64})
+    n = length(x)
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
+    half = n >> 1
+
+    # Pack real input into split-complex: realp[k]=x[2k-1], imagp[k]=x[2k] (1-based)
+    inp_realp = x[1:2:end]
+    inp_imagp = x[2:2:end]
+    out_realp = Vector{Float64}(undef, half)
+    out_imagp = Vector{Float64}(undef, half)
+
+    GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+        input = DSPDoubleSplitComplex(inp_realp, inp_imagp)
+        output = DSPDoubleSplitComplex(out_realp, out_imagp)
+        ccall(("vDSP_fft_zropD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
+               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_FORWARD)
+    end
+
+    # Unpack and divide by 2 (vDSP scales forward real FFT by 2)
+    result = Vector{ComplexF64}(undef, half + 1)
+    result[1] = complex(out_realp[1] / 2, 0.0)
+    @inbounds for k in 2:half
+        result[k] = complex(out_realp[k] / 2, out_imagp[k] / 2)
+    end
+    result[half + 1] = complex(out_imagp[1] / 2, 0.0)
+    return result
+end
+
+function _rfft1d(x::Vector{Float32}, setup::FFTSetup{Float32})
+    n = length(x)
+    @assert ispow2(n) "length of input must be a power of 2"
+    logn = trailing_zeros(n)
+    half = n >> 1
+
+    inp_realp = Float32.(x[1:2:end])
+    inp_imagp = Float32.(x[2:2:end])
+    out_realp = Vector{Float32}(undef, half)
+    out_imagp = Vector{Float32}(undef, half)
+
+    GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+        input = DSPSplitComplex(inp_realp, inp_imagp)
+        output = DSPSplitComplex(out_realp, out_imagp)
+        ccall(("vDSP_fft_zrop", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
+               Ref{DSPSplitComplex}, Clong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_FORWARD)
+    end
+
+    result = Vector{ComplexF32}(undef, half + 1)
+    result[1] = complex(out_realp[1] / 2, Float32(0))
+    @inbounds for k in 2:half
+        result[k] = complex(out_realp[k] / 2, out_imagp[k] / 2)
+    end
+    result[half + 1] = complex(out_imagp[1] / 2, Float32(0))
+    return result
+end
+
+# --- Internal 1D inverse real FFT (unnormalized) ---
+# Pack standard complex input back into vDSP format, run inverse, unpack real output.
+
+function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
+    @assert ispow2(n) "output length must be a power of 2"
+    logn = trailing_zeros(n)
+    half = n >> 1
+    @assert length(X) == half + 1 "input must have length n÷2+1"
+
+    # Pack standard complex input into vDSP format
+    inp_realp = Vector{Float64}(undef, half)
+    inp_imagp = Vector{Float64}(undef, half)
+    inp_realp[1] = real(X[1])
+    inp_imagp[1] = real(X[half + 1])
+    @inbounds for k in 2:half
+        inp_realp[k] = real(X[k])
+        inp_imagp[k] = imag(X[k])
+    end
+
+    out_realp = Vector{Float64}(undef, half)
+    out_imagp = Vector{Float64}(undef, half)
+
+    GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+        input = DSPDoubleSplitComplex(inp_realp, inp_imagp)
+        output = DSPDoubleSplitComplex(out_realp, out_imagp)
+        ccall(("vDSP_fft_zropD", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
+               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_INVERSE)
+    end
+
+    # Unpack interleaved real output
+    result = Vector{Float64}(undef, n)
+    @inbounds for k in 1:half
+        result[2k - 1] = out_realp[k]
+        result[2k] = out_imagp[k]
+    end
+    return result
+end
+
+function _brfft1d(X::Vector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
+    @assert ispow2(n) "output length must be a power of 2"
+    logn = trailing_zeros(n)
+    half = n >> 1
+    @assert length(X) == half + 1 "input must have length n÷2+1"
+
+    inp_realp = Vector{Float32}(undef, half)
+    inp_imagp = Vector{Float32}(undef, half)
+    inp_realp[1] = real(X[1])
+    inp_imagp[1] = real(X[half + 1])
+    @inbounds for k in 2:half
+        inp_realp[k] = real(X[k])
+        inp_imagp[k] = imag(X[k])
+    end
+
+    out_realp = Vector{Float32}(undef, half)
+    out_imagp = Vector{Float32}(undef, half)
+
+    GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+        input = DSPSplitComplex(inp_realp, inp_imagp)
+        output = DSPSplitComplex(out_realp, out_imagp)
+        ccall(("vDSP_fft_zrop", libacc), Cvoid,
+              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
+               Ref{DSPSplitComplex}, Clong, Culong, Cint),
+              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_INVERSE)
+    end
+
+    result = Vector{Float32}(undef, n)
+    @inbounds for k in 1:half
+        result[2k - 1] = out_realp[k]
+        result[2k] = out_imagp[k]
+    end
+    return result
+end
+
+# --- Public API: rfft (forward real FFT) ---
+
+plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
+
+rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
+rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
+
+# --- Public API: brfft (backward/unnormalized inverse real FFT) ---
+
+brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
+brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n, FFTSetup{T}(n))
+
+# --- Public API: irfft (normalized inverse real FFT) ---
+
+irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
+irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = irfft(X, n, FFTSetup{T}(n))
