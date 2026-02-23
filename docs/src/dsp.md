@@ -1,6 +1,6 @@
-# DSP & FFT
+# Signal Processing
 
-AppleAccelerate wraps vDSP functions for signal processing, including convolution, correlation, filtering, windowing, DCT, and FFT.
+AppleAccelerate wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) functions for signal processing, including convolution, correlation, filtering, windowing, DCT, and FFT.
 
 ```@setup dsp
 using AppleAccelerate, AbstractFFTs
@@ -8,7 +8,7 @@ using AppleAccelerate, AbstractFFTs
 
 ## FFT
 
-The FFT API follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. All dimensions must be powers of 2.
+The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. All dimensions must be powers of 2.
 
 ```@example dsp
 x = randn(ComplexF64, 1024)
@@ -71,19 +71,15 @@ AppleAccelerate provides a package extension for [AbstractFFTs.jl](https://githu
 x = randn(ComplexF64, 1024)
 
 # Out-of-place
-X = fft(x)
-x_recovered = ifft(X)
+X = AppleAccelerate.fft(x)
+x_recovered = AppleAccelerate.ifft(X)
+@assert x_recovered ≈ x
 
 # In-place
 y = copy(x)
-fft!(y)
-ifft!(y)
+AppleAccelerate.fft!(y)
+AppleAccelerate.ifft!(y)
 @assert y ≈ x
-
-# Plan-based API (works for all variants)
-p = plan_fft(x)
-X = p * x
-x_recovered = p \ X
 nothing # hide
 ```
 
@@ -104,7 +100,7 @@ Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dim
 
 ## DCT (Discrete Cosine Transform)
 
-Float32 only. Supports DCT types II, III, and IV.
+Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/accelerate/discrete_cosine_transforms). Float32 only. Supports DCT types II, III, and IV.
 
 ```@docs
 AppleAccelerate.plan_dct
@@ -113,7 +109,7 @@ AppleAccelerate.dct
 
 ## Convolution
 
-`conv(X, K)` computes the convolution of vectors `X` and `K`. `conv!(result, X, K)` stores the result in a preallocated vector.
+Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv). `conv(X, K)` computes the convolution of vectors `X` and `K`. `conv!(result, X, K)` stores the result in a preallocated vector.
 
 ```@example dsp
 X = randn(Float64, 100)
@@ -124,7 +120,7 @@ nothing # hide
 
 ## Cross-Correlation
 
-`xcorr(X, Y)` computes the cross-correlation. `xcorr(X)` computes auto-correlation.
+Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv) (with reversed kernel). `xcorr(X, Y)` computes the cross-correlation. `xcorr(X)` computes auto-correlation.
 
 ```@example dsp
 X = randn(Float64, 100)
@@ -135,7 +131,7 @@ nothing # hide
 
 ## Biquad Filtering
 
-IIR filtering via cascaded biquad sections (Float64 only).
+Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad). IIR filtering via cascaded biquad sections (Float64 only).
 
 ```@example dsp
 X = randn(Float64, 100)
@@ -147,6 +143,8 @@ nothing # hide
 ```
 
 ## Window Functions
+
+Wraps Apple's [vDSP window generation functions](https://developer.apple.com/documentation/accelerate/vdsp/vector_generation).
 
 ```@docs
 AppleAccelerate.blackman

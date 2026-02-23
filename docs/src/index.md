@@ -1,4 +1,4 @@
-# AppleAccelerate.jl
+# Getting Started
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/accelerate/), providing high-performance BLAS/LAPACK, vectorized math operations, DSP/FFT, and sparse linear algebra on macOS.
 
@@ -16,21 +16,7 @@ Pkg.add("AppleAccelerate")
 
 ## Quick Start
 
-### BLAS/LAPACK Forwarding
-
-AppleAccelerate automatically forwards BLAS and LAPACK calls to Apple's Accelerate framework on package load:
-
-```@example
-using AppleAccelerate
-using LinearAlgebra
-
-# All BLAS/LAPACK operations now use Accelerate
-A = randn(1000, 1000)
-F = lu(A)  # Uses Accelerate LAPACK
-nothing # hide
-```
-
-### Vectorized Math
+### Array Operations
 
 AppleAccelerate provides accelerated element-wise math operations via Apple's vecLib:
 
@@ -50,14 +36,17 @@ sin.(X)  # Now uses Accelerate
 nothing # hide
 ```
 
-### FFT
+### Dense Linear Algebra
+
+AppleAccelerate automatically forwards BLAS and LAPACK calls to Apple's Accelerate framework on package load:
 
 ```@example
 using AppleAccelerate
+using LinearAlgebra
 
-x = randn(ComplexF64, 1024)
-X = AppleAccelerate.fft(x)
-x_recovered = AppleAccelerate.ifft(X)
+# All BLAS/LAPACK operations now use Accelerate
+A = randn(1000, 1000)
+F = lu(A)  # Uses Accelerate LAPACK
 nothing # hide
 ```
 
@@ -73,5 +62,16 @@ b = randn(100)
 import AppleAccelerate: AAFactorization, solve
 f = AAFactorization(A)
 x = solve(f, b)
+nothing # hide
+```
+
+### Signal Processing
+
+```@example
+using AppleAccelerate
+
+x = randn(ComplexF64, 1024)
+X = AppleAccelerate.fft(x)
+x_recovered = AppleAccelerate.ifft(X)
 nothing # hide
 ```
