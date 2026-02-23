@@ -117,7 +117,10 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
         end
         if T == Float32
-            @eval Base.broadcasted(::typeof($f), arg::Union{Array{F,N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($f)(maybecopy(arg))
+            @eval begin
+                Base.broadcasted(::typeof($f), arg::Array{<:Union{Float32,Float64}}) = ($f)(arg)
+                Base.broadcasted(::typeof($f), arg::Base.Broadcast.Broadcasted) = ($f)(copy(arg))
+            end
         end
     end
     for (f, fa) in (twoarg_funcs...,(:pow,:pow))
@@ -128,7 +131,12 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},Array{$T,N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
         end
         if T == Float32
-            @eval Base.broadcasted(::typeof($f), arg1::Union{Array{F, N},Base.Broadcast.Broadcasted}, arg2::Union{Array{F, N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($f)(maybecopy(arg1), maybecopy(arg2))
+            @eval begin
+                Base.broadcasted(::typeof($f), arg1::Array{F}, arg2::Array{F}) where {F<:Union{Float32,Float64}} = ($f)(arg1, arg2)
+                Base.broadcasted(::typeof($f), arg1::Array{<:Union{Float32,Float64}}, arg2::Base.Broadcast.Broadcasted) = ($f)(arg1, copy(arg2))
+                Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::Array{<:Union{Float32,Float64}}) = ($f)(copy(arg1), arg2)
+                Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::Base.Broadcast.Broadcasted) = ($f)(copy(arg1), copy(arg2))
+            end
         end
     end
 end
@@ -205,9 +213,17 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             # Broadcasting override such that f.(X) turns into f(X)
             Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N},Array{$T,N}}}) where {Style, Axes, N} = ($f)(bc.args...)
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},Array{$T,N}}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
-            Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::Union{Array{$T, N},Base.Broadcast.Broadcasted}) where {N} = ($f)(maybecopy(arg1), maybecopy(arg2))
+            Base.broadcasted(::typeof($f), arg1::Array{$T}, arg2::Array{$T}) = ($f)(arg1, arg2)
+            Base.broadcasted(::typeof($f), arg1::Array{$T}, arg2::Base.Broadcast.Broadcasted) = ($f)(arg1, copy(arg2))
+            Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::Array{$T}) = ($f)(copy(arg1), arg2)
         end
     end
+end
+
+# Disambiguating methods for (Broadcasted, Broadcasted) — resolves ambiguity between
+# Float32 and Float64 broadcasted overrides when both arguments are Broadcasted objects.
+for f in (:vadd, :vsub, :vmul, :vdiv)
+    @eval Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::Base.Broadcast.Broadcasted) = ($f)(copy(arg1), copy(arg2))
 end
 
 # Element-wise operations over a vector and a scalar
@@ -315,7 +331,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             # Broadcasting override such that f.(X) turns into f(X)
             Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N},$T}}) where {Style, Axes, N} = ($f)(bc.args...)
             Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N},$T}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
-            Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::$T) where {N} = ($f)(maybecopy(arg1), arg2)
+            Base.broadcasted(::typeof($f), arg1::Array{$T}, arg2::$T) = ($f)(arg1, arg2)
+            Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::$T) = ($f)(copy(arg1), arg2)
         end
     end
 
@@ -326,7 +343,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         # Broadcasting override such that f.(X) turns into f(X)
         Base.copy(bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T, N}, $T}}) where {Style, Axes, N} = ($f)(bc.args...)
         Base.copyto!(dest::Array{$T, N}, bc::Base.Broadcast.Broadcasted{Style, Axes, typeof($f), Tuple{Array{$T,N}, $T}}) where {Style, Axes, N} = ($f!)(dest, bc.args...)
-        Base.broadcasted(::typeof($f), arg1::Union{Array{$T, N},Base.Broadcast.Broadcasted}, arg2::$T) where {N} = ($f)(maybecopy(arg1), arg2)
+        Base.broadcasted(::typeof($f), arg1::Array{$T}, arg2::$T) = ($f)(arg1, arg2)
+        Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::$T) = ($f)(copy(arg1), arg2)
     end
 end
 

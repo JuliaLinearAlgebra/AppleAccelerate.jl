@@ -507,4 +507,25 @@ for T in (Float32, Float64)
     end
 end
 
+@testset "Broadcasted-Broadcasted dispatch" begin
+    # Test that binary vDSP ops correctly handle chained broadcasting
+    # where both arguments are Broadcasted objects (not yet materialized arrays).
+    # This exercises the disambiguating methods for vadd/vsub/vmul/vdiv.
+    for T in (Float32, Float64)
+        X = randn(T, N)
+        Y = randn(T, N)
+        A = randn(T, N)
+        B = randn(T, N)
+
+        # vadd.(abs.(X), abs.(Y)) — both args are Broadcasted
+        @test AppleAccelerate.vadd.(AppleAccelerate.abs.(X), AppleAccelerate.abs.(Y)) ≈ abs.(X) .+ abs.(Y)
+        # vsub
+        @test AppleAccelerate.vsub.(AppleAccelerate.abs.(X), AppleAccelerate.abs.(Y)) ≈ abs.(X) .- abs.(Y)
+        # vmul
+        @test AppleAccelerate.vmul.(AppleAccelerate.abs.(X), AppleAccelerate.abs.(Y)) ≈ abs.(X) .* abs.(Y)
+        # vdiv
+        @test AppleAccelerate.vdiv.(AppleAccelerate.abs.(X) .+ T(1), AppleAccelerate.abs.(Y) .+ T(1)) ≈ (abs.(X) .+ 1) ./ (abs.(Y) .+ 1)
+    end
+end
+
 end # @testset "Array Operations"
