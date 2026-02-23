@@ -98,7 +98,7 @@ Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dim
 !!! note
     Real FFT (`rfft`, `irfft`, `brfft`) is available only via the direct `AppleAccelerate.*` API and is not wired into the AbstractFFTs extension, to avoid dispatch conflicts with other packages that call `rfft` internally on non-power-of-2 inputs.
 
-### FFT Benchmarks
+## FFT Benchmarks
 
 Pre-planned FFT performance comparing Apple vDSP against FFTW, both single-threaded. Run the full benchmark suite with `julia --project=test/bench test/bench/run_benchmarks.jl fft` ([source](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl)).
 
