@@ -16,10 +16,7 @@ end
 Random.seed!(7)
 N = 1_000
 
-@testset "AppleAccelerate.jl" begin
-    include("array_tests.jl")
-    include("dsp_tests.jl")
-end
-
+include("array_tests.jl")
+include("dsp_tests.jl")
 include("sparse_tests.jl")
 include("linalg_tests.jl")
