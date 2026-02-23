@@ -1,5 +1,8 @@
 # AppleAccelerate.jl
 
+[![CI](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml)
+[![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/)
+
 This provides a Julia interface to some of the
 [macOS Accelerate framework](https://developer.apple.com/documentation/accelerate). At
 the moment, this package provides:

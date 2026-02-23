@@ -166,6 +166,20 @@ import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!,
                 @test denseM[i] == aaM[i]
             end
         end
+        @testset "transpose" begin
+            N = 3
+            M = 4
+            sparseM = sprand(N, M, 0.5)
+            aaM = AASparseMatrix(sparseM)
+            aaMt = transpose(aaM)
+            # SparseGetTranspose sets the transpose flag; the underlying structure
+            # retains the original dimensions, so verify the flag is toggled.
+            ATT_TRANSP = AppleAccelerate.ATT_TRANSPOSE
+            @test (aaMt.matrix.structure.attributes & ATT_TRANSP) != zero(typeof(ATT_TRANSP))
+            # Double transpose clears the flag
+            aaMtt = transpose(aaMt)
+            @test (aaMtt.matrix.structure.attributes & ATT_TRANSP) == zero(typeof(ATT_TRANSP))
+        end
         @testset "special matrices" begin
             N = 3
             sparseM = sprand(N, N, 0.5)
@@ -295,6 +309,22 @@ import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!,
             b, B = A*x, A*X
             @test solve(sym_fact, b) ≈ x
             @test solve(sym_fact, B) ≈ X
+        end
+
+        @testset "LDLT" begin
+            N = 4
+            # symmetric indefinite matrix (not positive definite)
+            temp = sprand(N, N, 0.9)
+            A = sparse(temp + temp')
+            while det(A) ≈ 0 || !issymmetric(A)
+                temp = sprand(N, N, 0.9)
+                A = sparse(temp + temp')
+            end
+            ldlt_fact = AAFactorization(A)
+            factor!(ldlt_fact, AppleAccelerate.SparseFactorizationLDLTTPP)
+            x = rand(N)
+            b = A * x
+            @test solve(ldlt_fact, b) ≈ x
         end
 
         @testset "non-square in-place solve" begin

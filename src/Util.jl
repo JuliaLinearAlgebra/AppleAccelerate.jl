@@ -1,7 +1,5 @@
 ## Util.jl##
 
-tupletypelength(a)=length(a.parameters)
-
 @inline maybecopy(x::T) where {T <: Base.Broadcast.Broadcasted} = copy(x)
 @inline maybecopy(x::T) where {T <: Array} = x
 
@@ -10,6 +8,25 @@ const OPS = Dict{Symbol,Tuple{Symbol, Symbol, Symbol}}(:+ => (:vadd, :vsadd, :vs
 :* => (:vmul, :vsmul, :vsmul),
 :/ => (:vdiv, :vsdiv, :vsdiv),)
 
+"""
+    @replaceBase(f1, f2, ...)
+
+Replace Base functions with their AppleAccelerate equivalents for `Array{Float32}` and
+`Array{Float64}`. After calling this macro, expressions like `sin.(X)` will use the
+accelerated Accelerate implementation transparently.
+
+Supported functions: `ceil`, `floor`, `sqrt`, `exp`, `log`, `sin`, `cos`, `tan`,
+`asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, and more. Arithmetic operators
+`+`, `-`, `*`, `/` are also supported.
+
+# Example
+```julia
+using AppleAccelerate
+AppleAccelerate.@replaceBase sin cos exp log
+X = randn(Float64, 1000)
+sin.(X)  # Now uses Accelerate
+```
+"""
 macro replaceBase(fs...)
     b = Expr(:block)
     for f in fs

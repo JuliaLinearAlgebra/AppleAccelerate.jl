@@ -32,7 +32,6 @@ AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
                                         AAFactorization(AASparseMatrix(M))
 
 # easiest way to make this follow the defaults and naming conventions of LinearAlgebra?
-# TODO: add tests for the different kinds of factorizations, beyond QR.
 function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored

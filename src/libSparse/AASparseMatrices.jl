@@ -57,10 +57,10 @@ LinearAlgebra.issymmetric(M::AASparseMatrix) = (M.matrix.structure.attributes &
                                                 ATT_KIND_MASK) == ATT_SYMMETRIC
 istri(M::AASparseMatrix) = (M.matrix.structure.attributes
                                     & ATT_KIND_MASK) == ATT_TRIANGULAR
-LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (MM.matrix.structure.attributes
-                                        & ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
-LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (MM.matrix.structure.attributes
-                                        & ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
+LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
+                                        ATT_LOWER_TRIANGLE == ATT_UPPER_TRIANGLE)
+LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
+                                        ATT_LOWER_TRIANGLE == ATT_LOWER_TRIANGLE)
 
 function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
     ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
@@ -79,7 +79,6 @@ function Base.getindex(M::AASparseMatrix, i::Int)
 end
 # Creates a new structure, referring to the same data,
 # but with the transpose flag (in attributes) flipped.
-# TODO: untested
 Base.transpose(M::AASparseMatrix) = AASparseMatrix(SparseGetTranspose(M.matrix),
                         M._colptr, M._rowval, M._nzval)
 

@@ -61,6 +61,13 @@ function load_accelerate(; clear::Bool = false,
     end
 end
 
+"""
+    get_macos_version(normalize=true)
+
+Return the current macOS version as a `VersionNumber`. If `normalize` is `true`,
+macOS 16.x versions are reported as 26.x to maintain monotonic ordering.
+Returns `nothing` on non-Apple platforms or if the version cannot be determined.
+"""
 function get_macos_version(normalize=true)
     @static if !Sys.isapple()
         return nothing
@@ -84,6 +91,12 @@ function get_macos_version(normalize=true)
     return ver
 end
 
+"""
+    set_num_threads(n::BlasInt)
+
+Set the number of threads used by Accelerate BLAS. If `n == 1`, use single-threaded mode;
+if `n > 1`, use multi-threaded mode. Requires macOS 15 or later.
+"""
 function set_num_threads(n::LinearAlgebra.BlasInt)
     @static if Sys.isapple()
         if get_macos_version() < v"15"
@@ -104,6 +117,13 @@ function set_num_threads(n::LinearAlgebra.BlasInt)
     return nothing
 end
 
+"""
+    get_num_threads() -> BlasInt
+
+Return the number of threads used by Accelerate BLAS. Returns `1` for single-threaded mode,
+or the actual thread count for multi-threaded mode. Returns `-1` on non-Apple platforms
+or macOS versions earlier than 15.
+"""
 function get_num_threads()::LinearAlgebra.BlasInt
     @static if Sys.isapple()
         if get_macos_version() < v"15"

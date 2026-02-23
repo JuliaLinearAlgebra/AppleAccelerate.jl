@@ -323,7 +323,7 @@ Returns: DFTSetup
 function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     n = trailing_zeros(length)
     f = length >> n
-    if dct_type < 2 &&  dct_type > 4
+    if dct_type < 2 ||  dct_type > 4
         error("DCT type ", dct_type, " is not supported. Only DCT types 2, 3 and 4 are supported")
     elseif !(n >= 4 && f in (1,3,5,15))
         error("Invalid DCT length. Length must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4")

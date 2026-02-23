@@ -403,18 +403,6 @@ for T in (Float32, Float64)
     end
 end
 
-#=
-AppleAccelerate.@replaceBase(sin, atan, /)
-
-@testset "Replace Base::$T" for T in (Float32, Float64)
-X::Array{T} = randn(N)
-Y::Array{T} = abs.(randn(N))
-
-@test Base.sin.(X) == AppleAccelerate.sin(X)
-@test Base.atan.(X, Y) == AppleAccelerate.atan(X, Y)
-@test X ./ Y  == AppleAccelerate.div_float(X, Y)
-end
-=#
 end
 
 if AppleAccelerate.get_macos_version() < v"13.4"
