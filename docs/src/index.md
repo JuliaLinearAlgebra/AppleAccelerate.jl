@@ -1,13 +1,10 @@
-# Getting Started
+# Introduction
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/accelerate/), providing high-performance BLAS/LAPACK, vectorized math operations, DSP/FFT, and sparse linear algebra on macOS.
 
-## Requirements
-
-- macOS 13.4 or later
-- Julia 1.10 or later
-
 ## Installation
+
+Requires macOS 13.4+ and Julia 1.10+.
 
 ```julia
 using Pkg

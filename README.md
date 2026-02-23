@@ -1,10 +1,14 @@
-# AppleAccelerate.jl
+<p align="center">
+  <img src="docs/src/assets/logo.png" alt="AppleAccelerate.jl" width="400"/>
+</p>
 
-[![CI](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml)
-[![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/)
-[![JuliaHub](https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg)](https://juliahub.com/ui/Packages/General/AppleAccelerate)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Julia compat](https://img.shields.io/badge/Julia-≥1.10-blue.svg)](https://julialang.org/downloads/)
+<p align="center">
+  <a href="https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml"><img src="https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml/badge.svg" alt="CI"/></a>
+  <a href="https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Docs"/></a>
+  <a href="https://juliahub.com/ui/Packages/General/AppleAccelerate"><img src="https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg" alt="JuliaHub"/></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
+  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.10-blue.svg" alt="Julia compat"/></a>
+</p>
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
 
@@ -13,12 +17,9 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Sparse linear algebra** via `libSparse` — sparse matrix operations and direct solvers (QR, Cholesky, LDLT) — **faster for Float32 QR** and **Cholesky at N=5000** vs SuiteSparse
 - **Signal Processing** — FFT, DCT, convolution, cross-correlation, biquad filtering, window functions — **on par with FFTW** for complex FFT, **up to 2× faster** for Float32 real FFT
 
-## Requirements
-
-- macOS 13.4 or later
-- Julia 1.10 or later
-
 ## Installation
+
+Requires macOS 13.4+ and Julia 1.10+.
 
 ```julia
 using Pkg
