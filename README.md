@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml)
 [![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/)
+[![JuliaHub](https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg)](https://juliahub.com/ui/Packages/General/AppleAccelerate)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Julia compat](https://img.shields.io/badge/Julia-≥1.10-blue.svg)](https://julialang.org/downloads/)
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
 
