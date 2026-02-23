@@ -37,7 +37,9 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
+        if: runner.os == 'macOS'
       - uses: codecov/codecov-action@v5
+        if: runner.os == 'macOS'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
