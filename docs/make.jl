@@ -5,7 +5,7 @@ makedocs(;
     sitename = "AppleAccelerate.jl",
     modules = [AppleAccelerate],
     pages = [
-        "Getting Started" => "index.md",
+        "Introduction" => "index.md",
         "Array Operations" => "array.md",
         "Dense Linear Algebra" => "blas.md",
         "Sparse Linear Algebra" => "sparse.md",
