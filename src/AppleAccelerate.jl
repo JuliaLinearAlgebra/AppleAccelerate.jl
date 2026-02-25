@@ -172,7 +172,6 @@ function __init__()
 end
 
 @static if Sys.isapple()
-    include("util.jl")
     include("array.jl")
     include("complexarray.jl")
     include("dsp.jl")

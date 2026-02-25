@@ -2,12 +2,6 @@
 
 ## Array Operations
 
-### Replacing Base Functions
-
-```@docs
-AppleAccelerate.@replaceBase
-```
-
 ### Unary vDSP Operations
 
 ```@docs

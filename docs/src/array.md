@@ -2,7 +2,7 @@
 
 AppleAccelerate wraps Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib) (`vv*`) and [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) (`vDSP_*`) functions to provide accelerated element-wise operations on `Array{Float32}` and `Array{Float64}`.
 
-These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix or use `@replaceBase` to override Base functions.
+These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix.
 
 ## Element-wise Math Functions
 
@@ -247,12 +247,6 @@ AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Fl
 ## Broadcasting
 
 AppleAccelerate overrides `Base.copy` and `Base.copyto!` for `Broadcasted` objects, so that broadcasting syntax like `f.(X)` automatically uses the accelerated implementation.
-
-## Replacing Base Functions
-
-| Function | Description |
-|----------|-------------|
-| [`@replaceBase`](@ref AppleAccelerate.@replaceBase) | Replace Base functions with accelerated equivalents |
 
 ## Benchmarks
 

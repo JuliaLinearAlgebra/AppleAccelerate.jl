@@ -27,9 +27,8 @@ Y = AppleAccelerate.exp(X)
 Y = AppleAccelerate.sin(X)
 Y = AppleAccelerate.log(X)
 
-# Or replace Base functions for transparent acceleration
-AppleAccelerate.@replaceBase sin cos exp log sqrt
-sin.(X)  # Now uses Accelerate
+# Broadcasting works automatically
+Y = AppleAccelerate.sin.(X)
 nothing # hide
 ```
 
