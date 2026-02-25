@@ -22,6 +22,12 @@ mutable struct Biquad{T}
     end
 end
 
+## === FFT constants === ##
+
+const     FFT_FORWARD         = 1
+const     FFT_INVERSE         = -1
+const     SIGNAL_STRIDE       = 1
+
 ## === FUNCTIONS == ##
 
 for (T, suff) in ((Float64, "D"), (Float32, ""))
@@ -134,38 +140,42 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 end
 
 ## == Biquadratic/IIR filtering
-for (T, suff) in ((Float64, "D"), )
 
-    """
-    Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
-    can be initialized with a single call to biquad_create_setup. coefficients must
-    contain 5 coefficients for each section. The three feed-forward coefficients are
-    specified first, followed by the two feedback coefficients. Returns a Biquad object.
+# Both vDSP_biquad_CreateSetup (Float32) and vDSP_biquad_CreateSetupD (Float64)
+# accept Float64 coefficients. The processing type differs: vDSP_biquad processes
+# Float32 data, vDSP_biquadD processes Float64 data.
 
-    Returns: Biquad{T}
-    """
+for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
+
     @eval begin
-        function biquadcreate(coefficients::Vector{$T},  sections::Int)
+        """
+        Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
+        can be initialized with a single call to biquad_create_setup. coefficients must
+        contain 5 coefficients for each section (as Float64). The three feed-forward
+        coefficients are specified first, followed by the two feedback coefficients.
+
+        Returns: Biquad{$($T)}
+        """
+        function biquadcreate(coefficients::Vector{Float64}, sections::Int, ::Type{$T})
             if length(coefficients) < 5*sections
                 error("Incomplete biquad specification provided - coefficients must
                             contain 5 elements for each filter section")
             end
-            setup = ccall(($(string("vDSP_biquad_CreateSetup", suff), libacc)),  Ptr{Cvoid},
-                          (Ptr{$T}, UInt64),
+            setup = ccall(($(string("vDSP_biquad_CreateSetup", Dsuff), libacc)),  Ptr{Cvoid},
+                          (Ptr{Float64}, UInt64),
                           coefficients, sections)
             return Biquad($T, setup, sections)
         end
     end
 
-
-    """
-    Filters an input array X with the specified Biquad filter and filter delay values provided
-    in delays; only numelem elements are filtered. After execution, delays contains the final
-    state data of the filter.
-
-    Returns: Vector{T}
-    """
     @eval begin
+        """
+        Filters an input array X with the specified Biquad filter and filter delay values provided
+        in delays; only numelem elements are filtered. After execution, delays contains the final
+        state data of the filter.
+
+        Returns: Vector{$($T)}
+        """
         function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Int, biquad::Biquad{$T})
             if length(delays) < (2*(biquad.sections)+2)
                 error("Incomplete delay specification provided - delays must contain 2*M + 2
@@ -179,19 +189,204 @@ for (T, suff) in ((Float64, "D"), )
         end
     end
 
-
-    """
-    Frees all resources associated with a particular Biquad previously
-    created through a call to biquad_create_setup. This is called automatically
-    when the setup object is no longer visible to the garbage collector.
-
-    Returns: Cvoid
-    """
     @eval begin
+        """
+        Frees all resources associated with a particular Biquad previously
+        created through a call to biquad_create_setup. This is called automatically
+        when the setup object is no longer visible to the garbage collector.
+
+        Returns: Cvoid
+        """
         function biquaddestroy(biquad::Biquad{$T})
-            ccall(($(string("vDSP_biquad_DestroySetup", suff), libacc)),  Cvoid,
+            ccall(($(string("vDSP_biquad_DestroySetup", Dsuff), libacc)),  Cvoid,
                   (Ptr{Cvoid}, ),
                   biquad.setup)
+        end
+    end
+end
+
+# Backward-compatible method: biquadcreate(::Vector{Float64}, ::Int) defaults to Float64
+biquadcreate(coefficients::Vector{Float64}, sections::Int) = biquadcreate(coefficients, sections, Float64)
+
+## == Multi-channel Biquadratic/IIR filtering
+
+mutable struct BiquadMulti{T}
+    setup::Ptr{Cvoid}
+    channels::Int
+    sections::Int
+
+    function BiquadMulti(T::DataType, setup::Ptr{Cvoid}, channels::Int, sections::Int)
+        obj = new{T}(setup, channels, sections)
+        finalizer(biquadm_destroy, obj)
+        obj
+    end
+end
+
+# Both vDSP_biquadm_CreateSetup (Float32) and vDSP_biquadm_CreateSetupD (Float64)
+# accept Float64 coefficients.
+for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
+    @eval begin
+        """
+        Creates a multi-channel biquad IIR filter setup. `coefficients` must contain
+        `5 * channels * sections` Float64 values. Delay values are initialized to zero.
+
+        Returns: BiquadMulti{$($T)}
+        """
+        function biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int, ::Type{$T})
+            if length(coefficients) < 5 * channels * sections
+                error("Incomplete biquadm specification - coefficients must contain 5*channels*sections elements")
+            end
+            setup = ccall(($(string("vDSP_biquadm_CreateSetup", Dsuff)), libacc), Ptr{Cvoid},
+                          (Ptr{Float64}, UInt64, UInt64),
+                          coefficients, channels, sections)
+            return BiquadMulti($T, setup, channels, sections)
+        end
+
+        """
+        Apply a multi-channel biquad IIR filter. `X` is a vector of input channel vectors,
+        each of length `numelem`. Returns a vector of output channel vectors.
+
+        Returns: Vector{Vector{$($T)}}
+        """
+        function biquadm(X::Vector{Vector{$T}}, numelem::Int, setup::BiquadMulti{$T})
+            M = setup.channels
+            length(X) == M || error("Expected $M channels, got $(length(X))")
+            Y = [similar(x) for x in X]
+            xptrs = [pointer(x) for x in X]
+            yptrs = [pointer(y) for y in Y]
+            GC.@preserve X Y begin
+                ccall(($(string("vDSP_biquadm", suff)), libacc), Cvoid,
+                      (Ptr{Cvoid}, Ptr{Ptr{$T}}, Int64, Ptr{Ptr{$T}}, Int64, UInt64),
+                      setup.setup, xptrs, 1, yptrs, 1, numelem)
+            end
+            return Y
+        end
+
+        function biquadm_destroy(setup::BiquadMulti{$T})
+            ccall(($(string("vDSP_biquadm_DestroySetup", Dsuff)), libacc), Cvoid,
+                  (Ptr{Cvoid},),
+                  setup.setup)
+        end
+    end
+end
+
+# Convenience: default to Float32
+biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int) =
+    biquadm_create(coefficients, channels, sections, Float32)
+
+## == Spectral Analysis == ##
+
+for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDoubleSplitComplex))
+    @eval begin
+        """
+        Accumulating autospectrum: `C[n] += |A[n]|^2`. `A` is a complex vector,
+        `C` is a real vector that accumulates the power spectrum.
+
+        Wraps [`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec).
+        """
+        function zaspec!(C::Vector{$T}, A::Vector{Complex{$T}})
+            n = length(A)
+            realp = $T.(real.(A))
+            imagp = $T.(imag.(A))
+            GC.@preserve realp imagp begin
+                sc = $SC(pointer(realp), pointer(imagp))
+                ccall(($(string("vDSP_zaspec", suff)), libacc), Cvoid,
+                      (Ref{$SC}, Ptr{$T}, UInt64),
+                      sc, C, n)
+            end
+            return C
+        end
+
+        function zaspec(A::Vector{Complex{$T}})
+            C = zeros($T, length(A))
+            zaspec!(C, A)
+        end
+
+        """
+        Coherence function: `D[n] = |C[n]|^2 / (A[n] * B[n])`. `A` and `B` are real
+        power spectra, `C` is a complex cross-spectrum, `D` is the output coherence.
+
+        Wraps [`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher).
+        """
+        function zcoher!(D::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{Complex{$T}})
+            n = length(A)
+            cr = $T.(real.(C))
+            ci = $T.(imag.(C))
+            GC.@preserve cr ci begin
+                sc = $SC(pointer(cr), pointer(ci))
+                ccall(($(string("vDSP_zcoher", suff)), libacc), Cvoid,
+                      (Ptr{$T}, Ptr{$T}, Ref{$SC}, Ptr{$T}, UInt64),
+                      A, B, sc, D, n)
+            end
+            return D
+        end
+
+        function zcoher(A::Vector{$T}, B::Vector{$T}, C::Vector{Complex{$T}})
+            D = Vector{$T}(undef, length(A))
+            zcoher!(D, A, B, C)
+        end
+
+        """
+        Transfer function: `C[n] = B[n] / A[n]`. `A` is a real power spectrum,
+        `B` is a complex cross-spectrum, `C` is the output complex transfer function.
+
+        Wraps [`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans).
+        """
+        function ztrans!(C::Vector{Complex{$T}}, A::Vector{$T}, B::Vector{Complex{$T}})
+            n = length(A)
+            br = $T.(real.(B))
+            bi = $T.(imag.(B))
+            cr = Vector{$T}(undef, n)
+            ci = Vector{$T}(undef, n)
+            GC.@preserve br bi cr ci begin
+                scb = $SC(pointer(br), pointer(bi))
+                scc = $SC(pointer(cr), pointer(ci))
+                ccall(($(string("vDSP_ztrans", suff)), libacc), Cvoid,
+                      (Ptr{$T}, Ref{$SC}, Ref{$SC}, UInt64),
+                      A, scb, scc, n)
+            end
+            @inbounds for i in 1:n
+                C[i] = complex(cr[i], ci[i])
+            end
+            return C
+        end
+
+        function ztrans(A::Vector{$T}, B::Vector{Complex{$T}})
+            C = Vector{Complex{$T}}(undef, length(A))
+            ztrans!(C, A, B)
+        end
+
+        """
+        Accumulating cross-spectrum: `C[n] += conj(A[n]) * B[n]`. `A` and `B` are
+        complex vectors, `C` is the complex output that accumulates.
+
+        Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec).
+        """
+        function zcspec!(C::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            n = length(A)
+            ar = $T.(real.(A))
+            ai = $T.(imag.(A))
+            br = $T.(real.(B))
+            bi = $T.(imag.(B))
+            cr = $T.(real.(C))
+            ci = $T.(imag.(C))
+            GC.@preserve ar ai br bi cr ci begin
+                sca = $SC(pointer(ar), pointer(ai))
+                scb = $SC(pointer(br), pointer(bi))
+                scc = $SC(pointer(cr), pointer(ci))
+                ccall(($(string("vDSP_zcspec", suff)), libacc), Cvoid,
+                      (Ref{$SC}, Ref{$SC}, Ref{$SC}, UInt64),
+                      sca, scb, scc, n)
+            end
+            @inbounds for i in 1:n
+                C[i] = complex(cr[i], ci[i])
+            end
+            return C
+        end
+
+        function zcspec(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            C = zeros(Complex{$T}, length(A))
+            zcspec!(C, A, B)
         end
     end
 end
@@ -371,10 +566,6 @@ function plan_destroy(setup::DFTSetup)
           setup.setup)
 end
 
-
-const     FFT_FORWARD         = 1
-const     FFT_INVERSE         = -1
-const     SIGNAL_STRIDE       = 1
 
 mutable struct FFTSetup{T}
     plan::Ptr{Cvoid}

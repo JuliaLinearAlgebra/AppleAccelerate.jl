@@ -750,6 +750,43 @@ end
 @doc "Generate a ramp: `result[i] = start + i * step` for `i = 0, ..., n-1`. Wraps [`vDSP_vramp`](https://developer.apple.com/documentation/accelerate/vdsp_vramp)." vramp
 @doc "Multiply vector by a generated ramp. Wraps [`vDSP_vrampmul`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmul)." vrampmul
 
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vrampmul2!(O0::Vector{$T}, O1::Vector{$T}, I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
+            n = length(I0)
+            s = Ref{$T}(start)
+            ccall(($(string("vDSP_vrampmul2", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  I0, I1, 1, s, Ref(step), O0, O1, 1, n)
+            return (O0, O1)
+        end
+        function vrampmul2(I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
+            O0 = similar(I0)
+            O1 = similar(I1)
+            vrampmul2!(O0, O1, I0, I1, start, step)
+        end
+    end
+end
+
+@doc "Stereo ramp multiply: multiply two vectors by the same ramp. Wraps [`vDSP_vrampmul2`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmul2)." vrampmul2
+
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vavlin!(C::Vector{$T}, A::Vector{$T}, weight::$T)
+            ccall(($(string("vDSP_vavlin", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(weight), C, 1, length(A))
+            return C
+        end
+        function vavlin(A::Vector{$T}, C::Vector{$T}, weight::$T)
+            result = copy(C)
+            vavlin!(result, A, weight)
+        end
+    end
+end
+
+@doc "Vector linear average: `C[n] = (C[n] * weight + A[n]) / (weight + 1)`. Wraps [`vDSP_vavlin`](https://developer.apple.com/documentation/accelerate/vdsp_vavlin)." vavlin
+
 # ============================================================
 # vDSP Integration & running operations
 # See: https://developer.apple.com/documentation/accelerate/vdsp

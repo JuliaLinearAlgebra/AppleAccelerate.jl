@@ -168,6 +168,13 @@ AppleAccelerate.vsingle
 ```@docs
 AppleAccelerate.vramp
 AppleAccelerate.vrampmul
+AppleAccelerate.vrampmul2
+```
+
+## Linear Average
+
+```@docs
+AppleAccelerate.vavlin
 ```
 
 ## Integration & Running Operations

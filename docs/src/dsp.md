@@ -95,6 +95,24 @@ The extension supports the full AbstractFFTs interface for 1D and 2D:
 
 Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dimensions. Non-power-of-2 inputs, empty arrays, and 3D+ arrays will throw an `ArgumentError` with a message suggesting to use FFTW.jl.
 
+### Region argument
+
+For 2D transforms, the `region` argument selects which dimensions to transform — matching the AbstractFFTs convention:
+
+```@example dsp
+x = randn(ComplexF64, 16, 32)
+
+p_cols = plan_fft(x, (1,))   # transform along columns only (dim 1)
+p_rows = plan_fft(x, (2,))   # transform along rows only (dim 2)
+p_both = plan_fft(x, (1,2))  # transform along both (default)
+
+# Equivalent to two 1D FFTs composed:
+X_both = p_both * x
+X_seq  = p_rows * (p_cols * x)
+@assert X_both ≈ X_seq
+nothing # hide
+```
+
 !!! note
     Real FFT (`rfft`, `irfft`, `brfft`) is available only via the direct `AppleAccelerate.*` API and is not wired into the AbstractFFTs extension, to avoid dispatch conflicts with other packages that call `rfft` internally on non-power-of-2 inputs.
 
@@ -171,14 +189,83 @@ nothing # hide
 
 ## Biquad Filtering
 
-Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad). IIR filtering via cascaded biquad sections (Float64 only).
+Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad). IIR filtering via cascaded biquad sections. Both `Float64` and `Float32` processing are supported; coefficients are always `Float64`.
 
 ```@example dsp
 X = randn(Float64, 100)
 coefficients = randn(5)  # 5 coefficients per section
-bq = AppleAccelerate.biquadcreate(coefficients, 1)
+bq = AppleAccelerate.biquadcreate(coefficients, 1)  # defaults to Float64
 delays = zeros(4)
 result = AppleAccelerate.biquad(X, delays, length(X), bq)
+
+# Float32 processing
+X32 = randn(Float32, 100)
+bq32 = AppleAccelerate.biquadcreate(coefficients, 1, Float32)
+delays32 = zeros(Float32, 4)
+result32 = AppleAccelerate.biquad(X32, delays32, length(X32), bq32)
+nothing # hide
+```
+
+## Multi-Channel Biquad Filtering
+
+Wraps [`vDSP_biquadm`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm). Applies a multi-channel IIR filter in a single call. Both `Float32` (default) and `Float64` are supported.
+
+```@example dsp
+channels = 2
+sections = 1
+coefficients = randn(5 * channels * sections)
+
+setup = AppleAccelerate.biquadm_create(coefficients, channels, sections)  # Float32
+inputs = [randn(Float32, 64) for _ in 1:channels]
+outputs = AppleAccelerate.biquadm(inputs, 64, setup)
+
+# Float64 variant
+setup64 = AppleAccelerate.biquadm_create(coefficients, channels, sections, Float64)
+inputs64 = [randn(Float64, 64) for _ in 1:channels]
+outputs64 = AppleAccelerate.biquadm(inputs64, 64, setup64)
+nothing # hide
+```
+
+## Spectral Analysis
+
+Wraps Apple's [vDSP spectral analysis functions](https://developer.apple.com/documentation/accelerate/vdsp) for computing power spectra, cross-spectra, coherence, and transfer functions. All functions support both `Float32` and `Float64`.
+
+### Autospectrum
+
+```@example dsp
+x = randn(ComplexF64, 256)
+power = AppleAccelerate.zaspec(x)  # |x[n]|^2
+nothing # hide
+```
+
+The `zaspec!` variant accumulates into an existing vector (`C[n] += |A[n]|^2`), useful for averaging multiple frames.
+
+### Cross-Spectrum
+
+```@example dsp
+x = randn(ComplexF64, 256)
+y = randn(ComplexF64, 256)
+csd = AppleAccelerate.zcspec(x, y)  # conj(x[n]) * y[n], accumulated
+nothing # hide
+```
+
+### Coherence
+
+```@example dsp
+n = 256
+Sxx = abs2.(randn(ComplexF64, n))  # autospectrum of x
+Syy = abs2.(randn(ComplexF64, n))  # autospectrum of y
+Sxy = randn(ComplexF64, n)          # cross-spectrum
+coh = AppleAccelerate.zcoher(Sxx, Syy, Sxy)  # |Sxy|^2 / (Sxx * Syy)
+nothing # hide
+```
+
+### Transfer Function
+
+```@example dsp
+Sxx = abs2.(randn(ComplexF64, 256))
+Sxy = randn(ComplexF64, 256)
+H = AppleAccelerate.ztrans(Sxx, Sxy)  # Sxy[n] / Sxx[n]
 nothing # hide
 ```
 
