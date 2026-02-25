@@ -50,7 +50,7 @@ function factor!(aa_fact::AAFactorization{T},
                         * " has the correct properties for the factorization."))
         elseif aa_fact._factorization.status != SparseStatusOk
             throw(ErrorException("Something went wrong internally. Error type: "
-                                * String(aa_fact._factorization.status)))
+                                * string(aa_fact._factorization.status)))
         end
     end
 end
