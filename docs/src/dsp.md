@@ -144,6 +144,7 @@ Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/acc
 ```@docs
 AppleAccelerate.plan_dct
 AppleAccelerate.dct
+AppleAccelerate.plan_destroy
 ```
 
 ## Convolution
