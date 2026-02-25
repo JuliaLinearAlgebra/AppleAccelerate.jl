@@ -100,7 +100,7 @@ end
 for T in (Float32, Float64)
     X::Array{T} = 10*randn(N)
     @testset "Trigonometric::$T" begin
-        @testset "Testing $f::$T" for f in [:sin,:sinpi,:cos,:cospi,:tan,:atan] # tanpi not defined in Base
+        @testset "Testing $f::$T" for f in [:sin,:sinpi,:cos,:cospi,:tan,:tanpi,:atan]
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fa(X) ≈ fb.(X)
@@ -670,6 +670,181 @@ for T in (Float32, Float64)
         C2 = copy(C)
         AppleAccelerate.vavlin!(C2, A, weight)
         @test C2 ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vtmerg::$T" begin
+        n = 100
+        X = randn(T, n)
+        Y = randn(T, n)
+
+        # vtmerg: C[n] = A[n] + (B[n] - A[n]) * n/(N-1)  (0-based)
+        result = AppleAccelerate.vtmerg(X, Y)
+        expected = T[X[i] + (Y[i] - X[i]) * (i - 1) / (n - 1) for i in 1:n]
+        @test result ≈ expected
+
+        Z = similar(X)
+        AppleAccelerate.vtmerg!(Z, X, Y)
+        @test Z ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP venvlp::$T" begin
+        n = 50
+        A = randn(T, n)   # upper bound per element
+        B = randn(T, n)   # lower bound per element
+        C = randn(T, n)   # signal
+
+        result = AppleAccelerate.venvlp(A, B, C)
+        # venvlp: if C[n] < B[n] || A[n] < C[n] then D[n] = C[n] else D[n] = 0
+        ref = T[(C[i] < B[i] || A[i] < C[i]) ? C[i] : T(0) for i in 1:n]
+        @test result ≈ ref
+
+        Z = similar(C)
+        AppleAccelerate.venvlp!(Z, A, B, C)
+        @test Z ≈ ref
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP viclip::$T" begin
+        X = T.(collect(-5.0:0.5:5.0))
+        low = T(-2.0)
+        high = T(2.0)
+
+        # viclip: outside [low,high] pass through; inside: negative→low, non-negative→high
+        result = AppleAccelerate.viclip(X, low, high)
+        viclip_ref(x, lo, hi) = (x <= lo || hi <= x) ? x : (x < 0 ? lo : hi)
+        expected = T[viclip_ref(x, low, high) for x in X]
+        @test result ≈ expected
+
+        Z = similar(X)
+        AppleAccelerate.viclip!(Z, X, low, high)
+        @test Z ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vcmprs::$T" begin
+        X = T[1, 2, 3, 4, 5, 6, 7, 8]
+        gate = T[1, 0, 1, 0, 0, 1, 1, 0]
+
+        result = AppleAccelerate.vcmprs(X, gate)
+        n_kept = count(!iszero, gate)
+        expected = X[gate .!= 0]
+        @test result[1:n_kept] ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vrampmul::$T" begin
+        n = 100
+        X = ones(T, n)
+        start = T(1.0)
+        step = T(0.5)
+
+        result = AppleAccelerate.vrampmul(X, start, step)
+        ramp = T[start + (i - 1) * step for i in 1:n]
+        @test result ≈ X .* ramp
+
+        Z = similar(X)
+        AppleAccelerate.vrampmul!(Z, X, start, step)
+        @test Z ≈ X .* ramp
+
+        # Non-trivial input
+        X2 = randn(T, n)
+        result2 = AppleAccelerate.vrampmul(X2, start, step)
+        @test result2 ≈ X2 .* ramp
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vrsum::$T" begin
+        n = 50
+        X = ones(T, n)
+        scale = T(2.0)
+
+        result = AppleAccelerate.vrsum(X, scale)
+        # vrsum: result[0]=0; result[n] = result[n-1] + X[n]*scale  (0-based)
+        ref = similar(X)
+        ref[1] = T(0)
+        for i in 2:n
+            ref[i] = ref[i-1] + X[i] * scale
+        end
+        @test result ≈ ref
+
+        Z = similar(X)
+        AppleAccelerate.vrsum!(Z, X, scale)
+        @test Z ≈ ref
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vsimps::$T" begin
+        n = 101  # odd for Simpson's rule
+        X = ones(T, n)
+        step = T(0.1)
+
+        result = AppleAccelerate.vsimps(X, step)
+        # For constant f=1, Simpson integration gives cumulative area = n*step
+        @test result[1] ≈ T(0) atol=eps(T)
+        @test result[end] ≈ T((n - 1) * step) atol=T(0.01)
+
+        Z = similar(X)
+        AppleAccelerate.vsimps!(Z, X, step)
+        @test Z ≈ result
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vlint::$T" begin
+        # Ramp table: [0, 10, 20, 30, 40]
+        table = T[0, 10, 20, 30, 40]
+        # 0-based fractional indices
+        indices = T[0.0, 0.5, 1.0, 2.5, 3.0]
+
+        result = AppleAccelerate.vlint(table, indices)
+        expected = T[0, 5, 10, 25, 30]
+        @test result ≈ expected
+
+        Z = Vector{T}(undef, length(indices))
+        AppleAccelerate.vlint!(Z, table, indices)
+        @test Z ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP vqint::$T" begin
+        # Quadratic table: f(x) = x^2 → [0, 1, 4, 9, 16, 25]
+        table = T[0, 1, 4, 9, 16, 25]
+        # Fractional indices (must have p+2 < length(table))
+        indices = T[0.0, 0.5, 1.0, 1.5, 2.0, 3.0]
+
+        result = AppleAccelerate.vqint(table, indices)
+        # For a quadratic table, quadratic interpolation should be exact
+        expected = T[0, 0.25, 1, 2.25, 4, 9]
+        @test result ≈ expected atol=T(0.01)
+
+        Z = Vector{T}(undef, length(indices))
+        AppleAccelerate.vqint!(Z, table, indices)
+        @test Z ≈ expected atol=T(0.01)
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP nzcros::$T" begin
+        # Signal with known zero crossings at every consecutive pair
+        X = T[1, -1, 1, -1, 1]
+        (indices, cnt) = AppleAccelerate.nzcros(X)
+        @test cnt == 4
+        @test length(indices) == cnt
+
+        # No crossings in a constant signal
+        Y = ones(T, 10)
+        (_, cnt2) = AppleAccelerate.nzcros(Y)
+        @test cnt2 == 0
     end
 end
 
