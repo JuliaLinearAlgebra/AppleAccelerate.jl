@@ -386,17 +386,49 @@ for T in (Float32,  Float64)
     end
 end
 
-for T in (Float64, )
-    @testset "Biquadratic Flitering::$T" begin
-        @testset "Single Section::$T" begin
-            X::Vector{T} = randn(10)
-            d::Vector{T} = zeros(4)
-            c::Vector{T} = [x%0.5 for x in randn(5)]
-            fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
-            fa = AppleAccelerate.biquadcreate(c, 1)
-            @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
-        end
+@testset "Biquadratic Filtering::Float64" begin
+    @testset "Single Section::Float64" begin
+        X::Vector{Float64} = randn(10)
+        d::Vector{Float64} = zeros(4)
+        c::Vector{Float64} = [x%0.5 for x in randn(5)]
+        fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
+        fa = AppleAccelerate.biquadcreate(c, 1)
+        @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
     end
+end
+
+@testset "Biquadratic Filtering::Float32" begin
+    @testset "Single Section::Float32" begin
+        c = [x%0.5 for x in randn(5)]  # Float64 coefficients (required by Apple API)
+        X32 = Float32.(randn(10))
+        d32 = zeros(Float32, 4)
+        fa32 = AppleAccelerate.biquadcreate(c, 1, Float32)
+        result32 = AppleAccelerate.biquad(X32, d32, length(X32), fa32)
+
+        # Compare with Float64 result (allowing for precision loss)
+        X64 = Float64.(X32)
+        d64 = zeros(Float64, 4)
+        fa64 = AppleAccelerate.biquadcreate(c, 1, Float64)
+        result64 = AppleAccelerate.biquad(X64, d64, length(X64), fa64)
+        @test Float32.(result64) ≈ result32 rtol=sqrt(eps(Float32))
+    end
+end
+
+@testset "Multi-channel Biquad::Float32" begin
+    # Simple lowpass filter coefficients (1 section per channel)
+    c = [0.1, 0.2, 0.1, -0.5, 0.2,   # channel 1
+         0.1, 0.2, 0.1, -0.5, 0.2]    # channel 2
+    channels = 2
+    sections = 1
+    setup = AppleAccelerate.biquadm_create(c, channels, sections, Float32)
+    X = [Float32.(randn(64)), Float32.(randn(64))]
+    Y = AppleAccelerate.biquadm(X, 64, setup)
+    @test length(Y) == 2
+    @test length(Y[1]) == 64
+    @test length(Y[2]) == 64
+    # Results should not be all zeros (filter was applied)
+    @test !all(iszero, Y[1])
+    @test !all(iszero, Y[2])
 end
 
 
@@ -419,6 +451,108 @@ for T in (Float32, Float64)
             Wa = AppleAccelerate.hanning(N, T)
             Wb = 0.5(1 .- cos.(2pi.*(0:(N-1))./N))
             @test Wa ≈ Wb
+        end
+    end
+end
+
+@testset "Spectral Analysis" begin
+    for T in (Float32, Float64)
+        CT = Complex{T}
+        @testset "zaspec (autospectrum)::$T" begin
+            A = CT.(randn(64) .+ im .* randn(64))
+            C = zeros(T, 64)
+            AppleAccelerate.zaspec!(C, A)
+            @test C ≈ abs2.(A)
+
+            # Accumulating: calling twice should double
+            C2 = zeros(T, 64)
+            AppleAccelerate.zaspec!(C2, A)
+            AppleAccelerate.zaspec!(C2, A)
+            @test C2 ≈ 2 .* abs2.(A)
+
+            # Allocating version
+            @test AppleAccelerate.zaspec(A) ≈ abs2.(A)
+        end
+
+        @testset "zcoher (coherence)::$T" begin
+            n = 64
+            A = abs.(randn(T, n)) .+ T(0.01)  # power spectrum 1, positive
+            B = abs.(randn(T, n)) .+ T(0.01)  # power spectrum 2, positive
+            C = CT.(randn(n) .+ im .* randn(n))  # cross-spectrum
+
+            D = AppleAccelerate.zcoher(A, B, C)
+            expected = abs2.(C) ./ (A .* B)
+            @test D ≈ expected
+        end
+
+        @testset "ztrans (transfer function)::$T" begin
+            n = 64
+            A = abs.(randn(T, n)) .+ T(0.01)  # real power spectrum, positive
+            B = CT.(randn(n) .+ im .* randn(n))  # complex cross-spectrum
+
+            C = AppleAccelerate.ztrans(A, B)
+            expected = B ./ A
+            @test C ≈ expected
+        end
+
+        @testset "zcspec (cross-spectrum)::$T" begin
+            n = 64
+            A = CT.(randn(n) .+ im .* randn(n))
+            B = CT.(randn(n) .+ im .* randn(n))
+
+            C = AppleAccelerate.zcspec(A, B)
+            expected = conj.(A) .* B
+            @test C ≈ expected
+
+            # Accumulating: calling twice
+            C2 = zeros(CT, n)
+            AppleAccelerate.zcspec!(C2, A, B)
+            AppleAccelerate.zcspec!(C2, A, B)
+            @test C2 ≈ 2 .* (conj.(A) .* B)
+        end
+    end
+end
+
+@testset "plan_fft region argument" begin
+    @testset "2D FFT along dim 1 only" begin
+        x = randn(ComplexF64, 16, 8)
+        p = plan_fft(x, (1,))
+        result = p * x
+        expected = FFTW.fft(x, (1,))
+        @test result ≈ expected
+    end
+
+    @testset "2D FFT along dim 2 only" begin
+        x = randn(ComplexF64, 16, 8)
+        p = plan_fft(x, (2,))
+        result = p * x
+        expected = FFTW.fft(x, (2,))
+        @test result ≈ expected
+    end
+
+    @testset "2D FFT along both dims matches full 2D FFT" begin
+        x = randn(ComplexF64, 8, 16)
+        p12 = plan_fft(x, 1:2)
+        p_default = plan_fft(x)
+        @test (p12 * x) ≈ (p_default * x)
+    end
+
+    @testset "2D ifft roundtrip with region" begin
+        x = randn(ComplexF64, 8, 8)
+        for region in ((1,), (2,), 1:2)
+            fwd = plan_fft(x, region) * x
+            result = plan_bfft(x, region) * fwd
+            n = prod(size(x, d) for d in region)
+            @test result ./ n ≈ x
+        end
+    end
+
+    @testset "2D plan_fft region Float32" begin
+        x = randn(ComplexF32, 8, 8)
+        for region in ((1,), (2,))
+            result = plan_fft(x, region) * x
+            expected = FFTW.fft(x, collect(region))
+            @test result ≈ expected rtol=sqrt(eps(Float32))
         end
     end
 end

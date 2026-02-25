@@ -44,6 +44,27 @@ function _vdsp_unsupported(x)
     end
 end
 
+# --- Region helpers ---
+# Normalize region to a Set of dimension indices.
+_region_set(region) = Set(collect(region))
+_region_set(region::Integer) = Set((region,))
+
+# Apply 1D FFT along a single dimension of a matrix.
+function _fft_along_dim!(result::Matrix{Complex{T}}, x::Matrix{Complex{T}}, setup::FFTSetup{T}, dim::Int, direction::Int) where {T}
+    if dim == 1
+        for j in axes(x, 2)
+            col = x[:, j]
+            result[:, j] = AppleAccelerate._fft1d(col, setup, direction)
+        end
+    else  # dim == 2
+        for i in axes(x, 1)
+            row = Vector(x[i, :])
+            result[i, :] = AppleAccelerate._fft1d(row, setup, direction)
+        end
+    end
+    return result
+end
+
 # === Out-of-place plan types ===
 
 mutable struct VDSPFFTPlan{T<:Union{Float32,Float64},N,G} <: Plan{Complex{T}}
@@ -122,12 +143,30 @@ end
 
 function Base.:*(p::VDSPFFTPlan{T,2}, x::AbstractMatrix) where {T}
     _check_vdsp_fft(x)
-    AppleAccelerate.fft(convert(Matrix{Complex{T}}, x), p.setup)
+    xc = convert(Matrix{Complex{T}}, x)
+    dims = _region_set(p.region)
+    if 1 in dims && 2 in dims
+        return AppleAccelerate.fft(xc, p.setup)
+    end
+    result = copy(xc)
+    for d in sort(collect(dims))
+        _fft_along_dim!(result, result, p.setup, d, AppleAccelerate.FFT_FORWARD)
+    end
+    return result
 end
 
 function Base.:*(p::VDSPBFFTPlan{T,2}, x::AbstractMatrix) where {T}
     _check_vdsp_fft(x)
-    AppleAccelerate.bfft(convert(Matrix{Complex{T}}, x), p.setup)
+    xc = convert(Matrix{Complex{T}}, x)
+    dims = _region_set(p.region)
+    if 1 in dims && 2 in dims
+        return AppleAccelerate.bfft(xc, p.setup)
+    end
+    result = copy(xc)
+    for d in sort(collect(dims))
+        _fft_along_dim!(result, result, p.setup, d, AppleAccelerate.FFT_INVERSE)
+    end
+    return result
 end
 
 # --- Out-of-place mul! ---
@@ -144,12 +183,12 @@ end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
     _check_vdsp_fft(x)
-    copyto!(y, AppleAccelerate.fft(convert(Matrix{Complex{T}}, x), p.setup))
+    copyto!(y, p * x)
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPBFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
     _check_vdsp_fft(x)
-    copyto!(y, AppleAccelerate.bfft(convert(Matrix{Complex{T}}, x), p.setup))
+    copyto!(y, p * x)
 end
 
 # --- Out-of-place plan_inv ---
@@ -246,12 +285,28 @@ end
 
 function Base.:*(p::VDSPInplaceFFTPlan{T,2}, x::AbstractMatrix) where {T}
     _check_vdsp_fft(x)
-    AppleAccelerate.fft!(convert(Matrix{Complex{T}}, x), p.setup)
+    xc = convert(Matrix{Complex{T}}, x)
+    dims = _region_set(p.region)
+    if 1 in dims && 2 in dims
+        return AppleAccelerate.fft!(xc, p.setup)
+    end
+    for d in sort(collect(dims))
+        _fft_along_dim!(xc, xc, p.setup, d, AppleAccelerate.FFT_FORWARD)
+    end
+    return xc
 end
 
 function Base.:*(p::VDSPInplaceBFFTPlan{T,2}, x::AbstractMatrix) where {T}
     _check_vdsp_fft(x)
-    AppleAccelerate.bfft!(convert(Matrix{Complex{T}}, x), p.setup)
+    xc = convert(Matrix{Complex{T}}, x)
+    dims = _region_set(p.region)
+    if 1 in dims && 2 in dims
+        return AppleAccelerate.bfft!(xc, p.setup)
+    end
+    for d in sort(collect(dims))
+        _fft_along_dim!(xc, xc, p.setup, d, AppleAccelerate.FFT_INVERSE)
+    end
+    return xc
 end
 
 # --- In-place mul! ---
@@ -271,13 +326,13 @@ end
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPInplaceFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
     _check_vdsp_fft(x)
     copyto!(y, x)
-    AppleAccelerate.fft!(convert(Matrix{Complex{T}}, y), p.setup)
+    p * y
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPInplaceBFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
     _check_vdsp_fft(x)
     copyto!(y, x)
-    AppleAccelerate.bfft!(convert(Matrix{Complex{T}}, y), p.setup)
+    p * y
 end
 
 # --- In-place plan_inv ---

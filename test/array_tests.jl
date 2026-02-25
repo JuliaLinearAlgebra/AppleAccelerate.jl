@@ -631,4 +631,46 @@ for T in (Float32, Float64)
     end
 end
 
+for T in (Float32, Float64)
+    @testset "vDSP Stereo Ramp Multiply (vrampmul2)::$T" begin
+        n = 100
+        I0 = ones(T, n)
+        I1 = ones(T, n) .* T(2)
+        start = T(1.0)
+        step = T(0.5)
+
+        O0, O1 = AppleAccelerate.vrampmul2(I0, I1, start, step)
+
+        # O0[i] = (start + i*step) * I0[i], O1[i] = (start + i*step) * I1[i]
+        ramp = [start + i * step for i in 0:(n-1)]
+        @test O0 ≈ ramp .* I0
+        @test O1 ≈ ramp .* I1
+
+        # In-place variant
+        R0 = similar(I0)
+        R1 = similar(I1)
+        AppleAccelerate.vrampmul2!(R0, R1, I0, I1, start, step)
+        @test R0 ≈ O0
+        @test R1 ≈ O1
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP Vector Linear Average (vavlin)::$T" begin
+        n = 50
+        A = randn(T, n)
+        C = randn(T, n)
+        weight = T(3.0)
+
+        result = AppleAccelerate.vavlin(A, C, weight)
+        expected = (C .* weight .+ A) ./ (weight + 1)
+        @test result ≈ expected
+
+        # In-place variant
+        C2 = copy(C)
+        AppleAccelerate.vavlin!(C2, A, weight)
+        @test C2 ≈ expected
+    end
+end
+
 end # @testset "Array Operations"
