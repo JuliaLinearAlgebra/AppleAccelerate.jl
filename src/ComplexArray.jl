@@ -85,8 +85,20 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     end
 end
 
-@doc "Negate complex vector: `result[i] = -X[i]`. Wraps `vDSP_zvneg`/`vDSP_zvnegD`." vneg!
-@doc "Copy complex vector. Wraps `vDSP_zvmov`/`vDSP_zvmovD`." vcopy
+@doc """
+    vconj(X::Vector{Complex{T}}) -> Vector{Complex{T}}
+    vconj!(result, X)
+
+Complex conjugate: `result[i] = conj(X[i])`.
+Wraps [`vDSP_zvconj`](https://developer.apple.com/documentation/accelerate/vdsp_zvconj).
+""" vconj
+
+@doc """
+    vcopy(X::Vector{Complex{T}}) -> Vector{Complex{T}}
+
+Copy complex vector via split-complex move.
+Wraps [`vDSP_zvmov`](https://developer.apple.com/documentation/accelerate/vdsp_zvmov).
+""" vcopy
 
 # ============================================================
 # Complex → Complex binary operations (split-complex in/out)
@@ -252,13 +264,29 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     end
 end
 
-@doc "Complex absolute value (modulus): `result[i] = |X[i]|`. Wraps `vDSP_zvabs`/`vDSP_zvabsD`." vabs!
-@doc "Complex phase (angle): `result[i] = atan(imag(X[i]), real(X[i]))`. Wraps `vDSP_zvphas`/`vDSP_zvphasD`." vphase
-@doc "In-place complex phase. Wraps `vDSP_zvphas`/`vDSP_zvphasD`." vphase!
-@doc "Squared magnitude: `result[i] = abs2(X[i])`. Wraps `vDSP_zvmags`/`vDSP_zvmagsD`." vmags
-@doc "In-place squared magnitude. Wraps `vDSP_zvmags`/`vDSP_zvmagsD`." vmags!
-@doc "Squared magnitude and accumulate: `result[i] = abs2(X[i]) + B[i]`. Wraps `vDSP_zvmgsa`/`vDSP_zvmgsaD`." vmagsa
-@doc "In-place squared magnitude and accumulate. Wraps `vDSP_zvmgsa`/`vDSP_zvmgsaD`." vmagsa!
+@doc """
+    vphase(X::Vector{Complex{T}}) -> Vector{T}
+    vphase!(result, X)
+
+Complex phase (angle): `result[i] = atan(imag(X[i]), real(X[i]))`.
+Wraps [`vDSP_zvphas`](https://developer.apple.com/documentation/accelerate/vdsp_zvphas).
+""" vphase
+
+@doc """
+    vmags(X::Vector{Complex{T}}) -> Vector{T}
+    vmags!(result, X)
+
+Squared magnitude: `result[i] = abs2(X[i]) = real(X[i])^2 + imag(X[i])^2`.
+Wraps [`vDSP_zvmags`](https://developer.apple.com/documentation/accelerate/vdsp_zvmags).
+""" vmags
+
+@doc """
+    vmagsa(X::Vector{Complex{T}}, B::Vector{T}) -> Vector{T}
+    vmagsa!(result, X, B)
+
+Squared magnitude and accumulate: `result[i] = abs2(X[i]) + B[i]`.
+Wraps [`vDSP_zvmgsa`](https://developer.apple.com/documentation/accelerate/vdsp_zvmgsa).
+""" vmagsa
 
 # ============================================================
 # Complex dot product (returns scalar)
