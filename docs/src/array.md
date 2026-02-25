@@ -48,6 +48,7 @@ AppleAccelerate.vsq
 AppleAccelerate.vssq
 AppleAccelerate.vfrac
 AppleAccelerate.vreverse!
+AppleAccelerate.vreverse
 ```
 
 ## Vector Reductions
@@ -71,14 +72,16 @@ AppleAccelerate.distancesq
 
 ## Vector-Vector Arithmetic
 
-| Function | Description |
-|----------|-------------|
-| `vadd(X, Y)` | Element-wise addition |
-| `vsub(X, Y)` | Element-wise subtraction |
-| `vmul(X, Y)` | Element-wise multiplication |
-| `vdiv(X, Y)` | Element-wise division |
-
-All have mutating `!` variants (e.g., `vadd!(result, X, Y)`).
+```@docs
+AppleAccelerate.vadd
+AppleAccelerate.vadd!
+AppleAccelerate.vsub
+AppleAccelerate.vsub!
+AppleAccelerate.vmul
+AppleAccelerate.vmul!
+AppleAccelerate.vdiv
+AppleAccelerate.vdiv!
+```
 
 ## Two-Vector Comparison & Distance
 
@@ -93,19 +96,19 @@ AppleAccelerate.vtmerg
 
 ## Vector-Scalar Operations
 
-| Function | Description |
-|----------|-------------|
-| `vsadd(X, c)` | `X .+ c` |
-| `vssub(X, c)` | `X .- c` |
-| `svsub(X, c)` | `c .- X` |
-| `vsmul(X, c)` | `X .* c` |
-| `vsdiv(X, c)` | `X ./ c` |
-
 ```@docs
+AppleAccelerate.vsadd
+AppleAccelerate.vsadd!
+AppleAccelerate.vssub
+AppleAccelerate.vssub!
+AppleAccelerate.svsub
+AppleAccelerate.svsub!
+AppleAccelerate.vsmul
+AppleAccelerate.vsmul!
+AppleAccelerate.vsdiv
+AppleAccelerate.vsdiv!
 AppleAccelerate.svdiv
 ```
-
-All have mutating `!` variants.
 
 ## Compound Arithmetic
 
