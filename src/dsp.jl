@@ -1,4 +1,4 @@
-## DSP.jl ##
+## dsp.jl ##
 
 mutable struct DFTSetup{T}
     setup::Ptr{Cvoid}
@@ -548,13 +548,6 @@ function hanning(length::Int, rtype::DataType=Float64)
     hanning!(result, length, 0)
 end
 
-"""
-Alias function for `hanning`
-"""
-function hann(length::Int, rtype::DataType=Float64)
-    hanning(length, rtype)
-end
-
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     """
@@ -608,17 +601,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
             return result
-        end
-    end
-
-    """
-    Alias function for hanning!
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function hann!(result::Vector{$T}, length::Int, flag::Int=0)
-            hanning!(result, length, flag)
         end
     end
 

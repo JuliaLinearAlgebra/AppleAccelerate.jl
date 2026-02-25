@@ -1,4 +1,4 @@
-## Array.jl ##
+## array.jl ##
 
 mksymtuple(x) = (x, x)
 

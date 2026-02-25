@@ -172,13 +172,11 @@ function __init__()
 end
 
 @static if Sys.isapple()
-    include("Util.jl")
-    include("Array.jl")
-    include("ComplexArray.jl")
-    include("DSP.jl")
-    include("libSparse/wrappers.jl")
-    include("libSparse/AASparseMatrices.jl")
-    include("libSparse/AAFactorizations.jl")
+    include("util.jl")
+    include("array.jl")
+    include("complexarray.jl")
+    include("dsp.jl")
+    include("sparse.jl")
 end
 
 end # module

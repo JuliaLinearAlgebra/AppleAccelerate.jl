@@ -1,7 +1,7 @@
-## ComplexArray.jl — Complex-valued vDSP operations using split-complex format ##
+## complexarray.jl — Complex-valued vDSP operations using split-complex format ##
 
 # ============================================================
-# Split-complex structs (used here and by DSP.jl for FFT)
+# Split-complex structs (used here and by dsp.jl for FFT)
 # ============================================================
 struct DSPDoubleSplitComplex
     realp::Ptr{Float64}

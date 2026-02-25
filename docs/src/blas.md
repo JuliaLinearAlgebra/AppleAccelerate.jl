@@ -24,24 +24,24 @@ For the complete list of available operations, see the [Julia LinearAlgebra docu
 using AppleAccelerate
 ```
 
-```@docs
-AppleAccelerate.load_accelerate
-```
+| Function | Description |
+|----------|-------------|
+| [`load_accelerate`](@ref AppleAccelerate.load_accelerate) | Load Accelerate BLAS/LAPACK via LBT |
 
 ## Threading
 
 On macOS 26+, you can control BLAS threading:
 
-```@docs
-AppleAccelerate.set_num_threads
-AppleAccelerate.get_num_threads
-```
+| Function | Description |
+|----------|-------------|
+| [`set_num_threads`](@ref AppleAccelerate.set_num_threads) | Set the number of Accelerate BLAS threads |
+| [`get_num_threads`](@ref AppleAccelerate.get_num_threads) | Get the number of Accelerate BLAS threads |
 
 ## Utilities
 
-```@docs
-AppleAccelerate.get_macos_version
-```
+| Function | Description |
+|----------|-------------|
+| [`get_macos_version`](@ref AppleAccelerate.get_macos_version) | Return the current macOS version |
 
 ## Benchmarks
 
