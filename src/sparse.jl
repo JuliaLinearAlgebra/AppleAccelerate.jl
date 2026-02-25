@@ -756,6 +756,13 @@ AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
                                         AAFactorization(AASparseMatrix(M))
 
 # easiest way to make this follow the defaults and naming conventions of LinearAlgebra?
+"""
+    factor!(f::AAFactorization, [type::SparseFactorization_t])
+
+Explicitly compute the factorization. If `type` is not specified, Cholesky is used
+for symmetric matrices and QR for non-symmetric. Called automatically by [`solve`](@ref)
+if the factorization has not yet been computed.
+"""
 function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
@@ -779,6 +786,13 @@ function factor!(aa_fact::AAFactorization{T},
     end
 end
 
+"""
+    solve(f::AAFactorization, b::StridedVecOrMat)
+
+Solve the linear system `Ax = b` using Apple's Sparse Solvers, returning the solution `x`.
+The factorization is computed lazily on the first call if not already factored.
+Equivalent to `f \\ b`.
+"""
 function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTypes
     size(aa_fact.matrixObj)[2] != size(b, 1) && throw(DimensionMismatch(
         "Matrix and right-hand side size mismatch: got "
@@ -789,6 +803,13 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     return x
 end
 
+"""
+    solve!(f::AAFactorization, xb::StridedVecOrMat)
+
+Solve the linear system `Ax = b` in-place, overwriting `xb` with the solution.
+On input `xb` contains the right-hand side `b`; on output it contains the solution `x`.
+Equivalent to `ldiv!(f, xb)`.
+"""
 function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes
     ((xb isa StridedMatrix) &&
         (size(aa_fact.matrixObj)[1] != size(aa_fact.matrixObj)[2])) &&

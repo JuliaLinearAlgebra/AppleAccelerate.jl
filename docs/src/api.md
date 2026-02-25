@@ -18,8 +18,27 @@ AppleAccelerate.vreverse
 ### Vector Reductions
 
 ```@docs
+AppleAccelerate.maximum
+AppleAccelerate.minimum
+AppleAccelerate.sum
+AppleAccelerate.mean
+AppleAccelerate.findmax
+AppleAccelerate.findmin
+AppleAccelerate.meanmag
+AppleAccelerate.meansqr
+AppleAccelerate.meanssqr
+AppleAccelerate.summag
+AppleAccelerate.sumsqr
+AppleAccelerate.sumssqr
 AppleAccelerate.dot
 AppleAccelerate.distancesq
+```
+
+### Special Return Types
+
+```@docs
+AppleAccelerate.sincos
+AppleAccelerate.cis
 ```
 
 ### Vector-Vector Arithmetic
@@ -171,6 +190,7 @@ AppleAccelerate.load_accelerate
 AppleAccelerate.set_num_threads
 AppleAccelerate.get_num_threads
 AppleAccelerate.get_macos_version
+AppleAccelerate._read_macos_version
 ```
 
 ## Sparse Linear Algebra
@@ -179,9 +199,41 @@ AppleAccelerate.get_macos_version
 AppleAccelerate.AASparseMatrix
 AppleAccelerate.AAFactorization
 AppleAccelerate.muladd!
+AppleAccelerate.factor!
+AppleAccelerate.solve
+AppleAccelerate.solve!
 ```
 
 ## Signal Processing
+
+### FFT
+
+```@docs
+AppleAccelerate.plan_fft
+AppleAccelerate.fft
+AppleAccelerate.ifft
+AppleAccelerate.bfft
+AppleAccelerate.fft!
+AppleAccelerate.ifft!
+AppleAccelerate.bfft!
+```
+
+### Real FFT
+
+```@docs
+AppleAccelerate.plan_rfft
+AppleAccelerate.rfft
+AppleAccelerate.irfft
+AppleAccelerate.brfft
+```
+
+### DFT
+
+```@docs
+AppleAccelerate.plan_dft
+AppleAccelerate.dft
+AppleAccelerate.idft
+```
 
 ### DCT
 
@@ -191,13 +243,52 @@ AppleAccelerate.dct
 AppleAccelerate.plan_destroy
 ```
 
+### Convolution & Correlation
+
+```@docs
+AppleAccelerate.conv
+AppleAccelerate.conv!
+AppleAccelerate.xcorr
+AppleAccelerate.xcorr!
+```
+
+### Biquad Filtering
+
+```@docs
+AppleAccelerate.biquadcreate
+AppleAccelerate.biquad
+AppleAccelerate.biquaddestroy
+```
+
+### Multi-Channel Biquad Filtering
+
+```@docs
+AppleAccelerate.biquadm_create
+AppleAccelerate.biquadm
+```
+
+### Recursive Filter
+
+```@docs
+AppleAccelerate.deq22
+AppleAccelerate.deq22!
+AppleAccelerate.desamp
+AppleAccelerate.desamp!
+AppleAccelerate.wiener
+AppleAccelerate.wiener!
+```
+
 ### Spectral Analysis
 
 ```@docs
 AppleAccelerate.zaspec
+AppleAccelerate.zaspec!
 AppleAccelerate.zcspec
+AppleAccelerate.zcspec!
 AppleAccelerate.zcoher
+AppleAccelerate.zcoher!
 AppleAccelerate.ztrans
+AppleAccelerate.ztrans!
 ```
 
 ### Window Functions

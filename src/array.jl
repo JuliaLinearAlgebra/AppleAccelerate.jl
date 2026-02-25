@@ -143,6 +143,27 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 end
 
+"""
+    sincos(X::Array{T}) where T <: Union{Float32, Float64}
+
+Compute the sine and cosine of each element simultaneously via vecLib `vvsincos`.
+Returns a tuple `(sin(X), cos(X))` of arrays. Faster than computing `sin` and `cos`
+separately since both are produced in a single pass.
+
+The mutating variant `sincos!(out_sin, out_cos, X)` stores results in preallocated arrays.
+"""
+sincos
+
+"""
+    cis(X::Array{T}) where T <: Union{Float32, Float64}
+
+Compute `cos(x) + im*sin(x)` for each element via vecLib `vvcosisin`.
+Returns a `Complex{T}` array. Equivalent to `exp.(im .* X)` but faster.
+
+The mutating variant `cis!(out, X)` stores results in a preallocated complex array.
+"""
+cis
+
 # Functions over single vectors that return scalars/tuples
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
@@ -174,6 +195,78 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 end
+
+@doc """
+    maximum(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the maximum value in `X` via vDSP. Equivalent to `Base.maximum(X)`.
+""" maximum
+
+@doc """
+    minimum(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the minimum value in `X` via vDSP. Equivalent to `Base.minimum(X)`.
+""" minimum
+
+@doc """
+    sum(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the sum of elements in `X` via vDSP. Equivalent to `Base.sum(X)`.
+""" sum
+
+@doc """
+    mean(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the arithmetic mean of elements in `X` via vDSP.
+""" mean
+
+@doc """
+    meanmag(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the mean of absolute values: `sum(abs.(X)) / length(X)`.
+""" meanmag
+
+@doc """
+    meansqr(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the mean of squares: `sum(X.^2) / length(X)`.
+""" meansqr
+
+@doc """
+    meanssqr(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the mean of signed squares: `sum(X .* abs.(X)) / length(X)`.
+""" meanssqr
+
+@doc """
+    summag(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the sum of absolute values: `sum(abs.(X))`.
+""" summag
+
+@doc """
+    sumsqr(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the sum of squares: `sum(X.^2)`.
+""" sumsqr
+
+@doc """
+    sumssqr(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return the sum of signed squares: `sum(X .* abs.(X))`.
+""" sumssqr
+
+@doc """
+    findmax(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return `(value, index)` of the maximum element in `X` via vDSP. Equivalent to `Base.findmax(X)`.
+""" findmax
+
+@doc """
+    findmin(X::Vector{T}) where T <: Union{Float32, Float64}
+
+Return `(value, index)` of the minimum element in `X` via vDSP. Equivalent to `Base.findmin(X)`.
+""" findmin
 
 # Element-wise operations over two vectors
 for (T, suff) in ((Float32, ""), (Float64, "D"))
