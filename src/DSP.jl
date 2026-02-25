@@ -22,10 +22,12 @@ mutable struct Biquad{T}
     end
 end
 
-## === FFT constants === ##
+## === FFT/DFT constants === ##
 
 const     FFT_FORWARD         = 1
 const     FFT_INVERSE         = -1
+const     DFT_FORWARD         = 1
+const     DFT_INVERSE         = -1
 const     SIGNAL_STRIDE       = 1
 
 ## === FUNCTIONS == ##
@@ -391,6 +393,123 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
     end
 end
 
+## == Recursive Filter, FIR Decimation, Wiener-Levinson == ##
+
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    @eval begin
+        """
+            deq22!(C::Vector{$($T)}, A::Vector{$($T)}, B::Vector{$($T)})
+
+        Second-order (two-pole two-zero) recursive filter using `vDSP_deq22`.
+        `A` has N+2 elements (A[1:2] are initial state), `B` has 5 coefficients,
+        `C` has N+2 elements (C[1:2] must be preset as initial output state).
+        Computes: `C[n] = A[n]*B[1] + A[n-1]*B[2] + A[n-2]*B[3] - C[n-1]*B[4] - C[n-2]*B[5]`
+
+        Returns: `C`
+        """
+        function deq22!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+            length(B) == 5 || error("B must have exactly 5 coefficients")
+            length(A) >= 3 || error("A must have at least 3 elements (2 state + 1 sample)")
+            length(C) == length(A) || error("C must have the same length as A")
+            N = UInt64(length(A) - 2)
+            ccall(($(string("vDSP_deq22", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, B, C, 1, N)
+            return C
+        end
+
+        """
+            deq22(A::Vector{$($T)}, B::Vector{$($T)})
+
+        Allocating version of `deq22!`. Pads `A` with 2 leading zeros and returns
+        only the N output samples (without the 2-element state prefix).
+
+        Returns: `Vector{$($T)}` of length `length(A)`
+        """
+        function deq22(A::Vector{$T}, B::Vector{$T})
+            N = length(A)
+            Apad = [$T(0); $T(0); A]
+            C = zeros($T, N + 2)
+            deq22!(C, Apad, B)
+            return C[3:end]
+        end
+    end
+
+    @eval begin
+        """
+            desamp!(C::Vector{$($T)}, A::Vector{$($T)}, DF::Int, F::Vector{$($T)})
+
+        FIR decimation filter using `vDSP_desamp`. Filters input `A` with FIR
+        coefficients `F` (P taps) and decimation factor `DF`.
+        `C` must have at least `div(length(A) - P, DF) + 1` elements.
+        Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed)
+
+        Returns: `C`
+        """
+        function desamp!(C::Vector{$T}, A::Vector{$T}, DF::Int, F::Vector{$T})
+            P = UInt64(length(F))
+            Nout = UInt64(div(length(A) - P, DF) + 1)
+            length(C) >= Nout || error("C must have at least $(Nout) elements")
+            ccall(($(string("vDSP_desamp", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, UInt64, UInt64),
+                  A, DF, F, C, Nout, P)
+            return C
+        end
+
+        """
+            desamp(A::Vector{$($T)}, DF::Int, F::Vector{$($T)})
+
+        Allocating version of `desamp!`. Returns a vector of length
+        `div(length(A) - length(F), DF) + 1`.
+
+        Returns: `Vector{$($T)}`
+        """
+        function desamp(A::Vector{$T}, DF::Int, F::Vector{$T})
+            P = length(F)
+            Nout = div(length(A) - P, DF) + 1
+            C = Vector{$T}(undef, Nout)
+            desamp!(C, A, DF, F)
+        end
+    end
+
+    @eval begin
+        """
+            wiener!(F::Vector{$($T)}, P::Vector{$($T)}, A::Vector{$($T)}, C::Vector{$($T)}; flag::Int=0)
+
+        Wiener-Levinson filter using `vDSP_wiener`. Solves the Wiener-Hopf equation
+        `R * F = C` where `R` is the Toeplitz autocorrelation matrix formed from `A`.
+        `A` = autocorrelation coefficients (L elements), `C` = cross-correlation (L),
+        `F` = output filter coefficients (L), `P` = workspace (L).
+
+        Returns: `(F, error_code)` where error_code is 0 on success.
+        """
+        function wiener!(F::Vector{$T}, P::Vector{$T}, A::Vector{$T}, C::Vector{$T}; flag::Int=0)
+            L = UInt64(length(A))
+            length(C) == L || error("C must have the same length as A")
+            length(F) >= L || error("F must have at least L elements")
+            length(P) >= L || error("P (workspace) must have at least L elements")
+            err = Ref{Cint}(0)
+            ccall(($(string("vDSP_wiener", suff)), libacc), Cvoid,
+                  (UInt64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Ptr{$T}, Cint, Ptr{Cint}),
+                  L, A, C, F, P, Cint(flag), err)
+            return (F, Int(err[]))
+        end
+
+        """
+            wiener(A::Vector{$($T)}, C::Vector{$($T)}; flag::Int=0)
+
+        Allocating version of `wiener!`. Returns `(F, error_code)`.
+        """
+        function wiener(A::Vector{$T}, C::Vector{$T}; flag::Int=0)
+            L = length(A)
+            F = Vector{$T}(undef, L)
+            P = Vector{$T}(undef, L)
+            wiener!(F, P, A, C; flag=flag)
+        end
+    end
+end
+
 ## == WINDOW GENERATION == ##
 
 """
@@ -506,7 +625,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 end
 
 
-## == Discrete Cosine Transform (DCT) == ##
+## == Discrete Cosine Transform (DCT) & Discrete Fourier Transform (DFT) == ##
 """
 Initializes a new DCT setup object. 'dct_type' must be 2, 3, 4 corresponding to Type II, III and IV.
 DCT 'length' must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4. If you have a previous DCT setup
@@ -558,12 +677,125 @@ end
 
 
 """
-Deinitializes a DFTSetup object created by plan_dct
+Deinitializes a DFTSetup{Float32} object created by plan_dct or plan_dft.
 """
-function plan_destroy(setup::DFTSetup)
+function plan_destroy(setup::DFTSetup{Float32})
     ccall(("vDSP_DFT_DestroySetup", libacc), Cvoid,
           (Ptr{Cvoid},),
           setup.setup)
+end
+
+"""
+Deinitializes a DFTSetup{Float64} object created by plan_dft.
+"""
+function plan_destroy(setup::DFTSetup{Float64})
+    ccall(("vDSP_DFT_DestroySetupD", libacc), Cvoid,
+          (Ptr{Cvoid},),
+          setup.setup)
+end
+
+
+# --- Complex DFT (non-power-of-2 support) ---
+
+"""
+    plan_dft(length::Int, direction::Int, ::Type{T}=Float32; previous=C_NULL) where T
+
+Create a DFT setup for complex-to-complex DFT of the given `length` and `direction`
+(`DFT_FORWARD` or `DFT_INVERSE`). Length must be `f * 2^n` where `f ∈ {1, 3, 5, 15}`
+and `n ≥ 3`. Optionally pass a `previous` setup to share underlying data.
+
+Returns: `DFTSetup{T}`
+"""
+function plan_dft(length::Int, direction::Int, ::Type{Float32}=Float32; previous=C_NULL)
+    setup = ccall(("vDSP_DFT_zop_CreateSetup", libacc), Ptr{Cvoid},
+                  (Ptr{Cvoid}, UInt64, Cint),
+                  previous isa DFTSetup ? previous.setup : previous, length, Cint(direction))
+    setup == C_NULL && error("Invalid DFT length $length. Length must be f*(2^n) where f ∈ {1,3,5,15} and n ≥ 3")
+    return DFTSetup(Float32, setup, direction)
+end
+
+function plan_dft(length::Int, direction::Int, ::Type{Float64}; previous=C_NULL)
+    setup = ccall(("vDSP_DFT_zop_CreateSetupD", libacc), Ptr{Cvoid},
+                  (Ptr{Cvoid}, UInt64, Cint),
+                  previous isa DFTSetup ? previous.setup : previous, length, Cint(direction))
+    setup == C_NULL && error("Invalid DFT length $length. Length must be f*(2^n) where f ∈ {1,3,5,15} and n ≥ 3")
+    return DFTSetup(Float64, setup, direction)
+end
+
+"""
+    dft(Ir::Vector{T}, Ii::Vector{T}, setup::DFTSetup{T})
+
+Execute the complex DFT defined by `setup` on split-complex input (`Ir`, `Ii`).
+
+Returns: `(Or, Oi)` — real and imaginary parts of the output.
+"""
+function dft(Ir::Vector{Float32}, Ii::Vector{Float32}, setup::DFTSetup{Float32})
+    n = length(Ir)
+    Or = Vector{Float32}(undef, n)
+    Oi = Vector{Float32}(undef, n)
+    ccall(("vDSP_DFT_Execute", libacc), Cvoid,
+          (Ptr{Cvoid}, Ptr{Float32}, Ptr{Float32}, Ptr{Float32}, Ptr{Float32}),
+          setup.setup, Ir, Ii, Or, Oi)
+    return (Or, Oi)
+end
+
+function dft(Ir::Vector{Float64}, Ii::Vector{Float64}, setup::DFTSetup{Float64})
+    n = length(Ir)
+    Or = Vector{Float64}(undef, n)
+    Oi = Vector{Float64}(undef, n)
+    ccall(("vDSP_DFT_ExecuteD", libacc), Cvoid,
+          (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}),
+          setup.setup, Ir, Ii, Or, Oi)
+    return (Or, Oi)
+end
+
+"""
+    dft(X::Vector{Complex{T}}, setup::DFTSetup{T})
+
+Execute the complex DFT on an interleaved complex vector.
+
+Returns: `Vector{Complex{T}}`
+"""
+function dft(X::Vector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
+    Ir = T.(real.(X))
+    Ii = T.(imag.(X))
+    Or, Oi = dft(Ir, Ii, setup)
+    return complex.(Or, Oi)
+end
+
+"""
+    dft(X::Vector{Complex{T}}, direction::Int) where T
+    dft(X::Vector{Complex{T}}) where T
+
+Compute the DFT of `X`, auto-creating a setup. Default direction is forward.
+
+Returns: `Vector{Complex{T}}`
+"""
+function dft(X::Vector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
+    setup = plan_dft(length(X), direction, T)
+    return dft(X, setup)
+end
+
+function dft(X::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+    dft(X, DFT_FORWARD)
+end
+
+"""
+    idft(X::Vector{Complex{T}}, setup::DFTSetup{T})
+    idft(X::Vector{Complex{T}})
+
+Compute the normalized inverse DFT of `X`. The setup must have been created
+with `DFT_INVERSE` direction. Returns `dft(X, setup) ./ length(X)`.
+
+Returns: `Vector{Complex{T}}`
+"""
+function idft(X::Vector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
+    return dft(X, setup) ./ length(X)
+end
+
+function idft(X::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+    setup = plan_dft(length(X), DFT_INVERSE, T)
+    return dft(X, setup) ./ length(X)
 end
 
 
