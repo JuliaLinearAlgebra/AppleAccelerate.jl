@@ -165,6 +165,28 @@ AppleAccelerate.dct
 AppleAccelerate.plan_destroy
 ```
 
+## DFT (Complex Discrete Fourier Transform)
+
+Wraps Apple's [`vDSP_DFT_zop`](https://developer.apple.com/documentation/accelerate/1450396-vdsp_dft_execute) for complex-to-complex DFT. Unlike the FFT functions, DFT supports non-power-of-2 lengths of the form `f * 2^n` where `f ∈ {1, 3, 5, 15}` and `n ≥ 3`. Both `Float32` and `Float64` are supported.
+
+```@example dsp
+x = randn(ComplexF64, 120)  # 120 = 15 * 2^3, non-power-of-2
+
+# Forward DFT (auto-creates setup)
+X = AppleAccelerate.dft(x)
+
+# Normalized inverse DFT
+x_recovered = AppleAccelerate.idft(X)
+@assert x_recovered ≈ x
+
+# Reusable setup for repeated transforms
+setup_fwd = AppleAccelerate.plan_dft(120, AppleAccelerate.DFT_FORWARD, Float64)
+setup_inv = AppleAccelerate.plan_dft(120, AppleAccelerate.DFT_INVERSE, Float64)
+X = AppleAccelerate.dft(x, setup_fwd)
+x_recovered = AppleAccelerate.idft(X, setup_inv)
+nothing # hide
+```
+
 ## Convolution
 
 Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv). `conv(X, K)` computes the convolution of vectors `X` and `K`. `conv!(result, X, K)` stores the result in a preallocated vector.
@@ -266,6 +288,43 @@ nothing # hide
 Sxx = abs2.(randn(ComplexF64, 256))
 Sxy = randn(ComplexF64, 256)
 H = AppleAccelerate.ztrans(Sxx, Sxy)  # Sxy[n] / Sxx[n]
+nothing # hide
+```
+
+## Recursive Filter (deq22)
+
+Wraps [`vDSP_deq22`](https://developer.apple.com/documentation/accelerate/1450154-vdsp_deq22) for second-order (two-pole two-zero) recursive filtering. Both `Float32` and `Float64` are supported.
+
+```@example dsp
+A = randn(Float64, 64)
+B = Float64[0.5, -0.3, 0.2, 0.1, -0.05]  # 5 filter coefficients
+C = AppleAccelerate.deq22(A, B)  # returns N output samples
+nothing # hide
+```
+
+The `deq22!` variant operates on pre-padded arrays with explicit initial state.
+
+## FIR Decimation Filter (desamp)
+
+Wraps [`vDSP_desamp`](https://developer.apple.com/documentation/accelerate/1450372-vdsp_desamp) for FIR filtering with decimation. Both `Float32` and `Float64` are supported.
+
+```@example dsp
+A = randn(Float64, 100)
+F = randn(Float64, 5)    # 5-tap FIR filter
+DF = 3                    # decimation factor
+C = AppleAccelerate.desamp(A, DF, F)  # output length = div(100 - 5, 3) + 1
+nothing # hide
+```
+
+## Wiener-Levinson Filter (wiener)
+
+Wraps [`vDSP_wiener`](https://developer.apple.com/documentation/accelerate/1450250-vdsp_wiener) for solving the Wiener-Hopf equation via Levinson-Durbin recursion. Both `Float32` and `Float64` are supported.
+
+```@example dsp
+L = 8
+autocorr = Float64[1.0 / (1 + abs(k)) for k in 0:(L-1)]
+crosscorr = randn(Float64, L)
+F, err = AppleAccelerate.wiener(autocorr, crosscorr)  # err == 0 on success
 nothing # hide
 ```
 
