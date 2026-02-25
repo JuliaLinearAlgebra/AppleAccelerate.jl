@@ -431,6 +431,175 @@ end
     @test !all(iszero, Y[2])
 end
 
+@testset "deq22 (recursive filter)" begin
+    for T in (Float32, Float64)
+        @testset "$T" begin
+            N = 64
+            A = randn(T, N)
+            B = T[0.5, -0.3, 0.2, 0.1, -0.05]
+
+            # Test allocating version
+            C = AppleAccelerate.deq22(A, B)
+            @test length(C) == N
+
+            # Reference: manually compute difference equation
+            # Allocating version pads A with 2 leading zeros
+            Apad = [T(0); T(0); A]
+            Cref = zeros(T, N + 2)  # C[1:2] = 0 (initial state)
+            for n in 3:(N+2)
+                Cref[n] = Apad[n]*B[1] + Apad[n-1]*B[2] + Apad[n-2]*B[3] - Cref[n-1]*B[4] - Cref[n-2]*B[5]
+            end
+            @test C ≈ Cref[3:end]
+
+            # Test mutating version
+            Apad2 = [T(0); T(0); A]
+            C2 = zeros(T, N + 2)
+            AppleAccelerate.deq22!(C2, Apad2, B)
+            @test C2[3:end] ≈ Cref[3:end]
+        end
+    end
+end
+
+@testset "desamp (FIR decimation)" begin
+    for T in (Float32, Float64)
+        @testset "$T" begin
+            A = randn(T, 100)
+            F = randn(T, 5)
+            DF = 3
+
+            C = AppleAccelerate.desamp(A, DF, F)
+            P = length(F)
+            Nout = div(length(A) - P, DF) + 1
+            @test length(C) == Nout
+
+            # Reference: compute via dot products
+            Cref = Vector{T}(undef, Nout)
+            for n in 0:(Nout-1)
+                s = T(0)
+                for p in 0:(P-1)
+                    s += A[n*DF + p + 1] * F[p + 1]
+                end
+                Cref[n+1] = s
+            end
+            @test C ≈ Cref
+
+            # Test DF=1 (pure FIR, no decimation)
+            C1 = AppleAccelerate.desamp(A, 1, F)
+            Nout1 = div(length(A) - P, 1) + 1
+            Cref1 = Vector{T}(undef, Nout1)
+            for n in 0:(Nout1-1)
+                s = T(0)
+                for p in 0:(P-1)
+                    s += A[n + p + 1] * F[p + 1]
+                end
+                Cref1[n+1] = s
+            end
+            @test C1 ≈ Cref1
+
+            # Test mutating version
+            Cout = Vector{T}(undef, Nout)
+            AppleAccelerate.desamp!(Cout, A, DF, F)
+            @test Cout ≈ Cref
+        end
+    end
+end
+
+@testset "wiener (Wiener-Levinson)" begin
+    for T in (Float32, Float64)
+        @testset "$T" begin
+            L = 8
+            # Build a valid positive-definite Toeplitz autocorrelation
+            # Use a simple decaying autocorrelation
+            autocorr = T[T(1) / (1 + abs(T(k))) for k in 0:(L-1)]
+
+            # Arbitrary cross-correlation
+            crosscorr = randn(T, L)
+
+            F, err = AppleAccelerate.wiener(autocorr, crosscorr)
+            @test err == 0
+            @test length(F) == L
+
+            # Verify Wiener-Hopf equation: R * F ≈ crosscorr
+            # R is the Toeplitz matrix formed from autocorr
+            R = zeros(T, L, L)
+            for i in 1:L, j in 1:L
+                R[i,j] = autocorr[abs(i-j)+1]
+            end
+            @test R * F ≈ crosscorr rtol=(T == Float32 ? sqrt(eps(Float32)) : 1e-10)
+
+            # Test mutating version
+            F2 = Vector{T}(undef, L)
+            P2 = Vector{T}(undef, L)
+            F2r, err2 = AppleAccelerate.wiener!(F2, P2, autocorr, crosscorr)
+            @test err2 == 0
+            @test F2r ≈ F
+        end
+    end
+end
+
+@testset "DFT (complex-to-complex)" begin
+    for T in (Float32, Float64)
+        CT = Complex{T}
+        @testset "plan_dft and dft::$T" begin
+            # Power-of-2 size: compare against FFT
+            n = 64
+            x = randn(CT, n)
+            setup_fwd = AppleAccelerate.plan_dft(n, AppleAccelerate.DFT_FORWARD, T)
+            X_dft = AppleAccelerate.dft(x, setup_fwd)
+            X_fft = FFTW.fft(x)
+            if T == Float64
+                @test X_dft ≈ X_fft
+            else
+                @test X_dft ≈ X_fft rtol=sqrt(eps(Float32))
+            end
+        end
+
+        @testset "dft roundtrip::$T" begin
+            # Non-power-of-2 sizes: f * 2^n where f ∈ {1,3,5,15}, n ≥ 3
+            for n in (24, 40, 120)
+                x = randn(CT, n)
+                X = AppleAccelerate.dft(x)
+                x_recovered = AppleAccelerate.idft(X)
+                if T == Float64
+                    @test x_recovered ≈ x
+                else
+                    @test x_recovered ≈ x rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+
+        @testset "dft split-complex::$T" begin
+            n = 32
+            Ir = randn(T, n)
+            Ii = randn(T, n)
+            setup = AppleAccelerate.plan_dft(n, AppleAccelerate.DFT_FORWARD, T)
+            Or, Oi = AppleAccelerate.dft(Ir, Ii, setup)
+            # Compare with interleaved version
+            X = complex.(Ir, Ii)
+            Y = AppleAccelerate.dft(X, setup)
+            @test complex.(Or, Oi) ≈ Y
+        end
+
+        @testset "idft with setup::$T" begin
+            n = 48  # 3 * 2^4
+            x = randn(CT, n)
+            setup_fwd = AppleAccelerate.plan_dft(n, AppleAccelerate.DFT_FORWARD, T)
+            setup_inv = AppleAccelerate.plan_dft(n, AppleAccelerate.DFT_INVERSE, T)
+            X = AppleAccelerate.dft(x, setup_fwd)
+            x_rec = AppleAccelerate.idft(X, setup_inv)
+            if T == Float64
+                @test x_rec ≈ x
+            else
+                @test x_rec ≈ x rtol=sqrt(eps(Float32))
+            end
+        end
+    end
+
+    @testset "invalid DFT length" begin
+        @test_throws ErrorException AppleAccelerate.plan_dft(7, AppleAccelerate.DFT_FORWARD, Float32)
+    end
+end
+
 
 for T in (Float32, Float64)
     @testset "Window Functions::$T" begin
