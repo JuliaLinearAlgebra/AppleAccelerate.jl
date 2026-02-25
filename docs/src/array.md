@@ -209,6 +209,46 @@ AppleAccelerate.nzcros
 AppleAccelerate.vdbcon
 ```
 
+## Complex Array Operations
+
+AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Float32}}` and `Vector{Complex{Float64}}`. These extend existing function names (e.g., `vneg`, `vabs`, `vmul`) with methods that dispatch on complex element types — no naming conflicts with the real-valued versions above.
+
+### Complex unary operations
+
+| Function | Description | vDSP function |
+|----------|-------------|---------------|
+| `vneg(X)` / `vneg!(result, X)` | Negate: `-X` | `vDSP_zvneg` |
+| `vabs(X)` / `vabs!(result, X)` | Modulus: `abs.(X)` | `vDSP_zvabs` |
+
+```@docs
+AppleAccelerate.vconj
+AppleAccelerate.vcopy
+```
+
+### Complex → real operations
+
+```@docs
+AppleAccelerate.vphase
+AppleAccelerate.vmags
+AppleAccelerate.vmagsa
+```
+
+### Complex binary operations
+
+| Function | Description | vDSP function |
+|----------|-------------|---------------|
+| `vmul(X, Y)` / `vmul!(result, X, Y)` | Element-wise multiply: `X .* Y` | `vDSP_zvmul` |
+| `vdiv(X, Y)` / `vdiv!(result, X, Y)` | Element-wise divide: `X ./ Y` | `vDSP_zvdiv` |
+| `vsmul(X, c)` / `vsmul!(result, X, c)` | Scalar multiply: `X .* c` (complex scalar) | `vDSP_zvzsml` |
+| `dot(X, Y)` | Unconjugated dot product: `sum(X .* Y)` | `vDSP_zdotpr` |
+
+### Coordinate conversion
+
+```@docs
+AppleAccelerate.polar
+AppleAccelerate.rect
+```
+
 ## Broadcasting
 
 AppleAccelerate overrides `Base.copy` and `Base.copyto!` for `Broadcasted` objects, so that broadcasting syntax like `f.(X)` automatically uses the accelerated implementation.
