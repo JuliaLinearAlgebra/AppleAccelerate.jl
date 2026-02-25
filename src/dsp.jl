@@ -1,4 +1,4 @@
-## DSP.jl ##
+## dsp.jl ##
 
 mutable struct DFTSetup{T}
     setup::Ptr{Cvoid}
@@ -140,6 +140,45 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 end
+
+"""
+    conv(X::Vector{T}, K::Vector{T}) where T <: Union{Float32, Float64}
+
+Compute the convolution of signal `X` with kernel `K` via
+[`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
+Returns a vector of length `length(X) + length(K) - 1`.
+"""
+conv
+
+"""
+    conv!(result::Vector{T}, X::Vector{T}, K::Vector{T})
+    conv!(X::Vector{T}, K::Vector{T})
+
+In-place convolution. The 3-argument form stores the result in `result`
+(which must have at least `length(X) + length(K) - 1` elements).
+The 2-argument form overwrites `X`.
+"""
+conv!
+
+"""
+    xcorr(X::Vector{T}, Y::Vector{T}) where T <: Union{Float32, Float64}
+    xcorr(X::Vector{T})
+
+Cross-correlation of `X` and `Y` via
+[`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv)
+(with reversed kernel). The single-argument form computes auto-correlation.
+Returns a vector of length `length(X) + length(Y) - 1`.
+"""
+xcorr
+
+"""
+    xcorr!(result::Vector{T}, X::Vector{T}, Y::Vector{T})
+    xcorr!(X::Vector{T}, Y::Vector{T})
+
+In-place cross-correlation. The 3-argument form stores the result in `result`.
+The 2-argument form overwrites `X`.
+"""
+xcorr!
 
 ## == Biquadratic/IIR filtering
 
@@ -393,6 +432,44 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
     end
 end
 
+"""
+    zaspec(A::Vector{Complex{T}}) -> Vector{T}
+
+Autospectrum (power spectrum): returns a real vector `C` where `C[n] = |A[n]|^2`.
+
+See also [`zaspec!`](@ref) for the accumulating in-place variant.
+"""
+zaspec
+
+"""
+    zcspec(A::Vector{Complex{T}}, B::Vector{Complex{T}}) -> Vector{Complex{T}}
+
+Cross-spectrum: returns a complex vector `C` where `C[n] = conj(A[n]) * B[n]`.
+
+See also [`zcspec!`](@ref) for the accumulating in-place variant.
+"""
+zcspec
+
+"""
+    zcoher(A::Vector{T}, B::Vector{T}, C::Vector{Complex{T}}) -> Vector{T}
+
+Coherence function: returns a real vector `D` where `D[n] = |C[n]|^2 / (A[n] * B[n])`.
+`A` and `B` are real power spectra, `C` is a complex cross-spectrum.
+
+See also [`zcoher!`](@ref) for the in-place variant.
+"""
+zcoher
+
+"""
+    ztrans(A::Vector{T}, B::Vector{Complex{T}}) -> Vector{Complex{T}}
+
+Transfer function: returns a complex vector `C` where `C[n] = B[n] / A[n]`.
+`A` is a real power spectrum, `B` is a complex cross-spectrum.
+
+See also [`ztrans!`](@ref) for the in-place variant.
+"""
+ztrans
+
 ## == Recursive Filter, FIR Decimation, Wiener-Levinson == ##
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
@@ -548,13 +625,6 @@ function hanning(length::Int, rtype::DataType=Float64)
     hanning!(result, length, 0)
 end
 
-"""
-Alias function for `hanning`
-"""
-function hann(length::Int, rtype::DataType=Float64)
-    hanning(length, rtype)
-end
-
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     """
@@ -608,17 +678,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                   (Ptr{$T}, UInt64,  Int64),
                   result, length, flag)
             return result
-        end
-    end
-
-    """
-    Alias function for hanning!
-
-    Returns: Vector{$T}
-    """
-    @eval begin
-        function hann!(result::Vector{$T}, length::Int, flag::Int=0)
-            hanning!(result, length, flag)
         end
     end
 
@@ -821,6 +880,14 @@ mutable struct FFTSetup{T}
     end
 end
 
+"""
+    plan_fft(x::VecOrMat{Complex{T}}) where T <: Union{Float32, Float64}
+    plan_fft(n::Integer, [T=Float64], [radix=2])
+
+Create a reusable FFT setup object for repeated transforms of the same size.
+Wraps `vDSP_create_fftsetup` / `vDSP_create_fftsetupD`. The setup is automatically
+destroyed when garbage collected.
+"""
 function plan_fft(n::Integer, ::Type{T}=Float64, radix::Integer = 2) where T <: Union{Float32, Float64}
     FFTSetup{T}(n, radix)
 end
@@ -940,6 +1007,13 @@ end
 
 # --- Public API: fft (forward FFT) ---
 
+"""
+    fft(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the forward FFT of `x` via Apple vDSP. Supports 1D vectors and 2D matrices
+with `ComplexF32` or `ComplexF64` elements. All dimensions must be powers of 2.
+If `setup` is omitted, a temporary plan is created automatically.
+"""
 fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
 fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
 fft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x))
@@ -947,6 +1021,12 @@ fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x
 
 # --- Public API: bfft (backward/unnormalized inverse FFT) ---
 
+"""
+    bfft(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the unnormalized inverse (backward) FFT of `x` via Apple vDSP.
+The result is *not* divided by `length(x)`; use [`ifft`](@ref) for the normalized version.
+"""
 bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
 bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
 bfft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft(x))
@@ -954,6 +1034,12 @@ bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft
 
 # --- Public API: ifft (normalized inverse FFT) ---
 
+"""
+    ifft(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the normalized inverse FFT of `x` via Apple vDSP.
+Equivalent to `bfft(x) / length(x)`. Satisfies `ifft(fft(x)) ≈ x`.
+"""
 ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
@@ -1051,6 +1137,11 @@ end
 
 # --- Public API: fft! (in-place forward FFT) ---
 
+"""
+    fft!(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the forward FFT of `x` in-place via Apple vDSP, overwriting `x` with the result.
+"""
 fft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_FORWARD)
 fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_FORWARD)
 fft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, plan_fft(x))
@@ -1058,6 +1149,11 @@ fft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, plan_fft
 
 # --- Public API: bfft! (in-place backward/unnormalized inverse FFT) ---
 
+"""
+    bfft!(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the unnormalized inverse FFT of `x` in-place via Apple vDSP.
+"""
 bfft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_INVERSE)
 bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_INVERSE)
 bfft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, plan_fft(x))
@@ -1065,6 +1161,12 @@ bfft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, plan_f
 
 # --- Public API: ifft! (in-place normalized inverse FFT) ---
 
+"""
+    ifft!(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
+
+Compute the normalized inverse FFT of `x` in-place via Apple vDSP.
+Satisfies `ifft!(fft!(copy(x))) ≈ x`.
+"""
 function ifft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup)
     x ./= length(x)
@@ -1219,17 +1321,42 @@ end
 
 # --- Public API: rfft (forward real FFT) ---
 
+"""
+    plan_rfft(x::Vector{T}) where T <: Union{Float32, Float64}
+
+Create a reusable FFT setup for real-input forward transforms of the same size as `x`.
+"""
 plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
 
+"""
+    rfft(x::Vector{T}, [setup::FFTSetup{T}])
+
+Compute the forward FFT of a real-valued vector `x` via Apple vDSP.
+Returns the non-redundant complex coefficients of length `N÷2+1`.
+Input length must be a power of 2.
+"""
 rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
 rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
 
 # --- Public API: brfft (backward/unnormalized inverse real FFT) ---
 
+"""
+    brfft(X::Vector{Complex{T}}, n::Int, [setup::FFTSetup{T}])
+
+Compute the unnormalized inverse real FFT, returning a real vector of length `n`.
+`X` must have length `n÷2+1`. The result is *not* divided by `n`;
+use [`irfft`](@ref) for the normalized version.
+"""
 brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
 brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n, FFTSetup{T}(n))
 
 # --- Public API: irfft (normalized inverse real FFT) ---
 
+"""
+    irfft(X::Vector{Complex{T}}, n::Int, [setup::FFTSetup{T}])
+
+Compute the normalized inverse real FFT, returning a real vector of length `n`.
+Satisfies `irfft(rfft(x), length(x)) ≈ x`.
+"""
 irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
 irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = irfft(X, n, FFTSetup{T}(n))

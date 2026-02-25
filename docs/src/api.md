@@ -2,49 +2,299 @@
 
 ## Array Operations
 
-- [`AppleAccelerate.@replaceBase`](@ref)
-- Vector-vector: `vadd`, `vsub`, `vmul`, `vdiv` (and `!` variants)
-- Vector-scalar: `vsadd`, `vssub`, `svsub`, `vsdiv`, [`svdiv`](@ref AppleAccelerate.svdiv), `vsmul` (and `!` variants)
-- Unary vDSP: [`vneg`](@ref AppleAccelerate.vneg), [`vnabs`](@ref AppleAccelerate.vnabs), [`vabs`](@ref AppleAccelerate.vabs), [`vsq`](@ref AppleAccelerate.vsq), [`vssq`](@ref AppleAccelerate.vssq), [`vfrac`](@ref AppleAccelerate.vfrac), [`vreverse!`](@ref AppleAccelerate.vreverse!) (and `!` variants)
-- Two-vector: [`vmax`](@ref AppleAccelerate.vmax), [`vmin`](@ref AppleAccelerate.vmin), [`vmaxmg`](@ref AppleAccelerate.vmaxmg), [`vminmg`](@ref AppleAccelerate.vminmg), [`vdist`](@ref AppleAccelerate.vdist), [`vtmerg`](@ref AppleAccelerate.vtmerg) (and `!` variants)
-- Compound arithmetic: [`vam`](@ref AppleAccelerate.vam), [`vsbm`](@ref AppleAccelerate.vsbm), [`venvlp`](@ref AppleAccelerate.venvlp), [`vaam`](@ref AppleAccelerate.vaam), [`vsbsbm`](@ref AppleAccelerate.vsbsbm), [`vasbm`](@ref AppleAccelerate.vasbm), [`vpythg`](@ref AppleAccelerate.vpythg), [`vasm`](@ref AppleAccelerate.vasm), [`vsbsm`](@ref AppleAccelerate.vsbsm), [`vsma`](@ref AppleAccelerate.vsma), [`vsmsa`](@ref AppleAccelerate.vsmsa), [`vaddsub`](@ref AppleAccelerate.vaddsub) (and `!` variants)
-- Reductions: `maximum`, `minimum`, `mean`, `sum`, `findmax`, `findmin`, `meanmag`, `meansqr`, `summag`, `sumsqr`, [`dot`](@ref AppleAccelerate.dot), [`distancesq`](@ref AppleAccelerate.distancesq)
-- Clipping: [`vclip`](@ref AppleAccelerate.vclip), [`viclip`](@ref AppleAccelerate.viclip), [`vthr`](@ref AppleAccelerate.vthr), [`vthres`](@ref AppleAccelerate.vthres), [`vcmprs`](@ref AppleAccelerate.vcmprs) (and `!` variants)
-- Type conversion: [`vdouble`](@ref AppleAccelerate.vdouble), [`vsingle`](@ref AppleAccelerate.vsingle)
-- Ramp generation: [`vramp`](@ref AppleAccelerate.vramp), [`vrampmul`](@ref AppleAccelerate.vrampmul)
-- Integration: [`vrsum`](@ref AppleAccelerate.vrsum), [`vsimps`](@ref AppleAccelerate.vsimps), [`vtrapz`](@ref AppleAccelerate.vtrapz), [`vswsum`](@ref AppleAccelerate.vswsum), [`vswmax`](@ref AppleAccelerate.vswmax) (and `!` variants)
-- Interpolation: [`vintb`](@ref AppleAccelerate.vintb), [`vlint`](@ref AppleAccelerate.vlint), [`vqint`](@ref AppleAccelerate.vqint) (and `!` variants)
-- Polynomial: [`vpoly`](@ref AppleAccelerate.vpoly) (and `!` variant)
-- Normalization: [`vnormalize`](@ref AppleAccelerate.vnormalize) (and `!` variant)
-- Zero crossings: [`nzcros`](@ref AppleAccelerate.nzcros)
-- Decibel conversion: [`vdbcon`](@ref AppleAccelerate.vdbcon) (and `!` variant)
+### Unary vDSP Operations
+
+```@docs
+AppleAccelerate.vneg
+AppleAccelerate.vnabs
+AppleAccelerate.vabs
+AppleAccelerate.vsq
+AppleAccelerate.vssq
+AppleAccelerate.vfrac
+AppleAccelerate.vreverse!
+AppleAccelerate.vreverse
+```
+
+### Vector Reductions
+
+```@docs
+AppleAccelerate.maximum
+AppleAccelerate.minimum
+AppleAccelerate.sum
+AppleAccelerate.mean
+AppleAccelerate.findmax
+AppleAccelerate.findmin
+AppleAccelerate.meanmag
+AppleAccelerate.meansqr
+AppleAccelerate.meanssqr
+AppleAccelerate.summag
+AppleAccelerate.sumsqr
+AppleAccelerate.sumssqr
+AppleAccelerate.dot
+AppleAccelerate.distancesq
+```
+
+### Special Return Types
+
+```@docs
+AppleAccelerate.sincos
+AppleAccelerate.cis
+```
+
+### Vector-Vector Arithmetic
+
+```@docs
+AppleAccelerate.vadd
+AppleAccelerate.vadd!
+AppleAccelerate.vsub
+AppleAccelerate.vsub!
+AppleAccelerate.vmul
+AppleAccelerate.vmul!
+AppleAccelerate.vdiv
+AppleAccelerate.vdiv!
+```
+
+### Two-Vector Comparison & Distance
+
+```@docs
+AppleAccelerate.vmax
+AppleAccelerate.vmin
+AppleAccelerate.vmaxmg
+AppleAccelerate.vminmg
+AppleAccelerate.vdist
+AppleAccelerate.vtmerg
+```
+
+### Vector-Scalar Operations
+
+```@docs
+AppleAccelerate.vsadd
+AppleAccelerate.vsadd!
+AppleAccelerate.vssub
+AppleAccelerate.vssub!
+AppleAccelerate.svsub
+AppleAccelerate.svsub!
+AppleAccelerate.vsmul
+AppleAccelerate.vsmul!
+AppleAccelerate.vsdiv
+AppleAccelerate.vsdiv!
+AppleAccelerate.svdiv
+```
+
+### Compound Arithmetic
+
+```@docs
+AppleAccelerate.vam
+AppleAccelerate.vsbm
+AppleAccelerate.venvlp
+AppleAccelerate.vaam
+AppleAccelerate.vsbsbm
+AppleAccelerate.vasbm
+AppleAccelerate.vpythg
+AppleAccelerate.vasm
+AppleAccelerate.vsbsm
+AppleAccelerate.vsma
+AppleAccelerate.vsmsa
+AppleAccelerate.vaddsub
+```
+
+### Clipping & Thresholding
+
+```@docs
+AppleAccelerate.vclip
+AppleAccelerate.viclip
+AppleAccelerate.vthr
+AppleAccelerate.vthres
+AppleAccelerate.vcmprs
+```
+
+### Type Conversion
+
+```@docs
+AppleAccelerate.vdouble
+AppleAccelerate.vsingle
+```
+
+### Ramp Generation
+
+```@docs
+AppleAccelerate.vramp
+AppleAccelerate.vrampmul
+AppleAccelerate.vrampmul2
+```
+
+### Linear Average
+
+```@docs
+AppleAccelerate.vavlin
+```
+
+### Integration & Running Operations
+
+```@docs
+AppleAccelerate.vrsum
+AppleAccelerate.vsimps
+AppleAccelerate.vtrapz
+AppleAccelerate.vswsum
+AppleAccelerate.vswmax
+```
+
+### Interpolation
+
+```@docs
+AppleAccelerate.vintb
+AppleAccelerate.vlint
+AppleAccelerate.vqint
+```
+
+### Polynomial Evaluation
+
+```@docs
+AppleAccelerate.vpoly
+```
+
+### Normalization
+
+```@docs
+AppleAccelerate.vnormalize
+```
+
+### Zero Crossings
+
+```@docs
+AppleAccelerate.nzcros
+```
+
+### Decibel Conversion
+
+```@docs
+AppleAccelerate.vdbcon
+```
+
+### Complex Array Operations
+
+```@docs
+AppleAccelerate.vconj
+AppleAccelerate.vcopy
+AppleAccelerate.vphase
+AppleAccelerate.vmags
+AppleAccelerate.vmagsa
+AppleAccelerate.polar
+AppleAccelerate.rect
+```
 
 ## Dense Linear Algebra
 
-- [`AppleAccelerate.load_accelerate`](@ref)
-- [`AppleAccelerate.get_macos_version`](@ref)
-- [`AppleAccelerate.set_num_threads`](@ref)
-- [`AppleAccelerate.get_num_threads`](@ref)
+```@docs
+AppleAccelerate.load_accelerate
+AppleAccelerate.set_num_threads
+AppleAccelerate.get_num_threads
+AppleAccelerate.get_macos_version
+AppleAccelerate._read_macos_version
+```
 
 ## Sparse Linear Algebra
 
-- [`AppleAccelerate.AASparseMatrix`](@ref) — Sparse matrix wrapper
-- [`AppleAccelerate.AAFactorization`](@ref) — Lazy factorization
-- [`AppleAccelerate.muladd!`](@ref) — Fused multiply-add (`y += A*x`)
-- `solve`, `solve!` — Sparse solvers
-- `factor!` — Explicit factorization (Cholesky, LDLT, QR, CholeskyAtA)
-- `factorize` — Create `AAFactorization` from `AASparseMatrix`
-- `ldiv!` — In-place left division via `LinearAlgebra`
-- `transpose` — Transpose (flag-based, no copy)
-- `issymmetric`, `istriu`, `istril` — Structure queries
+```@docs
+AppleAccelerate.AASparseMatrix
+AppleAccelerate.AAFactorization
+AppleAccelerate.muladd!
+AppleAccelerate.factor!
+AppleAccelerate.solve
+AppleAccelerate.solve!
+```
 
 ## Signal Processing
 
-- `fft`, `ifft`, `bfft`, `fft!`, `ifft!`, `bfft!` — Complex FFT (Float32 and Float64, 1D and 2D)
-- `rfft`, `irfft`, `brfft` — Real FFT (Float32 and Float64, 1D)
-- `plan_fft`, `plan_rfft` — FFT plan creation
-- [`AppleAccelerate.plan_dct`](@ref), [`AppleAccelerate.dct`](@ref) — DCT (Float32 only)
-- `conv`, `conv!` — Convolution
-- `xcorr`, `xcorr!` — Cross-correlation
-- `biquadcreate`, `biquad` — Biquad IIR filtering (Float64 only)
-- [`AppleAccelerate.blackman`](@ref), [`AppleAccelerate.hamming`](@ref), [`AppleAccelerate.hanning`](@ref), [`AppleAccelerate.hann`](@ref) — Window functions
+### FFT
+
+```@docs
+AppleAccelerate.plan_fft
+AppleAccelerate.fft
+AppleAccelerate.ifft
+AppleAccelerate.bfft
+AppleAccelerate.fft!
+AppleAccelerate.ifft!
+AppleAccelerate.bfft!
+```
+
+### Real FFT
+
+```@docs
+AppleAccelerate.plan_rfft
+AppleAccelerate.rfft
+AppleAccelerate.irfft
+AppleAccelerate.brfft
+```
+
+### DFT
+
+```@docs
+AppleAccelerate.plan_dft
+AppleAccelerate.dft
+AppleAccelerate.idft
+```
+
+### DCT
+
+```@docs
+AppleAccelerate.plan_dct
+AppleAccelerate.dct
+AppleAccelerate.plan_destroy
+```
+
+### Convolution & Correlation
+
+```@docs
+AppleAccelerate.conv
+AppleAccelerate.conv!
+AppleAccelerate.xcorr
+AppleAccelerate.xcorr!
+```
+
+### Biquad Filtering
+
+```@docs
+AppleAccelerate.biquadcreate
+AppleAccelerate.biquad
+AppleAccelerate.biquaddestroy
+```
+
+### Multi-Channel Biquad Filtering
+
+```@docs
+AppleAccelerate.biquadm_create
+AppleAccelerate.biquadm
+```
+
+### Recursive Filter
+
+```@docs
+AppleAccelerate.deq22
+AppleAccelerate.deq22!
+AppleAccelerate.desamp
+AppleAccelerate.desamp!
+AppleAccelerate.wiener
+AppleAccelerate.wiener!
+```
+
+### Spectral Analysis
+
+```@docs
+AppleAccelerate.zaspec
+AppleAccelerate.zaspec!
+AppleAccelerate.zcspec
+AppleAccelerate.zcspec!
+AppleAccelerate.zcoher
+AppleAccelerate.zcoher!
+AppleAccelerate.ztrans
+AppleAccelerate.ztrans!
+```
+
+### Window Functions
+
+```@docs
+AppleAccelerate.blackman
+AppleAccelerate.hamming
+AppleAccelerate.hanning
+```

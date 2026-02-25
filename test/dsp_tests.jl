@@ -421,7 +421,8 @@ end
     channels = 2
     sections = 1
     setup = AppleAccelerate.biquadm_create(c, channels, sections, Float32)
-    X = [Float32.(randn(64)), Float32.(randn(64))]
+    rng = Random.Xoshiro(42)
+    X = [Float32.(randn(rng, 64)), Float32.(randn(rng, 64))]
     Y = AppleAccelerate.biquadm(X, 64, setup)
     @test length(Y) == 2
     @test length(Y[1]) == 64

@@ -2,7 +2,7 @@
 
 AppleAccelerate wraps Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib) (`vv*`) and [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) (`vDSP_*`) functions to provide accelerated element-wise operations on `Array{Float32}` and `Array{Float64}`.
 
-These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix or use `@replaceBase` to override Base functions.
+These functions are **not exported** to avoid conflicts with Base. Access them via the `AppleAccelerate.` prefix.
 
 ## Element-wise Math Functions
 
@@ -40,16 +40,16 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 
 ## Unary vDSP Operations
 
-```@docs
-AppleAccelerate.vneg
-AppleAccelerate.vnabs
-AppleAccelerate.vabs
-AppleAccelerate.vsq
-AppleAccelerate.vssq
-AppleAccelerate.vfrac
-AppleAccelerate.vreverse!
-AppleAccelerate.vreverse
-```
+| Function | Description |
+|----------|-------------|
+| [`vneg`](@ref AppleAccelerate.vneg) | Negate each element: `result[i] = -X[i]` |
+| [`vnabs`](@ref AppleAccelerate.vnabs) | Negative absolute value: `result[i] = -|X[i]|` |
+| [`vabs`](@ref AppleAccelerate.vabs) | Absolute value: `result[i] = \|X[i]\|` |
+| [`vsq`](@ref AppleAccelerate.vsq) | Square each element: `result[i] = X[i]^2` |
+| [`vssq`](@ref AppleAccelerate.vssq) | Signed square: `result[i] = X[i] * \|X[i]\|` |
+| [`vfrac`](@ref AppleAccelerate.vfrac) | Fractional part: `result[i] = X[i] - trunc(X[i])` |
+| [`vreverse!`](@ref AppleAccelerate.vreverse!) | Reverse vector in-place |
+| [`vreverse`](@ref AppleAccelerate.vreverse) | Return a reversed copy |
 
 ## Vector Reductions
 
@@ -64,51 +64,39 @@ AppleAccelerate.vreverse
 | `summag(X)` | Sum of absolute values |
 | `sumsqr(X)` | Sum of squares |
 | `sumssqr(X)` | Sum of signed squares |
-
-```@docs
-AppleAccelerate.dot
-AppleAccelerate.distancesq
-```
+| [`dot`](@ref AppleAccelerate.dot) | Dot product: `sum(X .* Y)` |
+| [`distancesq`](@ref AppleAccelerate.distancesq) | Squared Euclidean distance: `sum((X .- Y).^2)` |
 
 ## Vector-Vector Arithmetic
 
-```@docs
-AppleAccelerate.vadd
-AppleAccelerate.vadd!
-AppleAccelerate.vsub
-AppleAccelerate.vsub!
-AppleAccelerate.vmul
-AppleAccelerate.vmul!
-AppleAccelerate.vdiv
-AppleAccelerate.vdiv!
-```
+| Function | Description |
+|----------|-------------|
+| [`vadd`](@ref AppleAccelerate.vadd) / [`vadd!`](@ref AppleAccelerate.vadd!) | Element-wise addition |
+| [`vsub`](@ref AppleAccelerate.vsub) / [`vsub!`](@ref AppleAccelerate.vsub!) | Element-wise subtraction |
+| [`vmul`](@ref AppleAccelerate.vmul) / [`vmul!`](@ref AppleAccelerate.vmul!) | Element-wise multiplication |
+| [`vdiv`](@ref AppleAccelerate.vdiv) / [`vdiv!`](@ref AppleAccelerate.vdiv!) | Element-wise division |
 
 ## Two-Vector Comparison & Distance
 
-```@docs
-AppleAccelerate.vmax
-AppleAccelerate.vmin
-AppleAccelerate.vmaxmg
-AppleAccelerate.vminmg
-AppleAccelerate.vdist
-AppleAccelerate.vtmerg
-```
+| Function | Description |
+|----------|-------------|
+| [`vmax`](@ref AppleAccelerate.vmax) | Element-wise maximum |
+| [`vmin`](@ref AppleAccelerate.vmin) | Element-wise minimum |
+| [`vmaxmg`](@ref AppleAccelerate.vmaxmg) | Element-wise maximum magnitude |
+| [`vminmg`](@ref AppleAccelerate.vminmg) | Element-wise minimum magnitude |
+| [`vdist`](@ref AppleAccelerate.vdist) | Element-wise Euclidean distance |
+| [`vtmerg`](@ref AppleAccelerate.vtmerg) | Tapered merge of two vectors |
 
 ## Vector-Scalar Operations
 
-```@docs
-AppleAccelerate.vsadd
-AppleAccelerate.vsadd!
-AppleAccelerate.vssub
-AppleAccelerate.vssub!
-AppleAccelerate.svsub
-AppleAccelerate.svsub!
-AppleAccelerate.vsmul
-AppleAccelerate.vsmul!
-AppleAccelerate.vsdiv
-AppleAccelerate.vsdiv!
-AppleAccelerate.svdiv
-```
+| Function | Description |
+|----------|-------------|
+| [`vsadd`](@ref AppleAccelerate.vsadd) / [`vsadd!`](@ref AppleAccelerate.vsadd!) | Vector + scalar |
+| [`vssub`](@ref AppleAccelerate.vssub) / [`vssub!`](@ref AppleAccelerate.vssub!) | Vector - scalar |
+| [`svsub`](@ref AppleAccelerate.svsub) / [`svsub!`](@ref AppleAccelerate.svsub!) | Scalar - vector |
+| [`vsmul`](@ref AppleAccelerate.vsmul) / [`vsmul!`](@ref AppleAccelerate.vsmul!) | Vector * scalar |
+| [`vsdiv`](@ref AppleAccelerate.vsdiv) / [`vsdiv!`](@ref AppleAccelerate.vsdiv!) | Vector / scalar |
+| [`svdiv`](@ref AppleAccelerate.svdiv) | Scalar / vector |
 
 ## Compound Arithmetic
 
@@ -116,108 +104,108 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 
 ### Three-vector operations
 
-```@docs
-AppleAccelerate.vam
-AppleAccelerate.vsbm
-AppleAccelerate.venvlp
-```
+| Function | Description |
+|----------|-------------|
+| [`vam`](@ref AppleAccelerate.vam) | `(A + B) * C` |
+| [`vsbm`](@ref AppleAccelerate.vsbm) | `(A - B) * C` |
+| [`venvlp`](@ref AppleAccelerate.venvlp) | Signal envelope |
 
 ### Four-vector operations
 
-```@docs
-AppleAccelerate.vaam
-AppleAccelerate.vsbsbm
-AppleAccelerate.vasbm
-AppleAccelerate.vpythg
-```
+| Function | Description |
+|----------|-------------|
+| [`vaam`](@ref AppleAccelerate.vaam) | `(A + B) * (C + D)` |
+| [`vsbsbm`](@ref AppleAccelerate.vsbsbm) | `(A - B) * (C - D)` |
+| [`vasbm`](@ref AppleAccelerate.vasbm) | `(A + B) * (C - D)` |
+| [`vpythg`](@ref AppleAccelerate.vpythg) | Pythagorean distance |
 
 ### Vector-vector-scalar operations
 
-```@docs
-AppleAccelerate.vasm
-AppleAccelerate.vsbsm
-AppleAccelerate.vsma
-AppleAccelerate.vsmsa
-```
+| Function | Description |
+|----------|-------------|
+| [`vasm`](@ref AppleAccelerate.vasm) | `(A + B) * c` |
+| [`vsbsm`](@ref AppleAccelerate.vsbsm) | `(A - B) * c` |
+| [`vsma`](@ref AppleAccelerate.vsma) | `A * b + C` |
+| [`vsmsa`](@ref AppleAccelerate.vsmsa) | `A * b + c` |
 
 ### Dual output
 
-```@docs
-AppleAccelerate.vaddsub
-```
+| Function | Description |
+|----------|-------------|
+| [`vaddsub`](@ref AppleAccelerate.vaddsub) | Simultaneous add and subtract: returns `(A .+ B, A .- B)` |
 
 ## Clipping & Thresholding
 
-```@docs
-AppleAccelerate.vclip
-AppleAccelerate.viclip
-AppleAccelerate.vthr
-AppleAccelerate.vthres
-AppleAccelerate.vcmprs
-```
+| Function | Description |
+|----------|-------------|
+| [`vclip`](@ref AppleAccelerate.vclip) | Clip values to `[low, high]` |
+| [`viclip`](@ref AppleAccelerate.viclip) | Inverted clip: pass values outside `[low, high]` |
+| [`vthr`](@ref AppleAccelerate.vthr) | Threshold: keep or clamp to threshold |
+| [`vthres`](@ref AppleAccelerate.vthres) | Threshold to zero |
+| [`vcmprs`](@ref AppleAccelerate.vcmprs) | Compress: gather elements where gate is nonzero |
 
 ## Type Conversion
 
-```@docs
-AppleAccelerate.vdouble
-AppleAccelerate.vsingle
-```
+| Function | Description |
+|----------|-------------|
+| [`vdouble`](@ref AppleAccelerate.vdouble) | Convert Float32 to Float64 |
+| [`vsingle`](@ref AppleAccelerate.vsingle) | Convert Float64 to Float32 |
 
 ## Ramp Generation
 
-```@docs
-AppleAccelerate.vramp
-AppleAccelerate.vrampmul
-AppleAccelerate.vrampmul2
-```
+| Function | Description |
+|----------|-------------|
+| [`vramp`](@ref AppleAccelerate.vramp) | Generate a ramp: `start + i * step` |
+| [`vrampmul`](@ref AppleAccelerate.vrampmul) | Multiply vector by a generated ramp |
+| [`vrampmul2`](@ref AppleAccelerate.vrampmul2) | Stereo ramp multiply (two outputs) |
 
 ## Linear Average
 
-```@docs
-AppleAccelerate.vavlin
-```
+| Function | Description |
+|----------|-------------|
+| [`vavlin`](@ref AppleAccelerate.vavlin) | Weighted linear average of two vectors |
 
 ## Integration & Running Operations
 
-```@docs
-AppleAccelerate.vrsum
-AppleAccelerate.vsimps
-AppleAccelerate.vtrapz
-AppleAccelerate.vswsum
-AppleAccelerate.vswmax
-```
+| Function | Description |
+|----------|-------------|
+| [`vrsum`](@ref AppleAccelerate.vrsum) | Running sum scaled by `scale` |
+| [`vsimps`](@ref AppleAccelerate.vsimps) | Simpson's rule integration |
+| [`vtrapz`](@ref AppleAccelerate.vtrapz) | Trapezoidal integration |
+| [`vswsum`](@ref AppleAccelerate.vswsum) | Sliding window sum |
+| [`vswmax`](@ref AppleAccelerate.vswmax) | Sliding window maximum |
 
 ## Interpolation
 
-```@docs
-AppleAccelerate.vintb
-AppleAccelerate.vlint
-AppleAccelerate.vqint
-```
+| Function | Description |
+|----------|-------------|
+| [`vintb`](@ref AppleAccelerate.vintb) | Linear interpolation: `A + t * (B - A)` |
+| [`vlint`](@ref AppleAccelerate.vlint) | Linear interpolation from lookup table |
+| [`vqint`](@ref AppleAccelerate.vqint) | Quadratic interpolation from lookup table |
 
 ## Polynomial Evaluation
 
-```@docs
-AppleAccelerate.vpoly
-```
+| Function | Description |
+|----------|-------------|
+| [`vpoly`](@ref AppleAccelerate.vpoly) | Evaluate polynomial at each point |
 
 ## Normalization
 
-```@docs
-AppleAccelerate.vnormalize
-```
+| Function | Description |
+|----------|-------------|
+| [`vnormalize`](@ref AppleAccelerate.vnormalize) | Normalize to zero mean and unit standard deviation |
 
 ## Zero Crossings
 
-```@docs
-AppleAccelerate.nzcros
-```
+| Function | Description |
+|----------|-------------|
+| [`nzcros`](@ref AppleAccelerate.nzcros) | Find zero crossings |
 
 ## Decibel Conversion
 
-```@docs
-AppleAccelerate.vdbcon
-```
+| Function | Description |
+|----------|-------------|
+| [`vdbcon`](@ref AppleAccelerate.vdbcon) | Convert to decibels relative to a reference |
 
 ## Complex Array Operations
 
@@ -225,49 +213,40 @@ AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Fl
 
 ### Complex unary operations
 
-| Function | Description | vDSP function |
-|----------|-------------|---------------|
-| `vneg(X)` / `vneg!(result, X)` | Negate: `-X` | `vDSP_zvneg` |
-| `vabs(X)` / `vabs!(result, X)` | Modulus: `abs.(X)` | `vDSP_zvabs` |
-
-```@docs
-AppleAccelerate.vconj
-AppleAccelerate.vcopy
-```
+| Function | Description |
+|----------|-------------|
+| `vneg(X)` / `vneg!(result, X)` | Negate: `-X` |
+| `vabs(X)` / `vabs!(result, X)` | Modulus: `abs.(X)` |
+| [`vconj`](@ref AppleAccelerate.vconj) | Complex conjugate |
+| [`vcopy`](@ref AppleAccelerate.vcopy) | Copy via split-complex move |
 
 ### Complex → real operations
 
-```@docs
-AppleAccelerate.vphase
-AppleAccelerate.vmags
-AppleAccelerate.vmagsa
-```
+| Function | Description |
+|----------|-------------|
+| [`vphase`](@ref AppleAccelerate.vphase) | Complex phase (angle) |
+| [`vmags`](@ref AppleAccelerate.vmags) | Squared magnitude (`abs2`) |
+| [`vmagsa`](@ref AppleAccelerate.vmagsa) | Squared magnitude + accumulate |
 
 ### Complex binary operations
 
-| Function | Description | vDSP function |
-|----------|-------------|---------------|
-| `vmul(X, Y)` / `vmul!(result, X, Y)` | Element-wise multiply: `X .* Y` | `vDSP_zvmul` |
-| `vdiv(X, Y)` / `vdiv!(result, X, Y)` | Element-wise divide: `X ./ Y` | `vDSP_zvdiv` |
-| `vsmul(X, c)` / `vsmul!(result, X, c)` | Scalar multiply: `X .* c` (complex scalar) | `vDSP_zvzsml` |
-| `dot(X, Y)` | Unconjugated dot product: `sum(X .* Y)` | `vDSP_zdotpr` |
+| Function | Description |
+|----------|-------------|
+| `vmul(X, Y)` / `vmul!(result, X, Y)` | Element-wise multiply: `X .* Y` |
+| `vdiv(X, Y)` / `vdiv!(result, X, Y)` | Element-wise divide: `X ./ Y` |
+| `vsmul(X, c)` / `vsmul!(result, X, c)` | Scalar multiply (complex scalar) |
+| `dot(X, Y)` | Unconjugated dot product: `sum(X .* Y)` |
 
 ### Coordinate conversion
 
-```@docs
-AppleAccelerate.polar
-AppleAccelerate.rect
-```
+| Function | Description |
+|----------|-------------|
+| [`polar`](@ref AppleAccelerate.polar) | Cartesian to polar coordinates |
+| [`rect`](@ref AppleAccelerate.rect) | Polar to Cartesian coordinates |
 
 ## Broadcasting
 
 AppleAccelerate overrides `Base.copy` and `Base.copyto!` for `Broadcasted` objects, so that broadcasting syntax like `f.(X)` automatically uses the accelerated implementation.
-
-## Replacing Base Functions
-
-```@docs
-AppleAccelerate.@replaceBase
-```
 
 ## Benchmarks
 

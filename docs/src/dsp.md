@@ -91,7 +91,7 @@ The extension supports the full AbstractFFTs interface for 1D and 2D:
 | `fft!`, `ifft!`, `bfft!` | In-place complex FFT |
 | `plan_fft`, `plan_ifft`, `plan_bfft` | Out-of-place plans |
 | `plan_fft!`, `plan_bfft!` | In-place plans |
-| `inv(plan)`, `p \\ x`, `mul!` | Plan operations |
+| `inv(plan)`, `p \ x`, `mul!` | Plan operations |
 
 Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dimensions. Non-power-of-2 inputs, empty arrays, and 3D+ arrays will throw an `ArgumentError` with a message suggesting to use FFTW.jl.
 
@@ -159,11 +159,11 @@ Pre-planned FFT performance comparing Apple vDSP against FFTW, both single-threa
 
 Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/accelerate/discrete_cosine_transforms). Float32 only. Supports DCT types II, III, and IV.
 
-```@docs
-AppleAccelerate.plan_dct
-AppleAccelerate.dct
-AppleAccelerate.plan_destroy
-```
+| Function | Description |
+|----------|-------------|
+| [`plan_dct`](@ref AppleAccelerate.plan_dct) | Create a DCT setup object |
+| [`dct`](@ref AppleAccelerate.dct) | Compute the Discrete Cosine Transform |
+| [`plan_destroy`](@ref AppleAccelerate.plan_destroy) | Destroy a DCT setup object |
 
 ## DFT (Complex Discrete Fourier Transform)
 
@@ -332,9 +332,8 @@ nothing # hide
 
 Wraps Apple's [vDSP window generation functions](https://developer.apple.com/documentation/accelerate/vdsp/vector_generation).
 
-```@docs
-AppleAccelerate.blackman
-AppleAccelerate.hamming
-AppleAccelerate.hanning
-AppleAccelerate.hann
-```
+| Function | Description |
+|----------|-------------|
+| [`blackman`](@ref AppleAccelerate.blackman) | Generate a Blackman window |
+| [`hamming`](@ref AppleAccelerate.hamming) | Generate a Hamming window |
+| [`hanning`](@ref AppleAccelerate.hanning) | Generate a Hanning window |

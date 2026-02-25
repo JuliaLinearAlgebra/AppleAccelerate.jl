@@ -29,11 +29,10 @@ the appropriate Apple Accelerate attributes.
 
 | Function | Description |
 |----------|-------------|
-| `AASparseMatrix(M::SparseMatrixCSC)` | Construct from Julia sparse matrix |
+| [`AASparseMatrix`](@ref AppleAccelerate.AASparseMatrix) | Construct from Julia sparse matrix |
 | `A * x` | Sparse matrix-vector or matrix-matrix multiply |
 | `alpha * A * x` | Scaled sparse multiply |
-| `muladd!(A, x, y)` | Multiply-add: `y += A * x` |
-| `muladd!(alpha, A, x, y)` | Scaled multiply-add: `y += alpha * A * x` |
+| [`muladd!`](@ref AppleAccelerate.muladd!) | Multiply-add: `y += A * x` or `y += alpha * A * x` |
 | `transpose(A)` | Transpose (sets flag, no copy) |
 
 ### Query functions
@@ -46,11 +45,6 @@ the appropriate Apple Accelerate attributes.
 | `istriu(A)` | Check if upper triangular |
 | `istril(A)` | Check if lower triangular |
 | `A[i, j]` | Element access |
-
-```@docs
-AppleAccelerate.AASparseMatrix
-AppleAccelerate.muladd!
-```
 
 ## AAFactorization
 
@@ -89,18 +83,15 @@ nothing # hide
 
 | Function | Description |
 |----------|-------------|
+| [`AAFactorization`](@ref AppleAccelerate.AAFactorization) | Lazy factorization wrapper |
 | `solve(f, b)` | Solve `Ax = b`, returns new vector/matrix |
 | `solve!(f, xb)` | Solve in-place (`xb` is overwritten with solution) |
-| `f \\ b` | Equivalent to `solve(f, b)` |
+| `f \ b` | Equivalent to `solve(f, b)` |
 | `ldiv!(f, xb)` | Equivalent to `solve!(f, xb)` |
 | `ldiv!(x, f, b)` | Solve `Ax = b`, store result in `x` |
 | `factor!(f)` | Explicitly compute the factorization |
 | `factor!(f, type)` | Compute factorization with specific type |
 | `factorize(A::AASparseMatrix)` | Create an `AAFactorization` from a sparse matrix |
-
-```@docs
-AppleAccelerate.AAFactorization
-```
 
 ## Benchmarks
 
