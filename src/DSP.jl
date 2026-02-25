@@ -376,20 +376,6 @@ const     FFT_FORWARD         = 1
 const     FFT_INVERSE         = -1
 const     SIGNAL_STRIDE       = 1
 
-struct DSPDoubleSplitComplex
-    realp::Ptr{Float64}
-    imagp::Ptr{Float64}
-end
-
-DSPDoubleSplitComplex(realp::Vector{Float64}, imagp::Vector{Float64}) = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
-
-struct DSPSplitComplex
-    realp::Ptr{Float32}
-    imagp::Ptr{Float32}
-end
-
-DSPSplitComplex(realp::Vector{Float32}, imagp::Vector{Float32}) = DSPSplitComplex(pointer(realp), pointer(imagp))
-
 mutable struct FFTSetup{T}
     plan::Ptr{Cvoid}
 

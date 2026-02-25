@@ -174,6 +174,7 @@ end
 @static if Sys.isapple()
     include("Util.jl")
     include("Array.jl")
+    include("ComplexArray.jl")
     include("DSP.jl")
     include("libSparse/wrappers.jl")
     include("libSparse/AASparseMatrices.jl")

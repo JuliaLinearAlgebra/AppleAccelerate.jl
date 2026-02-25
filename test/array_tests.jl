@@ -528,4 +528,107 @@ end
     end
 end
 
+for T in (Float32, Float64)
+    @testset "Complex Unary::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Z::Vector{Complex{T}} = similar(X)
+
+        # vneg
+        @test AppleAccelerate.vneg(X) ≈ -X
+        AppleAccelerate.vneg!(Z, X)
+        @test Z ≈ -X
+
+        # vconj
+        @test AppleAccelerate.vconj(X) ≈ conj.(X)
+        AppleAccelerate.vconj!(Z, X)
+        @test Z ≈ conj.(X)
+
+        # vcopy
+        @test AppleAccelerate.vcopy(X) ≈ X
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "Complex Binary::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Y::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Z::Vector{Complex{T}} = similar(X)
+
+        # vmul
+        @test AppleAccelerate.vmul(X, Y) ≈ X .* Y
+        AppleAccelerate.vmul!(Z, X, Y)
+        @test Z ≈ X .* Y
+
+        # vdiv
+        @test AppleAccelerate.vdiv(X, Y) ≈ X ./ Y
+        AppleAccelerate.vdiv!(Z, X, Y)
+        @test Z ≈ X ./ Y
+
+        # vsmul (complex scalar)
+        c::Complex{T} = complex(T(2.5), T(-1.3))
+        @test AppleAccelerate.vsmul(X, c) ≈ X .* c
+        AppleAccelerate.vsmul!(Z, X, c)
+        @test Z ≈ X .* c
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "Complex → Real::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        R::Vector{T} = similar(X, T)
+
+        # vabs
+        @test AppleAccelerate.vabs(X) ≈ abs.(X)
+        AppleAccelerate.vabs!(R, X)
+        @test R ≈ abs.(X)
+
+        # vphase
+        @test AppleAccelerate.vphase(X) ≈ angle.(X)
+        AppleAccelerate.vphase!(R, X)
+        @test R ≈ angle.(X)
+
+        # vmags
+        @test AppleAccelerate.vmags(X) ≈ abs2.(X)
+        AppleAccelerate.vmags!(R, X)
+        @test R ≈ abs2.(X)
+
+        # vmagsa
+        B::Vector{T} = randn(T, N)
+        @test AppleAccelerate.vmagsa(X, B) ≈ abs2.(X) .+ B
+        AppleAccelerate.vmagsa!(R, X, B)
+        @test R ≈ abs2.(X) .+ B
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "Complex Dot Product::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Y::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+
+        # dot: unconjugated dot product — sum(X .* Y)
+        @test AppleAccelerate.dot(X, Y) ≈ sum(X .* Y)
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "Polar/Rect Conversion::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+
+        # polar → rect roundtrip
+        (mags, angs) = AppleAccelerate.polar(X)
+        @test mags ≈ abs.(X)
+        @test angs ≈ angle.(X)
+
+        Y = AppleAccelerate.rect(mags, angs)
+        @test Y ≈ X atol=T(1e-4)
+
+        # rect from known values
+        m::Vector{T} = ones(T, 10)
+        a::Vector{T} = zeros(T, 10)
+        result = AppleAccelerate.rect(m, a)
+        @test real.(result) ≈ ones(T, 10) atol=T(1e-6)
+        @test imag.(result) ≈ zeros(T, 10) atol=T(1e-6)
+    end
+end
+
 end # @testset "Array Operations"
