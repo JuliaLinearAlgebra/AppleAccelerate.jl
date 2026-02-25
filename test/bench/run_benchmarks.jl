@@ -15,7 +15,7 @@
 # All benchmarks run single-threaded (BLAS, FFTW, Accelerate) for fair,
 # reproducible comparisons. Each bench file sets its own thread counts.
 
-using Printf, Dates
+using Dates, Printf
 
 const BENCH_DIR = @__DIR__
 
@@ -28,7 +28,7 @@ println("CPU: ", Sys.cpu_info()[1].model)
 println("Date: ", Dates.now())
 println("="^70)
 
-requested = if length(ARGS) > 0
+const requested = if length(ARGS) > 0
     Set(ARGS)
 else
     Set(["fft", "sparse", "dense", "array"])

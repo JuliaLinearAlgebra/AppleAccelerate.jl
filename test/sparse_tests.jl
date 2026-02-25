@@ -2,7 +2,7 @@ using AppleAccelerate
 using SparseArrays
 using LinearAlgebra
 
-import AppleAccelerate: AASparseMatrix, muladd!, AAFactorization, solve, solve!, factor!
+import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve, solve!
 
 @testset "Sparse Linear Algebra" begin
     @testset "wrappers" begin

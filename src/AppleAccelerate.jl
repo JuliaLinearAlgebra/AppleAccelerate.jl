@@ -1,5 +1,5 @@
 module AppleAccelerate
-using LinearAlgebra, Libdl
+using Libdl, LinearAlgebra
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
@@ -84,7 +84,9 @@ function _read_macos_version()
         return nothing
     end
 
-    ver = VersionNumber(only(m.captures))
+    cap = only(m.captures)
+    cap === nothing && return nothing
+    ver = VersionNumber(cap)
     # Early macOS Tahoe developer betas reported 16.x before Apple settled on 26.x
     if ver.major == 16
         return VersionNumber(26, ver.minor, ver.patch)

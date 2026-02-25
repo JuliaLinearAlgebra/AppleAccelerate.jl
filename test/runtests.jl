@@ -1,7 +1,7 @@
 using LinearAlgebra
 using AppleAccelerate
 using AbstractFFTs
-using DSP, FFTW, Test, Random, Statistics
+using DSP, FFTW, Random, Statistics, Test
 using Aqua
 
 if !Sys.isapple()

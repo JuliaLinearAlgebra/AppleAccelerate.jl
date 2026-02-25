@@ -1,5 +1,7 @@
 ## Array.jl ##
 
+mksymtuple(x) = (x, x)
+
 for (T, suff) in ((Float64, ""), (Float32, "f"))
 
     # 1-arg functions
@@ -9,7 +11,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
               :sinh,:cosh,:tanh,:asinh,:acosh,:atanh)
     # Combine this with the list of renamed 1-arg funcs
     onearg_funcs = (
-        ((x,x) for x in onearg_funcs)...,
+        map(mksymtuple, onearg_funcs)...,
         (:trunc,:int),
         (:round,:nint),
         (:exponent,:logb),
@@ -77,7 +79,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     end
 
     # two-arg return
-    for (f, fa) in ((:sincos,:sincos),)
+    for (f, _) in ((:sincos,:sincos),)
         f! = Symbol("$(f)!")
         @eval begin
             function ($f)(X::Array{$T})
@@ -109,7 +111,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         end
     end
 
-    for (f, fa) in onearg_funcs
+    for (f, _) in onearg_funcs
         f! = Symbol("$(f)!")
         @eval begin
             # Broadcasting override such that f.(X) turns into f(X)
@@ -123,7 +125,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
             end
         end
     end
-    for (f, fa) in (twoarg_funcs...,(:pow,:pow))
+    for (f, _) in (twoarg_funcs...,(:pow,:pow))
         f! = Symbol("$(f)!")
         @eval begin
             # Broadcasting override such that f.(X) turns into f(X)
@@ -971,4 +973,3 @@ Convert to decibels relative to `ref`. If `power=true`, computes `10*log10(X/ref
 if `power=false`, computes `20*log10(X/ref)`.
 Wraps [`vDSP_vdbcon`](https://developer.apple.com/documentation/accelerate/vdsp_vdbcon).
 """ vdbcon
-

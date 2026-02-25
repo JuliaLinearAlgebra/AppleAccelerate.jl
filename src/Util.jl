@@ -54,6 +54,7 @@ macro replaceBase(fs...)
                 (Base.$f)(X::Union{Float64,Float32}) = ($fa)([X])[1]
                 Base.broadcasted(::typeof(Base.$f), arg::Union{Array{F,N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($fa)(maybecopy(arg))
             end
+            push!(b.args, e)
             arg_consumed = true
         end
         if fa in (:copysign,:atan,:pow,:rem)
@@ -62,6 +63,7 @@ macro replaceBase(fs...)
                 (Base.$f)(X::T,Y::T) where {T <: Union{Float32,Float64}} = ($fa)([X],[Y])[1]
                 Base.broadcasted(::typeof(Base.$f), arg1::Union{Array{F, N},Base.Broadcast.Broadcasted}, arg2::Union{Array{F, N},Base.Broadcast.Broadcasted}) where {N,F<:Union{Float32,Float64}} = ($fa)(maybecopy(arg1), maybecopy(arg2))
             end
+            push!(b.args, e)
             arg_consumed = true
         end
         if f in (:+,:-,:*,:/)
@@ -73,12 +75,12 @@ macro replaceBase(fs...)
                 Base.broadcasted(::typeof(Base.$f), arg1::Union{Array{T, N},Base.Broadcast.Broadcasted}, arg2::T) where {N, T <: Union{Float32,Float64}} = ($(OPS[f][2]))(maybecopy(arg1), arg2)
                 Base.broadcasted(::typeof(Base.$f), arg1::T, arg2::Union{Array{T, N},Base.Broadcast.Broadcasted}) where {N, T <: Union{Float32,Float64}} = ($(OPS[f][3]))(maybecopy(arg2), arg1)
         end
+            push!(b.args, e)
             arg_consumed = true
         end
         if !arg_consumed
             error("Function $f not defined by AppleAccelerate.jl")
         end
-        push!(b.args,e)
     end
     b
 end
