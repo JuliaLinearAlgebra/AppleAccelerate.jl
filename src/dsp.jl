@@ -279,7 +279,7 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
             end
             setup = ccall(($(string("vDSP_biquadm_CreateSetup", Dsuff)), libacc), Ptr{Cvoid},
                           (Ptr{Float64}, UInt64, UInt64),
-                          coefficients, channels, sections)
+                          coefficients, sections, channels)
             return BiquadMulti($T, setup, channels, sections)
         end
 
