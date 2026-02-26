@@ -94,49 +94,11 @@ nothing # hide
 | `factor!(f, type)` | Compute factorization with specific type |
 | `factorize(A::AASparseMatrix)` | Create an `AAFactorization` from a sparse matrix |
 
-## Benchmarks
-
-Performance comparison of Apple Sparse Solvers vs SuiteSparse (CHOLMOD/UMFPACK). The sparse benchmark script runs SuiteSparse first (before loading AppleAccelerate), so SuiteSparse uses OpenBLAS internally, then loads AppleAccelerate and re-runs with Apple's sparse solvers. Run with `julia --project=test/bench test/bench/run_benchmarks.jl sparse` ([source](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_sparse.jl)).
-
-### Sparse Matrix-Vector Multiply (density=0.01)
-
-SuiteSparse CSC SpMV is 2.5–4.6× faster due to its simpler data layout:
-
-| Type | N | Apple (μs) | SuiteSparse (μs) | Ratio |
-|------|---|-----------|-------------------|-------|
-| Float64 | 1,000 | 35 | 10 | 0.30× |
-| Float64 | 10,000 | 2,998 | 728 | 0.24× |
-| Float64 | 50,000 | 76,061 | 30,615 | 0.40× |
-| Float32 | 1,000 | 35 | 10 | 0.29× |
-| Float32 | 10,000 | 2,938 | 644 | 0.22× |
-
-### QR Factorize + Solve
-
-SuiteSparse LU (`\`) is faster for Float64. Apple QR wins for Float32 at N≥500 (up to 1.8×):
-
-| Type | N | Apple (μs) | SuiteSparse (μs) | Speedup |
-|------|---|-----------|-------------------|---------|
-| Float64 | 500 | 3,057 | 2,610 | 0.85× |
-| Float64 | 2,000 | 148,372 | 98,608 | 0.66× |
-| Float64 | 5,000 | 2,481,285 | 1,834,568 | 0.74× |
-| Float32 | 1,000 | 11,798 | 16,460 | 1.40× |
-| Float32 | 2,000 | 70,343 | 124,074 | 1.76× |
-| Float32 | 5,000 | 1,307,779 | 1,800,863 | 1.38× |
-
-### Cholesky Factorize + Solve
-
-Apple Cholesky is faster at N=5000, SuiteSparse faster at smaller sizes:
-
-| Type | N | Apple (μs) | SuiteSparse (μs) | Speedup |
-|------|---|-----------|-------------------|---------|
-| Float64 | 500 | 1,957 | 1,546 | 0.79× |
-| Float64 | 2,000 | 52,412 | 46,820 | 0.89× |
-| Float64 | 5,000 | 344,766 | 505,765 | 1.47× |
-| Float32 | 2,000 | 42,128 | 33,195 | 0.79× |
-| Float32 | 5,000 | 273,444 | 339,105 | 1.24× |
-
-!!! note "Benchmark environment"
-    Apple M2 Max, macOS 26, single-threaded. Julia 1.12.5, AppleAccelerate v0.6.0, SparseArrays v1.12.0 (SuiteSparse 7.8.3). Times are minimum of 5 trials. Matrices have density 0.01. Run [`bench_sparse.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_sparse.jl) to reproduce.
-
-!!! warning "Benchmark limitations"
-    These benchmarks use random sparse matrices (`sprandn`) which lack the structure found in real-world problems (e.g., banded, block-diagonal, or mesh-derived sparsity patterns). The matrix sizes tested (N up to 5,000–50,000) are also modest by sparse solver standards. Performance on structured problems from applications like FEM, circuit simulation, or graph analysis may differ significantly.
+```@docs
+AppleAccelerate.AASparseMatrix
+AppleAccelerate.AAFactorization
+AppleAccelerate.muladd!
+AppleAccelerate.factor!
+AppleAccelerate.solve
+AppleAccelerate.solve!
+```

@@ -9,8 +9,9 @@ makedocs(;
         "Array Operations" => "array.md",
         "Dense Linear Algebra" => "blas.md",
         "Sparse Linear Algebra" => "sparse.md",
-        "Signal Processing" => "dsp.md",
-        "API Reference" => "api.md",
+        "FFT & Transforms" => "fft.md",
+        "Filtering & Spectral" => "filtering.md",
+        "Benchmarks" => "benchmarks.md",
     ],
     format = Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
