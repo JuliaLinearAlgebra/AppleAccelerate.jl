@@ -157,6 +157,7 @@ conv
 In-place convolution. The 3-argument form stores the result in `result`
 (which must have at least `length(X) + length(K) - 1` elements).
 The 2-argument form overwrites `X`.
+Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 conv!
 
@@ -177,6 +178,7 @@ xcorr
 
 In-place cross-correlation. The 3-argument form stores the result in `result`.
 The 2-argument form overwrites `X`.
+Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 xcorr!
 
@@ -249,6 +251,32 @@ end
 # Backward-compatible method: biquadcreate(::Vector{Float64}, ::Int) defaults to Float64
 biquadcreate(coefficients::Vector{Float64}, sections::Int) = biquadcreate(coefficients, sections, Float64)
 
+"""
+    biquadcreate(coefficients::Vector{Float64}, sections::Int, [T=Float64])
+
+Create a biquad IIR filter setup. `coefficients` must contain 5 values per section
+(3 feed-forward + 2 feedback). Returns a `Biquad{T}` setup object.
+Wraps [`vDSP_biquad_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_biquad_createsetup).
+"""
+biquadcreate
+
+"""
+    biquad(X, delays, numelem, bq::Biquad{T})
+
+Apply a cascaded biquad IIR filter to input `X`. `delays` holds the filter state
+and is updated in-place. Returns the filtered output vector.
+Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad).
+"""
+biquad
+
+"""
+    biquaddestroy(bq::Biquad{T})
+
+Free resources associated with a biquad setup. Called automatically by the finalizer.
+Wraps [`vDSP_biquad_DestroySetup`](https://developer.apple.com/documentation/accelerate/vdsp_biquad_destroysetup).
+"""
+biquaddestroy
+
 ## == Multi-channel Biquadratic/IIR filtering
 
 mutable struct BiquadMulti{T}
@@ -314,6 +342,24 @@ end
 # Convenience: default to Float32
 biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int) =
     biquadm_create(coefficients, channels, sections, Float32)
+
+"""
+    biquadm_create(coefficients, channels, sections, [T=Float32])
+
+Create a multi-channel biquad IIR filter setup. `coefficients` must contain
+`5 * channels * sections` Float64 values. Returns a `BiquadMulti{T}` setup object.
+Wraps [`vDSP_biquadm_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_createsetup).
+"""
+biquadm_create
+
+"""
+    biquadm(X, numelem, setup::BiquadMulti{T})
+
+Apply a multi-channel biquad IIR filter. `X` is a vector of per-channel input vectors.
+Returns a vector of per-channel output vectors.
+Wraps [`vDSP_biquadm`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm).
+"""
+biquadm
 
 ## == Spectral Analysis == ##
 
@@ -436,6 +482,7 @@ end
     zaspec(A::Vector{Complex{T}}) -> Vector{T}
 
 Autospectrum (power spectrum): returns a real vector `C` where `C[n] = |A[n]|^2`.
+Wraps [`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec).
 
 See also [`zaspec!`](@ref) for the accumulating in-place variant.
 """
@@ -445,6 +492,7 @@ zaspec
     zcspec(A::Vector{Complex{T}}, B::Vector{Complex{T}}) -> Vector{Complex{T}}
 
 Cross-spectrum: returns a complex vector `C` where `C[n] = conj(A[n]) * B[n]`.
+Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec).
 
 See also [`zcspec!`](@ref) for the accumulating in-place variant.
 """
@@ -455,6 +503,7 @@ zcspec
 
 Coherence function: returns a real vector `D` where `D[n] = |C[n]|^2 / (A[n] * B[n])`.
 `A` and `B` are real power spectra, `C` is a complex cross-spectrum.
+Wraps [`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher).
 
 See also [`zcoher!`](@ref) for the in-place variant.
 """
@@ -465,6 +514,7 @@ zcoher
 
 Transfer function: returns a complex vector `C` where `C[n] = B[n] / A[n]`.
 `A` is a real power spectrum, `B` is a complex cross-spectrum.
+Wraps [`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans).
 
 See also [`ztrans!`](@ref) for the in-place variant.
 """
@@ -592,9 +642,8 @@ end
 """
     blackman(length, [rtype=Float64])
 
-Generates a Blackman window of length 'length'. Default return type
-is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-will be returned.
+Generate a Blackman window of the given length.
+Wraps [`vDSP_blkman_window`](https://developer.apple.com/documentation/accelerate/vdsp_blkman_window).
 """
 function blackman(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
@@ -604,9 +653,8 @@ end
 """
     hamming(length, [rtype=Float64])
 
-Generates a Hamming window of length 'length'. Default return type
-is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-will be returned.
+Generate a Hamming window of the given length.
+Wraps [`vDSP_hamm_window`](https://developer.apple.com/documentation/accelerate/vdsp_hamm_window).
 """
 function hamming(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
@@ -616,9 +664,8 @@ end
 """
     hanning(length, [rtype=Float64])
 
-Generates a denormalized Hanning window of length 'length'. Default
-return type is Vector{Float64}, but if rtype=Float32, Vector{Float32}
-will be returned.
+Generate a Hanning window of the given length.
+Wraps [`vDSP_hann_window`](https://developer.apple.com/documentation/accelerate/vdsp_hann_window).
 """
 function hanning(length::Int, rtype::DataType=Float64)
     result::Vector{rtype} = Array{rtype}(undef, length)
@@ -686,12 +733,11 @@ end
 
 ## == Discrete Cosine Transform (DCT) & Discrete Fourier Transform (DFT) == ##
 """
-Initializes a new DCT setup object. 'dct_type' must be 2, 3, 4 corresponding to Type II, III and IV.
-DCT 'length' must be equal to f*(2^n) where f = 1,3,5,15 and n >= 4. If you have a previous DCT setup
-object, that can be passed in as 'previous'. The returned DCT setup will share the underlying data
-storage of the previous setup object.
+    plan_dct(length, dct_type, [previous])
 
-Returns: DFTSetup
+Create a DCT setup object. `dct_type` must be 2, 3, or 4 (Type II, III, IV).
+Length must be `f * 2^n` where `f ∈ {1,3,5,15}` and `n ≥ 4`.
+Wraps [`vDSP_DCT_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dct_createsetup).
 """
 function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     n = trailing_zeros(length)
@@ -709,10 +755,11 @@ end
 
 
 """
-Computes the DCT of a given input vector X using the parameters setup in
-the DFTSetup object.
+    dct(X::Vector{Float32}, setup::DFTSetup)
+    dct(X::Vector{Float32}, [dct_type=2])
 
-Returns: Vector{Float32}
+Compute the Discrete Cosine Transform of `X`.
+Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dct_execute).
 """
 function dct(X::Vector{Float32}, setup::DFTSetup)
     result = similar(X)
@@ -723,12 +770,6 @@ function dct(X::Vector{Float32}, setup::DFTSetup)
 end
 
 
-"""
-Computes the DCT of a given input vector X using a DCT Type 'dct_type' (defaults to type II).
-This function does not require a separate call to dct_setup.
-
-Returns: Vector{Float32}
-"""
 function dct(X::Vector{Float32}, dct_type::Int=2)
     setup = plan_dct(length(X), dct_type)
     return dct(X, setup)
@@ -736,7 +777,10 @@ end
 
 
 """
-Deinitializes a DFTSetup{Float32} object created by plan_dct or plan_dft.
+    plan_destroy(setup::DFTSetup)
+
+Destroy a DCT/DFT setup object, freeing its resources.
+Wraps [`vDSP_DFT_DestroySetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_destroysetup).
 """
 function plan_destroy(setup::DFTSetup{Float32})
     ccall(("vDSP_DFT_DestroySetup", libacc), Cvoid,
@@ -744,9 +788,6 @@ function plan_destroy(setup::DFTSetup{Float32})
           setup.setup)
 end
 
-"""
-Deinitializes a DFTSetup{Float64} object created by plan_dft.
-"""
 function plan_destroy(setup::DFTSetup{Float64})
     ccall(("vDSP_DFT_DestroySetupD", libacc), Cvoid,
           (Ptr{Cvoid},),
@@ -762,6 +803,7 @@ end
 Create a DFT setup for complex-to-complex DFT of the given `length` and `direction`
 (`DFT_FORWARD` or `DFT_INVERSE`). Length must be `f * 2^n` where `f ∈ {1, 3, 5, 15}`
 and `n ≥ 3`. Optionally pass a `previous` setup to share underlying data.
+Wraps [`vDSP_DFT_zop_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_zop_createsetup).
 
 Returns: `DFTSetup{T}`
 """
@@ -785,6 +827,7 @@ end
     dft(Ir::Vector{T}, Ii::Vector{T}, setup::DFTSetup{T})
 
 Execute the complex DFT defined by `setup` on split-complex input (`Ir`, `Ii`).
+Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute).
 
 Returns: `(Or, Oi)` — real and imaginary parts of the output.
 """
@@ -812,6 +855,7 @@ end
     dft(X::Vector{Complex{T}}, setup::DFTSetup{T})
 
 Execute the complex DFT on an interleaved complex vector.
+Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute).
 
 Returns: `Vector{Complex{T}}`
 """
@@ -827,6 +871,7 @@ end
     dft(X::Vector{Complex{T}}) where T
 
 Compute the DFT of `X`, auto-creating a setup. Default direction is forward.
+Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute).
 
 Returns: `Vector{Complex{T}}`
 """
@@ -845,6 +890,7 @@ end
 
 Compute the normalized inverse DFT of `X`. The setup must have been created
 with `DFT_INVERSE` direction. Returns `dft(X, setup) ./ length(X)`.
+Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute).
 
 Returns: `Vector{Complex{T}}`
 """
@@ -885,8 +931,9 @@ end
     plan_fft(n::Integer, [T=Float64], [radix=2])
 
 Create a reusable FFT setup object for repeated transforms of the same size.
-Wraps `vDSP_create_fftsetup` / `vDSP_create_fftsetupD`. The setup is automatically
-destroyed when garbage collected.
+Wraps [`vDSP_create_fftsetup`](https://developer.apple.com/documentation/accelerate/vdsp_create_fftsetup) /
+[`vDSP_create_fftsetupD`](https://developer.apple.com/documentation/accelerate/vdsp_create_fftsetupd).
+The setup is automatically destroyed when garbage collected.
 """
 function plan_fft(n::Integer, ::Type{T}=Float64, radix::Integer = 2) where T <: Union{Float32, Float64}
     FFTSetup{T}(n, radix)
@@ -1013,6 +1060,8 @@ end
 Compute the forward FFT of `x` via Apple vDSP. Supports 1D vectors and 2D matrices
 with `ComplexF32` or `ComplexF64` elements. All dimensions must be powers of 2.
 If `setup` is omitted, a temporary plan is created automatically.
+Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
+[`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
 fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
@@ -1026,6 +1075,8 @@ fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x
 
 Compute the unnormalized inverse (backward) FFT of `x` via Apple vDSP.
 The result is *not* divided by `length(x)`; use [`ifft`](@ref) for the normalized version.
+Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
+[`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
 bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
@@ -1039,6 +1090,8 @@ bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft
 
 Compute the normalized inverse FFT of `x` via Apple vDSP.
 Equivalent to `bfft(x) / length(x)`. Satisfies `ifft(fft(x)) ≈ x`.
+Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
+[`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
@@ -1141,6 +1194,8 @@ end
     fft!(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
 
 Compute the forward FFT of `x` in-place via Apple vDSP, overwriting `x` with the result.
+Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
+[`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
 fft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_FORWARD)
 fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_FORWARD)
@@ -1153,6 +1208,8 @@ fft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, plan_fft
     bfft!(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
 
 Compute the unnormalized inverse FFT of `x` in-place via Apple vDSP.
+Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
+[`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
 bfft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_INVERSE)
 bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_INVERSE)
@@ -1166,6 +1223,8 @@ bfft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, plan_f
 
 Compute the normalized inverse FFT of `x` in-place via Apple vDSP.
 Satisfies `ifft!(fft!(copy(x))) ≈ x`.
+Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
+[`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
 function ifft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup)
@@ -1325,6 +1384,7 @@ end
     plan_rfft(x::Vector{T}) where T <: Union{Float32, Float64}
 
 Create a reusable FFT setup for real-input forward transforms of the same size as `x`.
+Wraps [`vDSP_create_fftsetup`](https://developer.apple.com/documentation/accelerate/vdsp_create_fftsetup).
 """
 plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
 
@@ -1334,6 +1394,7 @@ plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x
 Compute the forward FFT of a real-valued vector `x` via Apple vDSP.
 Returns the non-redundant complex coefficients of length `N÷2+1`.
 Input length must be a power of 2.
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
 """
 rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
 rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
@@ -1346,6 +1407,7 @@ rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
 Compute the unnormalized inverse real FFT, returning a real vector of length `n`.
 `X` must have length `n÷2+1`. The result is *not* divided by `n`;
 use [`irfft`](@ref) for the normalized version.
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
 """
 brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
 brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n, FFTSetup{T}(n))
@@ -1357,6 +1419,7 @@ brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X
 
 Compute the normalized inverse real FFT, returning a real vector of length `n`.
 Satisfies `irfft(rfft(x), length(x)) ≈ x`.
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
 """
 irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
 irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = irfft(X, n, FFTSetup{T}(n))

@@ -6,6 +6,8 @@ These functions are **not exported** to avoid conflicts with Base. Access them v
 
 ## Element-wise Math Functions
 
+These functions wrap Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib) `vv*` routines.
+
 ### One-argument functions
 
 Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(out, X)`:
@@ -40,6 +42,8 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 
 ## Unary vDSP Operations
 
+Wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) unary vector operations.
+
 | Function | Description |
 |----------|-------------|
 | [`vneg`](@ref AppleAccelerate.vneg) | Negate each element: `result[i] = -X[i]` |
@@ -53,19 +57,21 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 
 ## Vector Reductions
 
-| Function | Description |
-|----------|-------------|
-| `maximum(X)`, `minimum(X)` | Max/min value |
-| `findmax(X)`, `findmin(X)` | Max/min value and index |
-| `sum(X)`, `mean(X)` | Sum and mean |
-| `meanmag(X)` | Mean of absolute values |
-| `meansqr(X)` | Mean of squares |
-| `meanssqr(X)` | Mean of signed squares |
-| `summag(X)` | Sum of absolute values |
-| `sumsqr(X)` | Sum of squares |
-| `sumssqr(X)` | Sum of signed squares |
-| [`dot`](@ref AppleAccelerate.dot) | Dot product: `sum(X .* Y)` |
-| [`distancesq`](@ref AppleAccelerate.distancesq) | Squared Euclidean distance: `sum((X .- Y).^2)` |
+Wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) reduction functions.
+
+| Function | Description | Apple function |
+|----------|-------------|----------------|
+| `maximum(X)`, `minimum(X)` | Max/min value | [`vDSP_maxv`](https://developer.apple.com/documentation/accelerate/vdsp_maxv), [`vDSP_minv`](https://developer.apple.com/documentation/accelerate/vdsp_minv) |
+| `findmax(X)`, `findmin(X)` | Max/min value and index | [`vDSP_maxvi`](https://developer.apple.com/documentation/accelerate/vdsp_maxvi), [`vDSP_minvi`](https://developer.apple.com/documentation/accelerate/vdsp_minvi) |
+| `sum(X)`, `mean(X)` | Sum and mean | [`vDSP_sve`](https://developer.apple.com/documentation/accelerate/vdsp_sve), [`vDSP_meanv`](https://developer.apple.com/documentation/accelerate/vdsp_meanv) |
+| `meanmag(X)` | Mean of absolute values | [`vDSP_meamgv`](https://developer.apple.com/documentation/accelerate/vdsp_meamgv) |
+| `meansqr(X)` | Mean of squares | [`vDSP_measqv`](https://developer.apple.com/documentation/accelerate/vdsp_measqv) |
+| `meanssqr(X)` | Mean of signed squares | [`vDSP_mvessq`](https://developer.apple.com/documentation/accelerate/vdsp_mvessq) |
+| `summag(X)` | Sum of absolute values | [`vDSP_svemg`](https://developer.apple.com/documentation/accelerate/vdsp_svemg) |
+| `sumsqr(X)` | Sum of squares | [`vDSP_svesq`](https://developer.apple.com/documentation/accelerate/vdsp_svesq) |
+| `sumssqr(X)` | Sum of signed squares | [`vDSP_svs`](https://developer.apple.com/documentation/accelerate/vdsp_svs) |
+| [`dot`](@ref AppleAccelerate.dot) | Dot product: `sum(X .* Y)` | [`vDSP_dotpr`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr) |
+| [`distancesq`](@ref AppleAccelerate.distancesq) | Squared Euclidean distance: `sum((X .- Y).^2)` | [`vDSP_distancesq`](https://developer.apple.com/documentation/accelerate/vdsp_distancesq) |
 | [`rmsqv`](@ref AppleAccelerate.rmsqv) | Root mean square: `sqrt(sum(X.^2)/N)` |
 | [`sve_svesq`](@ref AppleAccelerate.sve_svesq) | Simultaneous sum and sum-of-squares |
 | [`maxmgv`](@ref AppleAccelerate.maxmgv) | Maximum magnitude: `max(\|X\|)` |
@@ -75,12 +81,12 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 
 ## Vector-Vector Arithmetic
 
-| Function | Description |
-|----------|-------------|
-| [`vadd`](@ref AppleAccelerate.vadd) / [`vadd!`](@ref AppleAccelerate.vadd!) | Element-wise addition |
-| [`vsub`](@ref AppleAccelerate.vsub) / [`vsub!`](@ref AppleAccelerate.vsub!) | Element-wise subtraction |
-| [`vmul`](@ref AppleAccelerate.vmul) / [`vmul!`](@ref AppleAccelerate.vmul!) | Element-wise multiplication |
-| [`vdiv`](@ref AppleAccelerate.vdiv) / [`vdiv!`](@ref AppleAccelerate.vdiv!) | Element-wise division |
+| Function | Description | Apple function |
+|----------|-------------|----------------|
+| [`vadd`](@ref AppleAccelerate.vadd) / [`vadd!`](@ref AppleAccelerate.vadd!) | Element-wise addition | [`vDSP_vadd`](https://developer.apple.com/documentation/accelerate/vdsp_vadd) |
+| [`vsub`](@ref AppleAccelerate.vsub) / [`vsub!`](@ref AppleAccelerate.vsub!) | Element-wise subtraction | [`vDSP_vsub`](https://developer.apple.com/documentation/accelerate/vdsp_vsub) |
+| [`vmul`](@ref AppleAccelerate.vmul) / [`vmul!`](@ref AppleAccelerate.vmul!) | Element-wise multiplication | [`vDSP_vmul`](https://developer.apple.com/documentation/accelerate/vdsp_vmul) |
+| [`vdiv`](@ref AppleAccelerate.vdiv) / [`vdiv!`](@ref AppleAccelerate.vdiv!) | Element-wise division | [`vDSP_vdiv`](https://developer.apple.com/documentation/accelerate/vdsp_vdiv) |
 
 ## Two-Vector Comparison & Distance
 
@@ -95,14 +101,14 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 
 ## Vector-Scalar Operations
 
-| Function | Description |
-|----------|-------------|
-| [`vsadd`](@ref AppleAccelerate.vsadd) / [`vsadd!`](@ref AppleAccelerate.vsadd!) | Vector + scalar |
-| [`vssub`](@ref AppleAccelerate.vssub) / [`vssub!`](@ref AppleAccelerate.vssub!) | Vector - scalar |
-| [`svsub`](@ref AppleAccelerate.svsub) / [`svsub!`](@ref AppleAccelerate.svsub!) | Scalar - vector |
-| [`vsmul`](@ref AppleAccelerate.vsmul) / [`vsmul!`](@ref AppleAccelerate.vsmul!) | Vector * scalar |
-| [`vsdiv`](@ref AppleAccelerate.vsdiv) / [`vsdiv!`](@ref AppleAccelerate.vsdiv!) | Vector / scalar |
-| [`svdiv`](@ref AppleAccelerate.svdiv) | Scalar / vector |
+| Function | Description | Apple function |
+|----------|-------------|----------------|
+| [`vsadd`](@ref AppleAccelerate.vsadd) / [`vsadd!`](@ref AppleAccelerate.vsadd!) | Vector + scalar | [`vDSP_vsadd`](https://developer.apple.com/documentation/accelerate/vdsp_vsadd) |
+| [`vssub`](@ref AppleAccelerate.vssub) / [`vssub!`](@ref AppleAccelerate.vssub!) | Vector - scalar | [`vDSP_vsadd`](https://developer.apple.com/documentation/accelerate/vdsp_vsadd) |
+| [`svsub`](@ref AppleAccelerate.svsub) / [`svsub!`](@ref AppleAccelerate.svsub!) | Scalar - vector | [`vDSP_vsadd`](https://developer.apple.com/documentation/accelerate/vdsp_vsadd) |
+| [`vsmul`](@ref AppleAccelerate.vsmul) / [`vsmul!`](@ref AppleAccelerate.vsmul!) | Vector * scalar | [`vDSP_vsmul`](https://developer.apple.com/documentation/accelerate/vdsp_vsmul) |
+| [`vsdiv`](@ref AppleAccelerate.vsdiv) / [`vsdiv!`](@ref AppleAccelerate.vsdiv!) | Vector / scalar | [`vDSP_vsdiv`](https://developer.apple.com/documentation/accelerate/vdsp_vsdiv) |
+| [`svdiv`](@ref AppleAccelerate.svdiv) | Scalar / vector | [`vDSP_svdiv`](https://developer.apple.com/documentation/accelerate/vdsp_svdiv) |
 
 ## Compound Arithmetic
 
@@ -288,7 +294,7 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 
 ## Complex Array Operations
 
-AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Float32}}` and `Vector{Complex{Float64}}`. These extend existing function names (e.g., `vneg`, `vabs`, `vmul`) with methods that dispatch on complex element types — no naming conflicts with the real-valued versions above.
+AppleAccelerate also wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp)'s split-complex functions for `Vector{Complex{Float32}}` and `Vector{Complex{Float64}}`. These extend existing function names (e.g., `vneg`, `vabs`, `vmul`) with methods that dispatch on complex element types — no naming conflicts with the real-valued versions above.
 
 ### Complex unary operations
 

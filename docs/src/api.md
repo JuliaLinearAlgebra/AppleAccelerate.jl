@@ -1,6 +1,6 @@
 # API Reference
 
-## Array Operations
+## Array Operations — [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) / [vecLib](https://developer.apple.com/documentation/accelerate/veclib)
 
 ### Unary vDSP Operations
 
@@ -271,7 +271,7 @@ AppleAccelerate.zconv
 AppleAccelerate.zmmul
 ```
 
-## Dense Linear Algebra
+## Dense Linear Algebra — [BLAS](https://developer.apple.com/documentation/accelerate/blas) / [LAPACK](https://developer.apple.com/documentation/accelerate/lapack)
 
 ```@docs
 AppleAccelerate.load_accelerate
@@ -281,7 +281,7 @@ AppleAccelerate.get_macos_version
 AppleAccelerate._read_macos_version
 ```
 
-## Sparse Linear Algebra
+## Sparse Linear Algebra — [Sparse Solvers](https://developer.apple.com/documentation/accelerate/sparse_solvers)
 
 ```@docs
 AppleAccelerate.AASparseMatrix
@@ -292,9 +292,9 @@ AppleAccelerate.solve
 AppleAccelerate.solve!
 ```
 
-## Signal Processing
+## Signal Processing — [vDSP](https://developer.apple.com/documentation/accelerate/vdsp)
 
-### FFT
+### FFT — [Fast Fourier Transforms](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms)
 
 ```@docs
 AppleAccelerate.plan_fft
@@ -315,7 +315,7 @@ AppleAccelerate.irfft
 AppleAccelerate.brfft
 ```
 
-### DFT
+### DFT — [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute)
 
 ```@docs
 AppleAccelerate.plan_dft
@@ -323,7 +323,7 @@ AppleAccelerate.dft
 AppleAccelerate.idft
 ```
 
-### DCT
+### DCT — [Discrete Cosine Transforms](https://developer.apple.com/documentation/accelerate/discrete_cosine_transforms)
 
 ```@docs
 AppleAccelerate.plan_dct
@@ -331,7 +331,7 @@ AppleAccelerate.dct
 AppleAccelerate.plan_destroy
 ```
 
-### Convolution & Correlation
+### Convolution & Correlation — [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv)
 
 ```@docs
 AppleAccelerate.conv
@@ -340,7 +340,7 @@ AppleAccelerate.xcorr
 AppleAccelerate.xcorr!
 ```
 
-### Biquad Filtering
+### Biquad Filtering — [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad)
 
 ```@docs
 AppleAccelerate.biquadcreate
@@ -348,7 +348,7 @@ AppleAccelerate.biquad
 AppleAccelerate.biquaddestroy
 ```
 
-### Multi-Channel Biquad Filtering
+### Multi-Channel Biquad Filtering — [`vDSP_biquadm`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm)
 
 ```@docs
 AppleAccelerate.biquadm_create
@@ -379,7 +379,7 @@ AppleAccelerate.ztrans
 AppleAccelerate.ztrans!
 ```
 
-### Window Functions
+### Window Functions — [Vector Generation](https://developer.apple.com/documentation/accelerate/vdsp/vector_generation)
 
 ```@docs
 AppleAccelerate.blackman

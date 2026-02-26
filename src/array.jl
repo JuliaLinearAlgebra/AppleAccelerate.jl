@@ -146,7 +146,8 @@ end
 """
     sincos(X::Array{T}) where T <: Union{Float32, Float64}
 
-Compute the sine and cosine of each element simultaneously via vecLib `vvsincos`.
+Compute the sine and cosine of each element simultaneously via vecLib
+[`vvsincos`](https://developer.apple.com/documentation/accelerate/vvsincos).
 Returns a tuple `(sin(X), cos(X))` of arrays. Faster than computing `sin` and `cos`
 separately since both are produced in a single pass.
 
@@ -157,7 +158,8 @@ sincos
 """
     cis(X::Array{T}) where T <: Union{Float32, Float64}
 
-Compute `cos(x) + im*sin(x)` for each element via vecLib `vvcosisin`.
+Compute `cos(x) + im*sin(x)` for each element via vecLib
+[`vvcosisin`](https://developer.apple.com/documentation/accelerate/vvcosisin).
 Returns a `Complex{T}` array. Equivalent to `exp.(im .* X)` but faster.
 
 The mutating variant `cis!(out, X)` stores results in a preallocated complex array.
@@ -200,72 +202,84 @@ end
     maximum(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the maximum value in `X` via vDSP. Equivalent to `Base.maximum(X)`.
+Wraps [`vDSP_maxv`](https://developer.apple.com/documentation/accelerate/vdsp_maxv).
 """ maximum
 
 @doc """
     minimum(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the minimum value in `X` via vDSP. Equivalent to `Base.minimum(X)`.
+Wraps [`vDSP_minv`](https://developer.apple.com/documentation/accelerate/vdsp_minv).
 """ minimum
 
 @doc """
     sum(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of elements in `X` via vDSP. Equivalent to `Base.sum(X)`.
+Wraps [`vDSP_sve`](https://developer.apple.com/documentation/accelerate/vdsp_sve).
 """ sum
 
 @doc """
     mean(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the arithmetic mean of elements in `X` via vDSP.
+Wraps [`vDSP_meanv`](https://developer.apple.com/documentation/accelerate/vdsp_meanv).
 """ mean
 
 @doc """
     meanmag(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of absolute values: `sum(abs.(X)) / length(X)`.
+Wraps [`vDSP_meamgv`](https://developer.apple.com/documentation/accelerate/vdsp_meamgv).
 """ meanmag
 
 @doc """
     meansqr(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of squares: `sum(X.^2) / length(X)`.
+Wraps [`vDSP_measqv`](https://developer.apple.com/documentation/accelerate/vdsp_measqv).
 """ meansqr
 
 @doc """
     meanssqr(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of signed squares: `sum(X .* abs.(X)) / length(X)`.
+Wraps [`vDSP_mvessq`](https://developer.apple.com/documentation/accelerate/vdsp_mvessq).
 """ meanssqr
 
 @doc """
     summag(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of absolute values: `sum(abs.(X))`.
+Wraps [`vDSP_svemg`](https://developer.apple.com/documentation/accelerate/vdsp_svemg).
 """ summag
 
 @doc """
     sumsqr(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of squares: `sum(X.^2)`.
+Wraps [`vDSP_svesq`](https://developer.apple.com/documentation/accelerate/vdsp_svesq).
 """ sumsqr
 
 @doc """
     sumssqr(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of signed squares: `sum(X .* abs.(X))`.
+Wraps [`vDSP_svs`](https://developer.apple.com/documentation/accelerate/vdsp_svs).
 """ sumssqr
 
 @doc """
     findmax(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return `(value, index)` of the maximum element in `X` via vDSP. Equivalent to `Base.findmax(X)`.
+Wraps [`vDSP_maxvi`](https://developer.apple.com/documentation/accelerate/vdsp_maxvi).
 """ findmax
 
 @doc """
     findmin(X::Vector{T}) where T <: Union{Float32, Float64}
 
 Return `(value, index)` of the minimum element in `X` via vDSP. Equivalent to `Base.findmin(X)`.
+Wraps [`vDSP_minvi`](https://developer.apple.com/documentation/accelerate/vdsp_minvi).
 """ findmin
 
 # Element-wise operations over two vectors

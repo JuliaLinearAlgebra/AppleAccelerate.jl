@@ -15,7 +15,7 @@ Pkg.add("AppleAccelerate")
 
 ### Array Operations
 
-AppleAccelerate provides accelerated element-wise math operations via Apple's vecLib:
+AppleAccelerate provides accelerated element-wise math operations via Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib):
 
 ```@example
 using AppleAccelerate

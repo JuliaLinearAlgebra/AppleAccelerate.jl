@@ -8,7 +8,7 @@ using AppleAccelerate, SparseArrays, LinearAlgebra
 
 ## AASparseMatrix
 
-A wrapper around Apple's sparse matrix format, constructed from Julia's `SparseMatrixCSC`.
+A wrapper around Apple's [`SparseMatrix`](https://developer.apple.com/documentation/accelerate/sparsematrix_double) format, constructed from Julia's `SparseMatrixCSC`.
 
 ```@example sparse
 using AppleAccelerate, SparseArrays
@@ -48,6 +48,7 @@ the appropriate Apple Accelerate attributes.
 
 ## AAFactorization
 
+Wraps Apple's [`SparseOpaqueFactorization`](https://developer.apple.com/documentation/accelerate/sparseopaquefactorization_double).
 Lazy factorization wrapper: the factorization is computed on the first call to `solve`
 or by explicitly calling `factor!`.
 

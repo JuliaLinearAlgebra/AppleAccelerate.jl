@@ -167,7 +167,7 @@ Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/acc
 
 ## DFT (Complex Discrete Fourier Transform)
 
-Wraps Apple's [`vDSP_DFT_zop`](https://developer.apple.com/documentation/accelerate/1450396-vdsp_dft_execute) for complex-to-complex DFT. Unlike the FFT functions, DFT supports non-power-of-2 lengths of the form `f * 2^n` where `f ∈ {1, 3, 5, 15}` and `n ≥ 3`. Both `Float32` and `Float64` are supported.
+Wraps Apple's [`vDSP_DFT_zop`](https://developer.apple.com/documentation/accelerate/vdsp_dft_execute) for complex-to-complex DFT. Unlike the FFT functions, DFT supports non-power-of-2 lengths of the form `f * 2^n` where `f ∈ {1, 3, 5, 15}` and `n ≥ 3`. Both `Float32` and `Float64` are supported.
 
 ```@example dsp
 x = randn(ComplexF64, 120)  # 120 = 15 * 2^3, non-power-of-2
@@ -250,9 +250,9 @@ nothing # hide
 
 ## Spectral Analysis
 
-Wraps Apple's [vDSP spectral analysis functions](https://developer.apple.com/documentation/accelerate/vdsp) for computing power spectra, cross-spectra, coherence, and transfer functions. All functions support both `Float32` and `Float64`.
+Wraps Apple's [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) spectral analysis functions for computing power spectra, cross-spectra, coherence, and transfer functions. All functions support both `Float32` and `Float64`.
 
-### Autospectrum
+### Autospectrum ([`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec))
 
 ```@example dsp
 x = randn(ComplexF64, 256)
@@ -262,7 +262,7 @@ nothing # hide
 
 The `zaspec!` variant accumulates into an existing vector (`C[n] += |A[n]|^2`), useful for averaging multiple frames.
 
-### Cross-Spectrum
+### Cross-Spectrum ([`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec))
 
 ```@example dsp
 x = randn(ComplexF64, 256)
@@ -271,7 +271,7 @@ csd = AppleAccelerate.zcspec(x, y)  # conj(x[n]) * y[n], accumulated
 nothing # hide
 ```
 
-### Coherence
+### Coherence ([`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher))
 
 ```@example dsp
 n = 256
@@ -282,7 +282,7 @@ coh = AppleAccelerate.zcoher(Sxx, Syy, Sxy)  # |Sxy|^2 / (Sxx * Syy)
 nothing # hide
 ```
 
-### Transfer Function
+### Transfer Function ([`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans))
 
 ```@example dsp
 Sxx = abs2.(randn(ComplexF64, 256))
@@ -293,7 +293,7 @@ nothing # hide
 
 ## Recursive Filter (deq22)
 
-Wraps [`vDSP_deq22`](https://developer.apple.com/documentation/accelerate/1450154-vdsp_deq22) for second-order (two-pole two-zero) recursive filtering. Both `Float32` and `Float64` are supported.
+Wraps [`vDSP_deq22`](https://developer.apple.com/documentation/accelerate/vdsp_deq22) for second-order (two-pole two-zero) recursive filtering. Both `Float32` and `Float64` are supported.
 
 ```@example dsp
 A = randn(Float64, 64)
@@ -306,7 +306,7 @@ The `deq22!` variant operates on pre-padded arrays with explicit initial state.
 
 ## FIR Decimation Filter (desamp)
 
-Wraps [`vDSP_desamp`](https://developer.apple.com/documentation/accelerate/1450372-vdsp_desamp) for FIR filtering with decimation. Both `Float32` and `Float64` are supported.
+Wraps [`vDSP_desamp`](https://developer.apple.com/documentation/accelerate/vdsp_desamp) for FIR filtering with decimation. Both `Float32` and `Float64` are supported.
 
 ```@example dsp
 A = randn(Float64, 100)
@@ -318,7 +318,7 @@ nothing # hide
 
 ## Wiener-Levinson Filter (wiener)
 
-Wraps [`vDSP_wiener`](https://developer.apple.com/documentation/accelerate/1450250-vdsp_wiener) for solving the Wiener-Hopf equation via Levinson-Durbin recursion. Both `Float32` and `Float64` are supported.
+Wraps [`vDSP_wiener`](https://developer.apple.com/documentation/accelerate/vdsp_wiener) for solving the Wiener-Hopf equation via Levinson-Durbin recursion. Both `Float32` and `Float64` are supported.
 
 ```@example dsp
 L = 8
