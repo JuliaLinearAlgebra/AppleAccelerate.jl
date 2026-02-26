@@ -848,4 +848,313 @@ for T in (Float32, Float64)
     end
 end
 
+# ============================================================
+# Batch 1: Additional Compound Arithmetic
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Compound Arithmetic (Batch 1)::$T" begin
+        A::Vector{T} = randn(N)
+        B::Vector{T} = randn(N)
+        C::Vector{T} = randn(N)
+        D::Vector{T} = randn(N)
+        R::Vector{T} = similar(A)
+
+        # vma: A*B + C
+        @test AppleAccelerate.vma(A, B, C) ≈ A .* B .+ C
+        AppleAccelerate.vma!(R, A, B, C)
+        @test R ≈ A .* B .+ C
+
+        # vmsb: A*B - C
+        @test AppleAccelerate.vmsb(A, B, C) ≈ A .* B .- C
+        AppleAccelerate.vmsb!(R, A, B, C)
+        @test R ≈ A .* B .- C
+
+        # vmma: A*B + C*D
+        @test AppleAccelerate.vmma(A, B, C, D) ≈ A .* B .+ C .* D
+        AppleAccelerate.vmma!(R, A, B, C, D)
+        @test R ≈ A .* B .+ C .* D
+
+        # vmmsb: A*B - C*D
+        @test AppleAccelerate.vmmsb(A, B, C, D) ≈ A .* B .- C .* D
+        AppleAccelerate.vmmsb!(R, A, B, C, D)
+        @test R ≈ A .* B .- C .* D
+
+        # vmsa: A*B + c
+        c::T = T(2.5)
+        @test AppleAccelerate.vmsa(A, B, c) ≈ A .* B .+ c
+        AppleAccelerate.vmsa!(R, A, B, c)
+        @test R ≈ A .* B .+ c
+
+        # vsmsb: A*b - C
+        b::T = T(1.5)
+        @test AppleAccelerate.vsmsb(A, b, C) ≈ A .* b .- C
+        AppleAccelerate.vsmsb!(R, A, b, C)
+        @test R ≈ A .* b .- C
+
+        # vsmsma: A*b + C*d
+        d::T = T(0.7)
+        @test AppleAccelerate.vsmsma(A, b, C, d) ≈ A .* b .+ C .* d
+        AppleAccelerate.vsmsma!(R, A, b, C, d)
+        @test R ≈ A .* b .+ C .* d
+    end
+end
+
+# ============================================================
+# Batch 2: Extra Reductions
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Extra Reductions::$T" begin
+        X::Vector{T} = randn(N)
+
+        # rmsqv
+        @test AppleAccelerate.rmsqv(X) ≈ sqrt(sum(X .^ 2) / length(X))
+
+        # sve_svesq
+        (s, ssq) = AppleAccelerate.sve_svesq(X)
+        @test s ≈ sum(X)
+        @test ssq ≈ sum(X .^ 2)
+
+        # maxmgv / minmgv
+        @test AppleAccelerate.maxmgv(X) ≈ maximum(abs.(X))
+        @test AppleAccelerate.minmgv(X) ≈ minimum(abs.(X))
+
+        # maxmgvi / minmgvi
+        (val, idx) = AppleAccelerate.maxmgvi(X)
+        absX = abs.(X)
+        @test val ≈ maximum(absX)
+        @test absX[idx] ≈ val
+
+        (val2, idx2) = AppleAccelerate.minmgvi(X)
+        @test val2 ≈ minimum(absX)
+        @test absX[idx2] ≈ val2
+    end
+end
+
+# ============================================================
+# Batch 3: Vector Utility
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Vector Fill/Clear/Swap::$T" begin
+        X = randn(T, N)
+        Y = randn(T, N)
+        X_orig = copy(X)
+        Y_orig = copy(Y)
+
+        # vclr!
+        Z = randn(T, N)
+        AppleAccelerate.vclr!(Z)
+        @test all(iszero, Z)
+
+        # vfill!
+        AppleAccelerate.vfill!(Z, T(3.14))
+        @test all(==(T(3.14)), Z)
+
+        # vswap!
+        A = copy(X_orig)
+        B = copy(Y_orig)
+        AppleAccelerate.vswap!(A, B)
+        @test A ≈ Y_orig
+        @test B ≈ X_orig
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP Gather/Index::$T" begin
+        A = T.(collect(1:10))
+        B_idx = UInt[1, 3, 5, 7, 9]
+        @test AppleAccelerate.vgathr(A, B_idx) ≈ T[1, 3, 5, 7, 9]
+
+        # vindex uses 0-based float indices
+        B_float = T[0.0, 2.0, 4.0, 6.0, 8.0]
+        @test AppleAccelerate.vindex(A, B_float) ≈ T[1, 3, 5, 7, 9]
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP Generation::$T" begin
+        # vgen: linear ramp between two values
+        result = AppleAccelerate.vgen(T(0), T(10), 11)
+        expected = T[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        @test result ≈ expected
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP Clipping Variants::$T" begin
+        X = T.(collect(-5.0:0.5:5.0))
+
+        # vclipc: clip with count
+        low = T(-2.0)
+        high = T(2.0)
+        (clipped, nlow, nhigh) = AppleAccelerate.vclipc(X, low, high)
+        @test clipped ≈ clamp.(X, low, high)
+        @test nlow == count(x -> x < low, X)
+        @test nhigh == count(x -> x > high, X)
+
+        # vlim
+        b = T(0.0)
+        c = T(1.0)
+        result_vlim = AppleAccelerate.vlim(X, b, c)
+        expected_vlim = T[(x >= b) ? c : -c for x in X]
+        @test result_vlim ≈ expected_vlim
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "vDSP Sort::$T" begin
+        X = randn(T, 100)
+
+        # vsort! ascending
+        Y = copy(X)
+        AppleAccelerate.vsort!(Y, true)
+        @test Y ≈ sort(X)
+
+        # vsort! descending
+        Y = copy(X)
+        AppleAccelerate.vsort!(Y, false)
+        @test Y ≈ sort(X, rev=true)
+
+        # vsorti
+        perm = AppleAccelerate.vsorti(X, true)
+        @test X[perm] ≈ sort(X)
+    end
+end
+
+@testset "vDSP Integer Operations" begin
+    A = Int32[1, -2, 3, -4, 5]
+    B = Int32[10, 20, 30, 40, 50]
+
+    # vaddi
+    @test AppleAccelerate.vaddi(A, B) == A .+ B
+
+    # vabsi
+    @test AppleAccelerate.vabsi(A) == abs.(A)
+
+    # vfilli!
+    C = Vector{Int32}(undef, 5)
+    AppleAccelerate.vfilli!(C, Int32(42))
+    @test all(==(Int32(42)), C)
+
+    # veqvi (XNOR)
+    @test AppleAccelerate.veqvi(A, B) == .~(A .⊻ B)
+end
+
+# ============================================================
+# Batch 4: Matrix Operations
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Matrix Operations::$T" begin
+        m, p, n = 4, 3, 5
+        A = randn(T, m, p)
+        B = randn(T, p, n)
+
+        # mmul
+        C = AppleAccelerate.mmul(A, B)
+        @test C ≈ A * B atol=T(1e-4)
+
+        C2 = Matrix{T}(undef, m, n)
+        AppleAccelerate.mmul!(C2, A, B)
+        @test C2 ≈ A * B atol=T(1e-4)
+
+        # mtrans
+        D = randn(T, 3, 4)
+        Dt = AppleAccelerate.mtrans(D)
+        @test Dt ≈ transpose(D) atol=T(1e-6)
+
+        # mmov
+        E = randn(T, 3, 4)
+        F = AppleAccelerate.mmov(E)
+        @test F ≈ E
+    end
+end
+
+# ============================================================
+# Batch 6: Type Conversion (int ↔ float)
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Type Conversion int↔float::$T" begin
+        # float → int (truncating)
+        X = T[1.7, -2.3, 3.9, -4.1, 0.5]
+        @test AppleAccelerate.vfix8(X) == Int8.(trunc.(X))
+        @test AppleAccelerate.vfix16(X) == Int16.(trunc.(X))
+        @test AppleAccelerate.vfix32(X) == Int32.(trunc.(X))
+
+        # float → unsigned int (truncating)
+        Xpos = T[1.7, 2.3, 3.9, 4.1, 0.5]
+        @test AppleAccelerate.vfixu8(Xpos) == UInt8.(trunc.(Xpos))
+        @test AppleAccelerate.vfixu16(Xpos) == UInt16.(trunc.(Xpos))
+        @test AppleAccelerate.vfixu32(Xpos) == UInt32.(trunc.(Xpos))
+
+        # float → int (rounding)
+        @test AppleAccelerate.vfixr8(X) == Int8.(round.(X))
+        @test AppleAccelerate.vfixr16(X) == Int16.(round.(X))
+        @test AppleAccelerate.vfixr32(X) == Int32.(round.(X))
+
+        # float → unsigned int (rounding)
+        @test AppleAccelerate.vfixru8(Xpos) == UInt8.(round.(Xpos))
+        @test AppleAccelerate.vfixru16(Xpos) == UInt16.(round.(Xpos))
+        @test AppleAccelerate.vfixru32(Xpos) == UInt32.(round.(Xpos))
+
+        # int → float
+        Ai8 = Int8[1, -2, 3, -4, 5]
+        @test AppleAccelerate.vflt8(Ai8, T) ≈ T.(Ai8)
+
+        Ai16 = Int16[100, -200, 300, -400, 500]
+        @test AppleAccelerate.vflt16(Ai16, T) ≈ T.(Ai16)
+
+        Ai32 = Int32[1000, -2000, 3000, -4000, 5000]
+        @test AppleAccelerate.vflt32(Ai32, T) ≈ T.(Ai32)
+
+        # unsigned int → float
+        Au8 = UInt8[1, 2, 3, 4, 5]
+        @test AppleAccelerate.vfltu8(Au8, T) ≈ T.(Au8)
+
+        Au16 = UInt16[100, 200, 300, 400, 500]
+        @test AppleAccelerate.vfltu16(Au16, T) ≈ T.(Au16)
+
+        Au32 = UInt32[1000, 2000, 3000, 4000, 5000]
+        @test AppleAccelerate.vfltu32(Au32, T) ≈ T.(Au32)
+    end
+end
+
+# ============================================================
+# Batch 8: Image Convolution
+# ============================================================
+for T in (Float32, Float64)
+    @testset "vDSP Image Convolution::$T" begin
+        # Identity filter for f3x3
+        A = randn(T, 10, 10)
+        F3 = zeros(T, 3, 3)
+        F3[2, 2] = T(1)  # identity kernel
+        C = AppleAccelerate.f3x3(A, F3)
+        # Interior should match; border is zero
+        @test C[2:9, 2:9] ≈ A[2:9, 2:9]
+
+        # Identity filter for f5x5
+        F5 = zeros(T, 5, 5)
+        F5[3, 3] = T(1)
+        C5 = AppleAccelerate.f5x5(A, F5)
+        @test C5[3:8, 3:8] ≈ A[3:8, 3:8]
+
+        # imgfir with 3x3 identity should match f3x3
+        C_imgfir = AppleAccelerate.imgfir(A, F3)
+        @test C_imgfir[2:9, 2:9] ≈ A[2:9, 2:9]
+    end
+end
+
+# ============================================================
+# Format conversion tests (ctoz / ztoc)
+# ============================================================
+for T in (Float32, Float64)
+    @testset "ctoz/ztoc::$T" begin
+        X = complex.(randn(T, N), randn(T, N))
+        (re, im) = AppleAccelerate.ctoz(X)
+        @test re ≈ real.(X)
+        @test im ≈ imag.(X)
+
+        Y = AppleAccelerate.ztoc(re, im)
+        @test Y ≈ X
+    end
+end
+
 end # @testset "Array Operations"

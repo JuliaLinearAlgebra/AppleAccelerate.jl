@@ -86,25 +86,46 @@ AppleAccelerate.svdiv
 ```@docs
 AppleAccelerate.vam
 AppleAccelerate.vsbm
+AppleAccelerate.vma
+AppleAccelerate.vmsb
 AppleAccelerate.venvlp
 AppleAccelerate.vaam
 AppleAccelerate.vsbsbm
 AppleAccelerate.vasbm
+AppleAccelerate.vmma
+AppleAccelerate.vmmsb
 AppleAccelerate.vpythg
 AppleAccelerate.vasm
 AppleAccelerate.vsbsm
 AppleAccelerate.vsma
 AppleAccelerate.vsmsa
+AppleAccelerate.vmsa
+AppleAccelerate.vsmsb
+AppleAccelerate.vsmsma
 AppleAccelerate.vaddsub
+```
+
+### Extra Reductions
+
+```@docs
+AppleAccelerate.rmsqv
+AppleAccelerate.sve_svesq
+AppleAccelerate.maxmgv
+AppleAccelerate.minmgv
+AppleAccelerate.maxmgvi
+AppleAccelerate.minmgvi
 ```
 
 ### Clipping & Thresholding
 
 ```@docs
 AppleAccelerate.vclip
+AppleAccelerate.vclipc
 AppleAccelerate.viclip
 AppleAccelerate.vthr
 AppleAccelerate.vthres
+AppleAccelerate.vlim
+AppleAccelerate.vthrsc
 AppleAccelerate.vcmprs
 ```
 
@@ -171,6 +192,58 @@ AppleAccelerate.nzcros
 AppleAccelerate.vdbcon
 ```
 
+### Vector Fill, Swap & Sort
+
+```@docs
+AppleAccelerate.vclr!
+AppleAccelerate.vfill!
+AppleAccelerate.vswap!
+AppleAccelerate.vsort!
+AppleAccelerate.vsorti
+```
+
+### Gathering & Indexing
+
+```@docs
+AppleAccelerate.vgathr
+AppleAccelerate.vindex
+AppleAccelerate.vgen
+AppleAccelerate.vgenp
+AppleAccelerate.vtabi
+```
+
+### Matrix Operations
+
+```@docs
+AppleAccelerate.mmul
+AppleAccelerate.mtrans
+AppleAccelerate.mmov
+```
+
+### Integer Operations
+
+```@docs
+AppleAccelerate.vaddi
+AppleAccelerate.vabsi
+AppleAccelerate.vfilli!
+AppleAccelerate.veqvi
+```
+
+### Image Convolution
+
+```@docs
+AppleAccelerate.f3x3
+AppleAccelerate.f5x5
+AppleAccelerate.imgfir
+```
+
+### Format Conversion
+
+```@docs
+AppleAccelerate.ctoz
+AppleAccelerate.ztoc
+```
+
 ### Complex Array Operations
 
 ```@docs
@@ -181,6 +254,21 @@ AppleAccelerate.vmags
 AppleAccelerate.vmagsa
 AppleAccelerate.polar
 AppleAccelerate.rect
+AppleAccelerate.zvadd
+AppleAccelerate.zvsub
+AppleAccelerate.zvcmul
+AppleAccelerate.zrvmul
+AppleAccelerate.zrvdiv
+AppleAccelerate.zrvadd
+AppleAccelerate.zrvsub
+AppleAccelerate.zvcma
+AppleAccelerate.zvma
+AppleAccelerate.zvsma
+AppleAccelerate.zidotpr
+AppleAccelerate.zrdotpr
+AppleAccelerate.zvfill!
+AppleAccelerate.zconv
+AppleAccelerate.zmmul
 ```
 
 ## Dense Linear Algebra
