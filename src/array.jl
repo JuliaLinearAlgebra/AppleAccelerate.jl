@@ -691,6 +691,96 @@ end
 @doc "Vector scalar multiply and scalar add: `result[i] = A[i] * b + c`. Wraps [`vDSP_vsmsa`](https://developer.apple.com/documentation/accelerate/vdsp_vsmsa)." vsmsa
 @doc "Simultaneous add and subtract: returns `(A .+ B, B .- A)`. Wraps [`vDSP_vaddsub`](https://developer.apple.com/documentation/accelerate/vdsp_vaddsub)." vaddsub
 
+# --- Batch 1: additional compound arithmetic ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    # vma: D[n] = A[n]*B[n] + C[n]  (3-vector → 1-vector, same pattern as vam)
+    # vmsb: D[n] = A[n]*B[n] - C[n]
+    for (f, fa) in ((:vma, :vma), (:vmsb, :vmsb))
+        f! = Symbol("$(f)!")
+        @eval begin
+            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                      A, 1, B, 1, C, 1, result, 1, length(A))
+                return result
+            end
+            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+                result = similar(A)
+                ($f!)(result, A, B, C)
+            end
+        end
+    end
+
+    # vmma: E[n] = A[n]*B[n] + C[n]*D[n]  (4-vector → 1-vector)
+    # vmmsb: E[n] = A[n]*B[n] - C[n]*D[n]
+    for (f, fa) in ((:vmma, :vmma), (:vmmsb, :vmmsb))
+        f! = Symbol("$(f)!")
+        @eval begin
+            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                      A, 1, B, 1, C, 1, D, 1, result, 1, length(A))
+                return result
+            end
+            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+                result = similar(A)
+                ($f!)(result, A, B, C, D)
+            end
+        end
+    end
+
+    # vmsa: D[n] = A[n]*B[n] + c  (2-vector + scalar → 1-vector)
+    @eval begin
+        function vmsa!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
+            ccall(($(string("vDSP_vmsa", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, B, 1, Ref(c), result, 1, length(A))
+            return result
+        end
+        function vmsa(A::Vector{$T}, B::Vector{$T}, c::$T)
+            result = similar(A)
+            vmsa!(result, A, B, c)
+        end
+    end
+
+    # vsmsb: D[n] = A[n]*b - C[n]  (vector*scalar - vector)
+    @eval begin
+        function vsmsb!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
+            ccall(($(string("vDSP_vsmsb", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(b), C, 1, result, 1, length(A))
+            return result
+        end
+        function vsmsb(A::Vector{$T}, b::$T, C::Vector{$T})
+            result = similar(A)
+            vsmsb!(result, A, b, C)
+        end
+    end
+
+    # vsmsma: E[n] = A[n]*b + C[n]*d  (vector*scalar + vector*scalar)
+    @eval begin
+        function vsmsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
+            ccall(($(string("vDSP_vsmsma", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(b), C, 1, Ref(d), result, 1, length(A))
+            return result
+        end
+        function vsmsma(A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
+            result = similar(A)
+            vsmsma!(result, A, b, C, d)
+        end
+    end
+end
+
+@doc "Vector multiply and add: `result[i] = A[i]*B[i] + C[i]`. Wraps [`vDSP_vma`](https://developer.apple.com/documentation/accelerate/vdsp_vma)." vma
+@doc "Vector multiply and subtract: `result[i] = A[i]*B[i] - C[i]`. Wraps [`vDSP_vmsb`](https://developer.apple.com/documentation/accelerate/vdsp_vmsb)." vmsb
+@doc "Vector multiply, multiply, and add: `result[i] = A[i]*B[i] + C[i]*D[i]`. Wraps [`vDSP_vmma`](https://developer.apple.com/documentation/accelerate/vdsp_vmma)." vmma
+@doc "Vector multiply, multiply, and subtract: `result[i] = A[i]*B[i] - C[i]*D[i]`. Wraps [`vDSP_vmmsb`](https://developer.apple.com/documentation/accelerate/vdsp_vmmsb)." vmmsb
+@doc "Vector multiply and scalar add: `result[i] = A[i]*B[i] + c`. Wraps [`vDSP_vmsa`](https://developer.apple.com/documentation/accelerate/vdsp_vmsa)." vmsa
+@doc "Vector scalar multiply and subtract: `result[i] = A[i]*b - C[i]`. Wraps [`vDSP_vsmsb`](https://developer.apple.com/documentation/accelerate/vdsp_vsmsb)." vsmsb
+@doc "Vector scalar multiply and scalar multiply add: `result[i] = A[i]*b + C[i]*d`. Wraps [`vDSP_vsmsma`](https://developer.apple.com/documentation/accelerate/vdsp_vsmsma)." vsmsma
+
 # ============================================================
 # vDSP Scalar reductions: dot product, distance squared
 # See: https://developer.apple.com/documentation/accelerate/vdsp
@@ -716,6 +806,67 @@ end
 
 @doc "Dot product: `sum(X .* Y)`. Wraps [`vDSP_dotpr`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr)." dot
 @doc "Squared Euclidean distance: `sum((X .- Y).^2)`. Wraps [`vDSP_distancesq`](https://developer.apple.com/documentation/accelerate/vdsp_distancesq)." distancesq
+
+# --- Batch 2: additional reductions ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+
+    # rmsqv: root mean square — sqrt(sum(X.^2)/N)
+    @eval begin
+        function rmsqv(X::Vector{$T})
+            val = Ref{$T}(0)
+            ccall(($(string("vDSP_rmsqv", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, UInt64),
+                  X, 1, val, length(X))
+            return val[]
+        end
+    end
+
+    # sve_svesq: simultaneous sum and sum-of-squares
+    @eval begin
+        function sve_svesq(X::Vector{$T})
+            s = Ref{$T}(0)
+            ssq = Ref{$T}(0)
+            ccall(($(string("vDSP_sve_svesq", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, UInt64),
+                  X, 1, s, ssq, length(X))
+            return (s[], ssq[])
+        end
+    end
+
+    # maxmgv / minmgv: max/min magnitude
+    for (f, fa) in ((:maxmgv, :maxmgv), (:minmgv, :minmgv))
+        @eval begin
+            function ($f)(X::Vector{$T})
+                val = Ref{$T}(0)
+                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, UInt64),
+                      X, 1, val, length(X))
+                return val[]
+            end
+        end
+    end
+
+    # maxmgvi / minmgvi: max/min magnitude with index
+    for (f, fa) in ((:maxmgvi, :maxmgvi), (:minmgvi, :minmgvi))
+        @eval begin
+            function ($f)(X::Vector{$T})
+                val = Ref{$T}(0)
+                idx = Ref{UInt}(0)
+                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Ptr{UInt}, UInt64),
+                      X, 1, val, idx, length(X))
+                return (val[], Int(idx[]) + 1)
+            end
+        end
+    end
+end
+
+@doc "Root mean square: `sqrt(sum(X.^2) / length(X))`. Wraps [`vDSP_rmsqv`](https://developer.apple.com/documentation/accelerate/vdsp_rmsqv)." rmsqv
+@doc "Simultaneous sum and sum-of-squares: returns `(sum(X), sum(X.^2))`. Wraps [`vDSP_sve_svesq`](https://developer.apple.com/documentation/accelerate/vdsp_sve_svesq)." sve_svesq
+@doc "Maximum magnitude: `maximum(abs.(X))`. Wraps [`vDSP_maxmgv`](https://developer.apple.com/documentation/accelerate/vdsp_maxmgv)." maxmgv
+@doc "Minimum magnitude: `minimum(abs.(X))`. Wraps [`vDSP_minmgv`](https://developer.apple.com/documentation/accelerate/vdsp_minmgv)." minmgv
+@doc "Maximum magnitude with index: returns `(maximum(abs.(X)), index)`. Wraps [`vDSP_maxmgvi`](https://developer.apple.com/documentation/accelerate/vdsp_maxmgvi)." maxmgvi
+@doc "Minimum magnitude with index: returns `(minimum(abs.(X)), index)`. Wraps [`vDSP_minmgvi`](https://developer.apple.com/documentation/accelerate/vdsp_minmgvi)." minmgvi
 
 # ============================================================
 # vDSP Clipping & thresholding
@@ -1103,3 +1254,481 @@ Convert to decibels relative to `ref`. If `power=true`, computes `10*log10(X/ref
 if `power=false`, computes `20*log10(X/ref)`.
 Wraps [`vDSP_vdbcon`](https://developer.apple.com/documentation/accelerate/vdsp_vdbcon).
 """ vdbcon
+
+# ============================================================
+# Batch 3: Vector Utility — fill, swap, gather, generation,
+#   clipping variants, sorting, table lookup, integer ops,
+#   format conversion
+# ============================================================
+
+# --- Data fill / clear / swap ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vclr!(C::Vector{$T})
+            ccall(($(string("vDSP_vclr", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, UInt64),
+                  C, 1, length(C))
+            return C
+        end
+        function vfill!(C::Vector{$T}, a::$T)
+            ccall(($(string("vDSP_vfill", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  Ref(a), C, 1, length(C))
+            return C
+        end
+        function vswap!(A::Vector{$T}, B::Vector{$T})
+            ccall(($(string("vDSP_vswap", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                  A, 1, B, 1, length(A))
+            return (A, B)
+        end
+    end
+end
+
+@doc "Fill vector with zeros: `C[i] = 0`. Wraps [`vDSP_vclr`](https://developer.apple.com/documentation/accelerate/vdsp_vclr)." vclr!
+@doc "Fill vector with scalar value: `C[i] = a`. Wraps [`vDSP_vfill`](https://developer.apple.com/documentation/accelerate/vdsp_vfill)." vfill!
+@doc "Swap elements of two vectors in-place. Wraps [`vDSP_vswap`](https://developer.apple.com/documentation/accelerate/vdsp_vswap)." vswap!
+
+# --- Gathering / indexing ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vgathr!(C::Vector{$T}, A::Vector{$T}, B::Vector{UInt})
+            ccall(($(string("vDSP_vgathr", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{UInt}, Int64, Ptr{$T}, Int64, UInt64),
+                  A, B, 1, C, 1, length(B))
+            return C
+        end
+        function vgathr(A::Vector{$T}, B::Vector{UInt})
+            C = Vector{$T}(undef, length(B))
+            vgathr!(C, A, B)
+        end
+        function vindex!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+            ccall(($(string("vDSP_vindex", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                  A, B, 1, C, 1, length(B))
+            return C
+        end
+        function vindex(A::Vector{$T}, B::Vector{$T})
+            C = Vector{$T}(undef, length(B))
+            vindex!(C, A, B)
+        end
+    end
+end
+
+@doc "Gather elements by index: `C[i] = A[B[i]]` where B contains 1-based UInt indices. Wraps [`vDSP_vgathr`](https://developer.apple.com/documentation/accelerate/vdsp_vgathr)." vgathr
+@doc "Index with float indices: `C[i] = A[trunc(B[i])]` where B contains 0-based float indices. Wraps [`vDSP_vindex`](https://developer.apple.com/documentation/accelerate/vdsp_vindex)." vindex
+
+# --- Generation ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vgen!(C::Vector{$T}, a::$T, b::$T)
+            ccall(($(string("vDSP_vgen", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  Ref(a), Ref(b), C, 1, length(C))
+            return C
+        end
+        function vgen(a::$T, b::$T, n::Integer)
+            C = Vector{$T}(undef, n)
+            vgen!(C, a, b)
+        end
+        function vgenp!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T}, n::Integer)
+            ccall(($(string("vDSP_vgenp", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
+                  A, 1, B, 1, C, 1, n, length(A))
+            return C
+        end
+        function vgenp(A::Vector{$T}, B::Vector{$T}, n::Integer)
+            C = Vector{$T}(undef, n)
+            vgenp!(C, A, B, n)
+        end
+    end
+end
+
+@doc "Generate linear ramp between two scalars: `C[i] = a + (b-a)*i/(N-1)`. Wraps [`vDSP_vgen`](https://developer.apple.com/documentation/accelerate/vdsp_vgen)." vgen
+@doc "Piecewise linear interpolation from breakpoints. Wraps [`vDSP_vgenp`](https://developer.apple.com/documentation/accelerate/vdsp_vgenp)." vgenp
+
+# --- Clipping / thresholding variants ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vclipc!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+            nlow = Ref{UInt64}(0)
+            nhigh = Ref{UInt64}(0)
+            ccall(($(string("vDSP_vclipc", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64, Ptr{UInt64}, Ptr{UInt64}),
+                  X, 1, Ref(low), Ref(high), result, 1, length(X), nlow, nhigh)
+            return (result, Int(nlow[]), Int(nhigh[]))
+        end
+        function vclipc(X::Vector{$T}, low::$T, high::$T)
+            result = similar(X)
+            vclipc!(result, X, low, high)
+        end
+        function vlim!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+            ccall(($(string("vDSP_vlim", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(b), Ref(c), result, 1, length(A))
+            return result
+        end
+        function vlim(A::Vector{$T}, b::$T, c::$T)
+            result = similar(A)
+            vlim!(result, A, b, c)
+        end
+        function vthrsc!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+            ccall(($(string("vDSP_vthrsc", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(b), Ref(c), result, 1, length(A))
+            return result
+        end
+        function vthrsc(A::Vector{$T}, b::$T, c::$T)
+            result = similar(A)
+            vthrsc!(result, A, b, c)
+        end
+    end
+end
+
+@doc "Clip with count: returns `(clipped, nlow, nhigh)`. Wraps [`vDSP_vclipc`](https://developer.apple.com/documentation/accelerate/vdsp_vclipc)." vclipc
+@doc "Test limit: `result[i] = (b <= A[i]) ? c : -c`. Wraps [`vDSP_vlim`](https://developer.apple.com/documentation/accelerate/vdsp_vlim)." vlim
+@doc "Threshold with signed constant. Wraps [`vDSP_vthrsc`](https://developer.apple.com/documentation/accelerate/vdsp_vthrsc)." vthrsc
+
+# --- Sorting ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vsort!(X::Vector{$T}, ascending::Bool=true)
+            order = ascending ? Cint(1) : Cint(-1)
+            ccall(($(string("vDSP_vsort", suff)), libacc), Cvoid,
+                  (Ptr{$T}, UInt64, Cint),
+                  X, length(X), order)
+            return X
+        end
+        function vsorti!(indices::Vector{UInt}, X::Vector{$T}, ascending::Bool=true)
+            order = ascending ? Cint(1) : Cint(-1)
+            ccall(($(string("vDSP_vsorti", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{UInt}, Ptr{Cvoid}, UInt64, Cint),
+                  X, indices, C_NULL, length(X), order)
+            return indices
+        end
+        function vsorti(X::Vector{$T}, ascending::Bool=true)
+            indices = Vector{UInt}(undef, length(X))
+            for i in 1:length(X)
+                indices[i] = UInt(i - 1)
+            end
+            vsorti!(indices, X, ascending)
+            return Int.(indices) .+ 1
+        end
+    end
+end
+
+@doc "Sort vector in-place. `ascending=true` for ascending order. Wraps [`vDSP_vsort`](https://developer.apple.com/documentation/accelerate/vdsp_vsort)." vsort!
+@doc "Return sort permutation (1-based indices). Wraps [`vDSP_vsorti`](https://developer.apple.com/documentation/accelerate/vdsp_vsorti)." vsorti
+
+# --- Table lookup ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vtabi!(D::Vector{$T}, A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
+            ccall(($(string("vDSP_vtabi", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, UInt64, Ptr{$T}, Int64, UInt64),
+                  A, 1, Ref(s1), Ref(s2), C, length(C), D, 1, length(A))
+            return D
+        end
+        function vtabi(A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
+            D = Vector{$T}(undef, length(A))
+            vtabi!(D, A, s1, s2, C)
+        end
+    end
+end
+
+@doc "Table lookup with interpolation: `D[i] = C[clamp(s1*A[i]+s2, 0, M-1)]`. Wraps [`vDSP_vtabi`](https://developer.apple.com/documentation/accelerate/vdsp_vtabi)." vtabi
+
+# --- Integer operations (Int32) ---
+function vaddi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
+    ccall(("vDSP_vaddi", libacc), Cvoid,
+          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
+          A, 1, B, 1, C, 1, length(A))
+    return C
+end
+function vaddi(A::Vector{Int32}, B::Vector{Int32})
+    C = similar(A)
+    vaddi!(C, A, B)
+end
+
+function vabsi!(C::Vector{Int32}, A::Vector{Int32})
+    ccall(("vDSP_vabsi", libacc), Cvoid,
+          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
+          A, 1, C, 1, length(A))
+    return C
+end
+function vabsi(A::Vector{Int32})
+    C = similar(A)
+    vabsi!(C, A)
+end
+
+function vfilli!(C::Vector{Int32}, a::Int32)
+    ccall(("vDSP_vfilli", libacc), Cvoid,
+          (Ptr{Int32}, Ptr{Int32}, Int64, UInt64),
+          Ref(a), C, 1, length(C))
+    return C
+end
+
+function veqvi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
+    ccall(("vDSP_veqvi", libacc), Cvoid,
+          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
+          A, 1, B, 1, C, 1, length(A))
+    return C
+end
+function veqvi(A::Vector{Int32}, B::Vector{Int32})
+    C = similar(A)
+    veqvi!(C, A, B)
+end
+
+@doc "Int32 vector addition: `C[i] = A[i] + B[i]`. Wraps [`vDSP_vaddi`](https://developer.apple.com/documentation/accelerate/vdsp_vaddi)." vaddi
+@doc "Int32 absolute value: `C[i] = |A[i]|`. Wraps [`vDSP_vabsi`](https://developer.apple.com/documentation/accelerate/vdsp_vabsi)." vabsi
+@doc "Fill Int32 vector with scalar value. Wraps [`vDSP_vfilli`](https://developer.apple.com/documentation/accelerate/vdsp_vfilli)." vfilli!
+@doc "Int32 bitwise XNOR: `C[i] = ~(A[i] ^ B[i])`. Wraps [`vDSP_veqvi`](https://developer.apple.com/documentation/accelerate/vdsp_veqvi)." veqvi
+
+# ============================================================
+# Batch 4: Matrix Operations
+# Note: vDSP uses row-major layout, Julia uses column-major.
+# We swap dimensions so the user passes Julia matrices naturally.
+# ============================================================
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function mmul!(C::Matrix{$T}, A::Matrix{$T}, B::Matrix{$T})
+            # Julia (col-major) A is m×p, B is p×n → C is m×n
+            # vDSP sees transposed layouts, so we compute Bᵀ × Aᵀ = (AB)ᵀ
+            m, p = size(A)
+            p2, n = size(B)
+            p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
+            size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n"))
+            ccall(($(string("vDSP_mmul", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64, UInt64),
+                  B, 1, A, 1, C, 1, UInt64(n), UInt64(m), UInt64(p))
+            return C
+        end
+        function mmul(A::Matrix{$T}, B::Matrix{$T})
+            m = size(A, 1)
+            n = size(B, 2)
+            C = Matrix{$T}(undef, m, n)
+            mmul!(C, A, B)
+        end
+    end
+
+    @eval begin
+        function mtrans!(C::Matrix{$T}, A::Matrix{$T})
+            m, n = size(A)
+            size(C) == (n, m) || throw(DimensionMismatch("C must be $n×$m"))
+            # vDSP_mtrans(__A, __IA, __C, __IC, __M, __N):
+            #   __M = columns in A (rows in C), __N = rows in A (columns in C)
+            # Julia col-major m×n viewed as row-major: n rows × m cols
+            # We want C to be row-major m rows × n cols, so __M = m, __N = n
+            ccall(($(string("vDSP_mtrans", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
+                  A, 1, C, 1, UInt64(m), UInt64(n))
+            return C
+        end
+        function mtrans(A::Matrix{$T})
+            m, n = size(A)
+            C = Matrix{$T}(undef, n, m)
+            mtrans!(C, A)
+        end
+    end
+
+    @eval begin
+        function mmov!(C::Matrix{$T}, A::Matrix{$T})
+            m, n = size(A)
+            ta = UInt64(m)  # column stride of source (= number of rows in col-major)
+            tc = UInt64(size(C, 1))  # column stride of destination
+            ccall(($(string("vDSP_mmov", suff)), libacc), Cvoid,
+                  (Ptr{$T}, Ptr{$T}, UInt64, UInt64, UInt64, UInt64),
+                  A, C, UInt64(m), UInt64(n), ta, tc)
+            return C
+        end
+        function mmov(A::Matrix{$T})
+            C = similar(A)
+            mmov!(C, A)
+        end
+    end
+end
+
+@doc "Matrix multiply: `C = A * B`. Wraps [`vDSP_mmul`](https://developer.apple.com/documentation/accelerate/vdsp_mmul)." mmul
+@doc "Matrix transpose: `C = Aᵀ`. Wraps [`vDSP_mtrans`](https://developer.apple.com/documentation/accelerate/vdsp_mtrans)." mtrans
+@doc "Matrix copy (submatrix move). Wraps [`vDSP_mmov`](https://developer.apple.com/documentation/accelerate/vdsp_mmov)." mmov
+
+# ============================================================
+# Batch 6: Type Conversion (int ↔ float)
+# ============================================================
+
+# float → signed int (truncating)
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((Int8, "8"), (Int16, "16"), (Int32, "32"))
+        fname = Symbol("vfix$(intname)")
+        fname! = Symbol("vfix$(intname)!")
+        vdsp_name = string("vDSP_vfix", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$T})
+                C = Vector{$intT}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# float → unsigned int (truncating)
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((UInt8, "8"), (UInt16, "16"), (UInt32, "32"))
+        fname = Symbol("vfixu$(intname)")
+        fname! = Symbol("vfixu$(intname)!")
+        vdsp_name = string("vDSP_vfixu", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$T})
+                C = Vector{$intT}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# float → signed int (rounding)
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((Int8, "8"), (Int16, "16"), (Int32, "32"))
+        fname = Symbol("vfixr$(intname)")
+        fname! = Symbol("vfixr$(intname)!")
+        vdsp_name = string("vDSP_vfixr", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$T})
+                C = Vector{$intT}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# float → unsigned int (rounding)
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((UInt8, "8"), (UInt16, "16"), (UInt32, "32"))
+        fname = Symbol("vfixru$(intname)")
+        fname! = Symbol("vfixru$(intname)!")
+        vdsp_name = string("vDSP_vfixru", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$T})
+                C = Vector{$intT}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# signed int → float
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((Int8, "8"), (Int16, "16"), (Int32, "32"))
+        fname = Symbol("vflt$(intname)")
+        fname! = Symbol("vflt$(intname)!")
+        vdsp_name = string("vDSP_vflt", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$intT}, Int64, Ptr{$T}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$intT}, ::Type{$T})
+                C = Vector{$T}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# unsigned int → float
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    for (intT, intname) in ((UInt8, "8"), (UInt16, "16"), (UInt32, "32"))
+        fname = Symbol("vfltu$(intname)")
+        fname! = Symbol("vfltu$(intname)!")
+        vdsp_name = string("vDSP_vfltu", intname, suff)
+        @eval begin
+            function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+                ccall(($vdsp_name, libacc), Cvoid,
+                      (Ptr{$intT}, Int64, Ptr{$T}, Int64, UInt64),
+                      A, 1, C, 1, length(A))
+                return C
+            end
+            function ($fname)(A::Vector{$intT}, ::Type{$T})
+                C = Vector{$T}(undef, length(A))
+                ($fname!)(C, A)
+            end
+        end
+    end
+end
+
+# ============================================================
+# Batch 8: Image Convolution (2D)
+# ============================================================
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function f3x3!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+            nr, nc = size(A)
+            size(F) == (3, 3) || throw(DimensionMismatch("Filter must be 3×3"))
+            size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            ccall(($(string("vDSP_f3x3", suff)), libacc), Cvoid,
+                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
+                  A, UInt64(nr), UInt64(nc), F, C)
+            return C
+        end
+        function f3x3(A::Matrix{$T}, F::Matrix{$T})
+            C = similar(A)
+            f3x3!(C, A, F)
+        end
+        function f5x5!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+            nr, nc = size(A)
+            size(F) == (5, 5) || throw(DimensionMismatch("Filter must be 5×5"))
+            size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            ccall(($(string("vDSP_f5x5", suff)), libacc), Cvoid,
+                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
+                  A, UInt64(nr), UInt64(nc), F, C)
+            return C
+        end
+        function f5x5(A::Matrix{$T}, F::Matrix{$T})
+            C = similar(A)
+            f5x5!(C, A, F)
+        end
+        function imgfir!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+            nr, nc = size(A)
+            fr, fc = size(F)
+            size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            ccall(($(string("vDSP_imgfir", suff)), libacc), Cvoid,
+                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}, UInt64, UInt64),
+                  A, UInt64(nr), UInt64(nc), F, C, UInt64(fr), UInt64(fc))
+            return C
+        end
+        function imgfir(A::Matrix{$T}, F::Matrix{$T})
+            C = similar(A)
+            imgfir!(C, A, F)
+        end
+    end
+end
+
+@doc "2D convolution with a 3×3 filter. Border elements are set to zero. Wraps [`vDSP_f3x3`](https://developer.apple.com/documentation/accelerate/vdsp_f3x3)." f3x3
+@doc "2D convolution with a 5×5 filter. Border elements are set to zero. Wraps [`vDSP_f5x5`](https://developer.apple.com/documentation/accelerate/vdsp_f5x5)." f5x5
+@doc "General 2D image convolution with a P×Q filter. Border elements are set to zero. Wraps [`vDSP_imgfir`](https://developer.apple.com/documentation/accelerate/vdsp_imgfir)." imgfir

@@ -17,6 +17,7 @@ Random.seed!(7)
 N = 1_000
 
 include("array_tests.jl")
+include("complexarray_tests.jl")
 include("dsp_tests.jl")
 include("sparse_tests.jl")
 include("linalg_tests.jl")

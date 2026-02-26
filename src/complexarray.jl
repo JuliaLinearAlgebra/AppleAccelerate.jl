@@ -363,3 +363,428 @@ Wraps [`vDSP_polar`](https://developer.apple.com/documentation/accelerate/vdsp_p
 Convert polar coordinates to complex Cartesian form.
 Wraps [`vDSP_rect`](https://developer.apple.com/documentation/accelerate/vdsp_rect).
 """ rect
+
+# ============================================================
+# Batch 5: Additional Complex Vector Operations
+# ============================================================
+
+for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
+                             (Float64, "D", :DSPDoubleSplitComplex))
+
+    # --- Complex-complex binary ops ---
+
+    # zvadd: C = A + B
+    @eval begin
+        function zvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvadd", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvadd(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            result = similar(A)
+            zvadd!(result, A, B)
+        end
+    end
+
+    # zvsub: C = A - B  (NOTE: vDSP_zvsub computes __A - __B, pass A as first, B as second)
+    @eval begin
+        function zvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvsub", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvsub(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            result = similar(A)
+            zvsub!(result, A, B)
+        end
+    end
+
+    # zvcmul: C = conj(A) * B
+    @eval begin
+        function zvcmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvcmul", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvcmul(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            result = similar(A)
+            zvcmul!(result, A, B)
+        end
+    end
+
+    # --- Complex-real binary ops ---
+
+    # zrvmul: C = A * B (complex * real)
+    @eval begin
+        function zrvmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zrvmul", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, B, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zrvmul(A::Vector{Complex{$T}}, B::Vector{$T})
+            result = similar(A)
+            zrvmul!(result, A, B)
+        end
+    end
+
+    # zrvdiv: C = A / B (complex / real) — NOTE: vDSP_zrvdiv computes B/A, swap
+    @eval begin
+        function zrvdiv!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zrvdiv", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, B, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zrvdiv(A::Vector{Complex{$T}}, B::Vector{$T})
+            result = similar(A)
+            zrvdiv!(result, A, B)
+        end
+    end
+
+    # zrvadd: C = A + B (add real to complex, adds to real part)
+    @eval begin
+        function zrvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zrvadd", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, B, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zrvadd(A::Vector{Complex{$T}}, B::Vector{$T})
+            result = similar(A)
+            zrvadd!(result, A, B)
+        end
+    end
+
+    # zrvsub: C = A - B (complex - real) — NOTE: vDSP_zrvsub computes B - A, swap
+    @eval begin
+        function zrvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zrvsub", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, B, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zrvsub(A::Vector{Complex{$T}}, B::Vector{$T})
+            result = similar(A)
+            zrvsub!(result, A, B)
+        end
+    end
+
+    # --- Complex compound ops ---
+
+    # zvcma: D = conj(A)*B + C
+    @eval begin
+        function zvcma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            c_re = real.(C); c_im = imag.(C)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                csplit = $DSPSplit(c_re, c_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvcma", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, 1, csplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvcma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            result = similar(A)
+            zvcma!(result, A, B, C)
+        end
+    end
+
+    # zvma: D = A*B + C
+    @eval begin
+        function zvma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            c_re = real.(C); c_im = imag.(C)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                csplit = $DSPSplit(c_re, c_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvma", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, 1, csplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            result = similar(A)
+            zvma!(result, A, B, C)
+        end
+    end
+
+    # zvsma: D = A*b[scalar] + C
+    @eval begin
+        function zvsma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = $T[real(b)]; b_im = $T[imag(b)]
+            c_re = real.(C); c_im = imag.(C)
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                csplit = $DSPSplit(c_re, c_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvsma", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      asplit, 1, bsplit, csplit, 1, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zvsma(A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
+            result = similar(A)
+            zvsma!(result, A, b, C)
+        end
+    end
+
+    # --- Complex dot products ---
+
+    # zidotpr: conjugate dot product — sum(conj(A) .* B)
+    @eval begin
+        function zidotpr(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            o_re = $T[0]; o_im = $T[0]
+            GC.@preserve a_re a_im b_re b_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                bsplit = $DSPSplit(b_re, b_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zidotpr", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, UInt64),
+                      asplit, 1, bsplit, 1, osplit, n)
+            end
+            return complex(o_re[1], o_im[1])
+        end
+    end
+
+    # zrdotpr: complex-real dot product — sum(A .* B) where B is real
+    @eval begin
+        function zrdotpr(A::Vector{Complex{$T}}, B::Vector{$T})
+            n = length(A)
+            a_re = real.(A); a_im = imag.(A)
+            o_re = $T[0]; o_im = $T[0]
+            GC.@preserve a_re a_im o_re o_im begin
+                asplit = $DSPSplit(a_re, a_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zrdotpr", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, UInt64),
+                      asplit, 1, B, 1, osplit, n)
+            end
+            return complex(o_re[1], o_im[1])
+        end
+    end
+
+    # --- Complex fill ---
+
+    # zvfill: fill complex vector with complex scalar
+    @eval begin
+        function zvfill!(result::Vector{Complex{$T}}, c::Complex{$T})
+            n = length(result)
+            c_re = $T[real(c)]; c_im = $T[imag(c)]
+            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
+            GC.@preserve c_re c_im o_re o_im begin
+                csplit = $DSPSplit(c_re, c_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zvfill", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, UInt64),
+                      csplit, osplit, 1, n)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+    end
+
+    # --- Complex convolution ---
+
+    # zconv: complex convolution
+    @eval begin
+        function zconv!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, K::Vector{Complex{$T}})
+            xn = length(X)
+            kn = length(K)
+            rn = length(result)
+            x_re = real.(X); x_im = imag.(X)
+            k_re = real.(K); k_im = imag.(K)
+            o_re = Vector{$T}(undef, rn); o_im = Vector{$T}(undef, rn)
+            # Pad X with kn-1 zeros like real conv
+            xpad_re = [zeros($T, kn-1); x_re; zeros($T, kn)]
+            xpad_im = [zeros($T, kn-1); x_im; zeros($T, kn)]
+            GC.@preserve xpad_re xpad_im k_re k_im o_re o_im begin
+                xsplit = $DSPSplit(xpad_re, xpad_im)
+                ksplit = $DSPSplit(k_re, k_im)
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_zconv", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64),
+                      xsplit, 1, ksplit, 1, osplit, 1, rn, kn)
+            end
+            copyto!(result, complex.(o_re, o_im))
+            return result
+        end
+        function zconv(X::Vector{Complex{$T}}, K::Vector{Complex{$T}})
+            rn = length(X) + length(K) - 1
+            result = Vector{Complex{$T}}(undef, rn)
+            zconv!(result, X, K)
+        end
+    end
+
+    # --- Complex matrix multiply ---
+
+    # zmmul: complex matrix multiply C = A * B
+    @eval begin
+        function zmmul!(C::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}})
+            m, p = size(A)
+            p2, n = size(B)
+            p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
+            size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n"))
+            a_re = real.(A); a_im = imag.(A)
+            b_re = real.(B); b_im = imag.(B)
+            o_re = Matrix{$T}(undef, m, n); o_im = Matrix{$T}(undef, m, n)
+            GC.@preserve a_re a_im b_re b_im o_re o_im begin
+                asplit = $DSPSplit(pointer(a_re), pointer(a_im))
+                bsplit = $DSPSplit(pointer(b_re), pointer(b_im))
+                osplit = $DSPSplit(pointer(o_re), pointer(o_im))
+                # Same trick as mmul: swap for col-major → row-major
+                ccall(($(string("vDSP_zmmul", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64, UInt64),
+                      bsplit, 1, asplit, 1, osplit, 1, UInt64(n), UInt64(m), UInt64(p))
+            end
+            copyto!(C, complex.(o_re, o_im))
+            return C
+        end
+        function zmmul(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}})
+            m = size(A, 1)
+            n = size(B, 2)
+            C = Matrix{Complex{$T}}(undef, m, n)
+            zmmul!(C, A, B)
+        end
+    end
+end
+
+@doc "Complex vector addition: `C = A + B`. Wraps [`vDSP_zvadd`](https://developer.apple.com/documentation/accelerate/vdsp_zvadd)." zvadd
+@doc "Complex vector subtraction: `C = A - B`. Wraps [`vDSP_zvsub`](https://developer.apple.com/documentation/accelerate/vdsp_zvsub)." zvsub
+@doc "Complex conjugate multiply: `C = conj(A) * B`. Wraps [`vDSP_zvcmul`](https://developer.apple.com/documentation/accelerate/vdsp_zvcmul)." zvcmul
+@doc "Complex-real multiply: `C = A * B` (complex * real). Wraps [`vDSP_zrvmul`](https://developer.apple.com/documentation/accelerate/vdsp_zrvmul)." zrvmul
+@doc "Complex-real divide: `C = A / B` (complex / real). Wraps [`vDSP_zrvdiv`](https://developer.apple.com/documentation/accelerate/vdsp_zrvdiv)." zrvdiv
+@doc "Complex-real add: adds real vector to real part of complex. Wraps [`vDSP_zrvadd`](https://developer.apple.com/documentation/accelerate/vdsp_zrvadd)." zrvadd
+@doc "Complex-real subtract: subtracts real from complex. Wraps [`vDSP_zrvsub`](https://developer.apple.com/documentation/accelerate/vdsp_zrvsub)." zrvsub
+@doc "Complex conjugate multiply and add: `D = conj(A)*B + C`. Wraps [`vDSP_zvcma`](https://developer.apple.com/documentation/accelerate/vdsp_zvcma)." zvcma
+@doc "Complex multiply and add: `D = A*B + C`. Wraps [`vDSP_zvma`](https://developer.apple.com/documentation/accelerate/vdsp_zvma)." zvma
+@doc "Complex scalar multiply and add: `D = A*b + C`. Wraps [`vDSP_zvsma`](https://developer.apple.com/documentation/accelerate/vdsp_zvsma)." zvsma
+@doc "Conjugate dot product: `sum(conj(A) .* B)`. Wraps [`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr)." zidotpr
+@doc "Complex-real dot product: `sum(A .* B)` where B is real. Wraps [`vDSP_zrdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zrdotpr)." zrdotpr
+@doc "Fill complex vector with complex scalar. Wraps [`vDSP_zvfill`](https://developer.apple.com/documentation/accelerate/vdsp_zvfill)." zvfill!
+@doc "Complex convolution. Wraps [`vDSP_zconv`](https://developer.apple.com/documentation/accelerate/vdsp_zconv)." zconv
+@doc "Complex matrix multiply: `C = A * B`. Wraps [`vDSP_zmmul`](https://developer.apple.com/documentation/accelerate/vdsp_zmmul)." zmmul
+
+# ============================================================
+# Format conversion (interleaved ↔ split complex)
+# ============================================================
+for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
+                             (Float64, "D", :DSPDoubleSplitComplex))
+    @eval begin
+        function ctoz(X::Vector{Complex{$T}})
+            n = length(X)
+            o_re = Vector{$T}(undef, n)
+            o_im = Vector{$T}(undef, n)
+            GC.@preserve o_re o_im begin
+                osplit = $DSPSplit(o_re, o_im)
+                ccall(($(string("vDSP_ctoz", suff)), libacc), Cvoid,
+                      (Ptr{Complex{$T}}, Int64, Ref{$DSPSplit}, Int64, UInt64),
+                      X, 2, osplit, 1, n)
+            end
+            return (o_re, o_im)
+        end
+        function ztoc(re::Vector{$T}, im::Vector{$T})
+            n = length(re)
+            result = Vector{Complex{$T}}(undef, n)
+            GC.@preserve re im begin
+                isplit = $DSPSplit(re, im)
+                ccall(($(string("vDSP_ztoc", suff)), libacc), Cvoid,
+                      (Ref{$DSPSplit}, Int64, Ptr{Complex{$T}}, Int64, UInt64),
+                      isplit, 1, result, 2, n)
+            end
+            return result
+        end
+    end
+end
+
+@doc "Convert interleaved complex to split-complex (real, imag) vectors. Wraps [`vDSP_ctoz`](https://developer.apple.com/documentation/accelerate/vdsp_ctoz)." ctoz
+@doc "Convert split-complex (real, imag) vectors to interleaved complex. Wraps [`vDSP_ztoc`](https://developer.apple.com/documentation/accelerate/vdsp_ztoc)." ztoc

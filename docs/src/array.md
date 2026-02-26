@@ -66,6 +66,12 @@ Each function `f` has an allocating variant `f(X)` and a mutating variant `f!(ou
 | `sumssqr(X)` | Sum of signed squares |
 | [`dot`](@ref AppleAccelerate.dot) | Dot product: `sum(X .* Y)` |
 | [`distancesq`](@ref AppleAccelerate.distancesq) | Squared Euclidean distance: `sum((X .- Y).^2)` |
+| [`rmsqv`](@ref AppleAccelerate.rmsqv) | Root mean square: `sqrt(sum(X.^2)/N)` |
+| [`sve_svesq`](@ref AppleAccelerate.sve_svesq) | Simultaneous sum and sum-of-squares |
+| [`maxmgv`](@ref AppleAccelerate.maxmgv) | Maximum magnitude: `max(\|X\|)` |
+| [`minmgv`](@ref AppleAccelerate.minmgv) | Minimum magnitude: `min(\|X\|)` |
+| [`maxmgvi`](@ref AppleAccelerate.maxmgvi) | Maximum magnitude with index |
+| [`minmgvi`](@ref AppleAccelerate.minmgvi) | Minimum magnitude with index |
 
 ## Vector-Vector Arithmetic
 
@@ -108,6 +114,8 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 |----------|-------------|
 | [`vam`](@ref AppleAccelerate.vam) | `(A + B) * C` |
 | [`vsbm`](@ref AppleAccelerate.vsbm) | `(A - B) * C` |
+| [`vma`](@ref AppleAccelerate.vma) | `A * B + C` |
+| [`vmsb`](@ref AppleAccelerate.vmsb) | `A * B - C` |
 | [`venvlp`](@ref AppleAccelerate.venvlp) | Signal envelope |
 
 ### Four-vector operations
@@ -117,6 +125,8 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 | [`vaam`](@ref AppleAccelerate.vaam) | `(A + B) * (C + D)` |
 | [`vsbsbm`](@ref AppleAccelerate.vsbsbm) | `(A - B) * (C - D)` |
 | [`vasbm`](@ref AppleAccelerate.vasbm) | `(A + B) * (C - D)` |
+| [`vmma`](@ref AppleAccelerate.vmma) | `A * B + C * D` |
+| [`vmmsb`](@ref AppleAccelerate.vmmsb) | `A * B - C * D` |
 | [`vpythg`](@ref AppleAccelerate.vpythg) | Pythagorean distance |
 
 ### Vector-vector-scalar operations
@@ -127,6 +137,9 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 | [`vsbsm`](@ref AppleAccelerate.vsbsm) | `(A - B) * c` |
 | [`vsma`](@ref AppleAccelerate.vsma) | `A * b + C` |
 | [`vsmsa`](@ref AppleAccelerate.vsmsa) | `A * b + c` |
+| [`vmsa`](@ref AppleAccelerate.vmsa) | `A * B + c` |
+| [`vsmsb`](@ref AppleAccelerate.vsmsb) | `A * b - C` |
+| [`vsmsma`](@ref AppleAccelerate.vsmsma) | `A * b + C * d` |
 
 ### Dual output
 
@@ -139,9 +152,12 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 | Function | Description |
 |----------|-------------|
 | [`vclip`](@ref AppleAccelerate.vclip) | Clip values to `[low, high]` |
+| [`vclipc`](@ref AppleAccelerate.vclipc) | Clip with count: returns `(clipped, nlow, nhigh)` |
 | [`viclip`](@ref AppleAccelerate.viclip) | Inverted clip: pass values outside `[low, high]` |
 | [`vthr`](@ref AppleAccelerate.vthr) | Threshold: keep or clamp to threshold |
 | [`vthres`](@ref AppleAccelerate.vthres) | Threshold to zero |
+| [`vlim`](@ref AppleAccelerate.vlim) | Test limit: `(b <= A[i]) ? c : -c` |
+| [`vthrsc`](@ref AppleAccelerate.vthrsc) | Threshold with signed constant |
 | [`vcmprs`](@ref AppleAccelerate.vcmprs) | Compress: gather elements where gate is nonzero |
 
 ## Type Conversion
@@ -207,6 +223,69 @@ These operations fuse multiple arithmetic steps into a single vDSP call for bett
 |----------|-------------|
 | [`vdbcon`](@ref AppleAccelerate.vdbcon) | Convert to decibels relative to a reference |
 
+## Vector Fill, Swap & Sort
+
+| Function | Description |
+|----------|-------------|
+| [`vclr!`](@ref AppleAccelerate.vclr!) | Fill vector with zeros |
+| [`vfill!`](@ref AppleAccelerate.vfill!) | Fill vector with scalar value |
+| [`vswap!`](@ref AppleAccelerate.vswap!) | Swap two vectors in-place |
+| [`vsort!`](@ref AppleAccelerate.vsort!) | Sort vector in-place |
+| [`vsorti`](@ref AppleAccelerate.vsorti) | Return sort permutation (indices) |
+
+## Gathering & Indexing
+
+| Function | Description |
+|----------|-------------|
+| [`vgathr`](@ref AppleAccelerate.vgathr) | Gather by index: `C[i] = A[B[i]]` |
+| [`vindex`](@ref AppleAccelerate.vindex) | Index with float indices |
+| [`vgen`](@ref AppleAccelerate.vgen) | Generate linear ramp between two values |
+| [`vgenp`](@ref AppleAccelerate.vgenp) | Piecewise linear interpolation from breakpoints |
+| [`vtabi`](@ref AppleAccelerate.vtabi) | Table lookup with interpolation |
+
+## Matrix Operations
+
+| Function | Description |
+|----------|-------------|
+| [`mmul`](@ref AppleAccelerate.mmul) | Matrix multiply: `C = A * B` |
+| [`mtrans`](@ref AppleAccelerate.mtrans) | Matrix transpose: `C = Aᵀ` |
+| [`mmov`](@ref AppleAccelerate.mmov) | Matrix copy (submatrix move) |
+
+## Integer Operations (Int32)
+
+| Function | Description |
+|----------|-------------|
+| [`vaddi`](@ref AppleAccelerate.vaddi) | Int32 vector addition |
+| [`vabsi`](@ref AppleAccelerate.vabsi) | Int32 absolute value |
+| [`vfilli!`](@ref AppleAccelerate.vfilli!) | Fill Int32 vector with scalar |
+| [`veqvi`](@ref AppleAccelerate.veqvi) | Int32 bitwise XNOR |
+
+## Type Conversion (int ↔ float)
+
+| Direction | Functions | Description |
+|-----------|-----------|-------------|
+| float → signed int (truncate) | `vfix8`, `vfix16`, `vfix32` | Truncating conversion |
+| float → unsigned int (truncate) | `vfixu8`, `vfixu16`, `vfixu32` | Truncating conversion |
+| float → signed int (round) | `vfixr8`, `vfixr16`, `vfixr32` | Rounding conversion |
+| float → unsigned int (round) | `vfixru8`, `vfixru16`, `vfixru32` | Rounding conversion |
+| signed int → float | `vflt8`, `vflt16`, `vflt32` | Signed integer to float |
+| unsigned int → float | `vfltu8`, `vfltu16`, `vfltu32` | Unsigned integer to float |
+
+## Image Convolution
+
+| Function | Description |
+|----------|-------------|
+| [`f3x3`](@ref AppleAccelerate.f3x3) | 2D convolution with 3×3 filter |
+| [`f5x5`](@ref AppleAccelerate.f5x5) | 2D convolution with 5×5 filter |
+| [`imgfir`](@ref AppleAccelerate.imgfir) | General 2D image convolution |
+
+## Format Conversion
+
+| Function | Description |
+|----------|-------------|
+| [`ctoz`](@ref AppleAccelerate.ctoz) | Interleaved complex → split (real, imag) vectors |
+| [`ztoc`](@ref AppleAccelerate.ztoc) | Split (real, imag) vectors → interleaved complex |
+
 ## Complex Array Operations
 
 AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Float32}}` and `Vector{Complex{Float64}}`. These extend existing function names (e.g., `vneg`, `vabs`, `vmul`) with methods that dispatch on complex element types — no naming conflicts with the real-valued versions above.
@@ -236,6 +315,41 @@ AppleAccelerate also wraps vDSP's split-complex functions for `Vector{Complex{Fl
 | `vdiv(X, Y)` / `vdiv!(result, X, Y)` | Element-wise divide: `X ./ Y` |
 | `vsmul(X, c)` / `vsmul!(result, X, c)` | Scalar multiply (complex scalar) |
 | `dot(X, Y)` | Unconjugated dot product: `sum(X .* Y)` |
+| [`zvadd`](@ref AppleAccelerate.zvadd) | Complex addition: `A + B` |
+| [`zvsub`](@ref AppleAccelerate.zvsub) | Complex subtraction: `A - B` |
+| [`zvcmul`](@ref AppleAccelerate.zvcmul) | Conjugate multiply: `conj(A) * B` |
+
+### Complex-real operations
+
+| Function | Description |
+|----------|-------------|
+| [`zrvmul`](@ref AppleAccelerate.zrvmul) | Complex × real |
+| [`zrvdiv`](@ref AppleAccelerate.zrvdiv) | Complex / real |
+| [`zrvadd`](@ref AppleAccelerate.zrvadd) | Complex + real (adds to real part) |
+| [`zrvsub`](@ref AppleAccelerate.zrvsub) | Complex − real |
+
+### Complex compound operations
+
+| Function | Description |
+|----------|-------------|
+| [`zvcma`](@ref AppleAccelerate.zvcma) | `conj(A)*B + C` |
+| [`zvma`](@ref AppleAccelerate.zvma) | `A*B + C` |
+| [`zvsma`](@ref AppleAccelerate.zvsma) | `A*b + C` (b is complex scalar) |
+
+### Complex dot products
+
+| Function | Description |
+|----------|-------------|
+| [`zidotpr`](@ref AppleAccelerate.zidotpr) | Conjugate dot: `sum(conj(A) .* B)` |
+| [`zrdotpr`](@ref AppleAccelerate.zrdotpr) | Complex-real dot: `sum(A .* B)` |
+
+### Complex fill & convolution
+
+| Function | Description |
+|----------|-------------|
+| [`zvfill!`](@ref AppleAccelerate.zvfill!) | Fill complex vector with scalar |
+| [`zconv`](@ref AppleAccelerate.zconv) | Complex convolution |
+| [`zmmul`](@ref AppleAccelerate.zmmul) | Complex matrix multiply |
 
 ### Coordinate conversion
 
