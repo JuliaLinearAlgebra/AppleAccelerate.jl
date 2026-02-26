@@ -147,7 +147,7 @@ end
     sincos(X::Array{T}) where T <: Union{Float32, Float64}
 
 Compute the sine and cosine of each element simultaneously via vecLib
-[`vvsincos`](https://developer.apple.com/documentation/accelerate/vvsincos).
+[`vvsincos`](https://developer.apple.com/documentation/accelerate/vvsincos(_:_:_:_:)).
 Returns a tuple `(sin(X), cos(X))` of arrays. Faster than computing `sin` and `cos`
 separately since both are produced in a single pass.
 
@@ -159,7 +159,7 @@ sincos
     cis(X::Array{T}) where T <: Union{Float32, Float64}
 
 Compute `cos(x) + im*sin(x)` for each element via vecLib
-[`vvcosisin`](https://developer.apple.com/documentation/accelerate/vvcosisin).
+[`vvcosisin`](https://developer.apple.com/documentation/accelerate/vvcosisin(_:_:_:)).
 Returns a `Complex{T}` array. Equivalent to `exp.(im .* X)` but faster.
 
 The mutating variant `cis!(out, X)` stores results in a preallocated complex array.

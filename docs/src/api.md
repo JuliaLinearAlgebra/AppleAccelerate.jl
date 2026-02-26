@@ -271,7 +271,7 @@ AppleAccelerate.zconv
 AppleAccelerate.zmmul
 ```
 
-## Dense Linear Algebra — [BLAS](https://developer.apple.com/documentation/accelerate/blas) / [LAPACK](https://developer.apple.com/documentation/accelerate/lapack)
+## Dense Linear Algebra — [BLAS](https://developer.apple.com/documentation/accelerate/blas) / [LAPACK](https://developer.apple.com/documentation/accelerate/solving-systems-of-linear-equations-with-lapack)
 
 ```@docs
 AppleAccelerate.load_accelerate
