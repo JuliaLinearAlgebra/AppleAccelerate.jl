@@ -5,6 +5,23 @@ using LinearAlgebra
 import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve, solve!
 
 @testset "Sparse Linear Algebra" begin
+    @testset "attribute bitfields" begin
+        AA = AppleAccelerate
+        # Independent C bitfields must not share bits with each other.
+        @test AA.ATT_TRANSPOSE           & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_LOWER_TRIANGLE      & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_CONJUGATE_TRANSPOSE & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_TRANSPOSE      & AA.ATT_LOWER_TRIANGLE      == 0
+        @test AA.ATT_TRANSPOSE      & AA.ATT_CONJUGATE_TRANSPOSE == 0
+        @test AA.ATT_LOWER_TRIANGLE & AA.ATT_CONJUGATE_TRANSPOSE == 0
+
+        # OR-combined constants must let each field be extracted back via its mask.
+        @test AA.ATT_TRI_LOWER & AA.ATT_KIND_MASK     == AA.ATT_TRIANGULAR
+        @test AA.ATT_TRI_LOWER & AA.ATT_TRIANGLE_MASK == AA.ATT_LOWER_TRIANGLE
+        @test AA.ATT_TRI_UPPER & AA.ATT_KIND_MASK     == AA.ATT_TRIANGULAR
+        @test AA.ATT_TRI_UPPER & AA.ATT_TRIANGLE_MASK == AA.ATT_UPPER_TRIANGLE
+    end
+
     @testset "wrappers" begin
         @testset "SparseMultiply and SparseMultiplyAdd" begin
             # less copy-paste heavy way via meta programming features?
@@ -384,6 +401,76 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             # @test BX ≈ X
         end
     end
+    # Complex sparse support is macOS 15.5+ only.
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" && @testset "Complex" begin
+        @testset "multiply $T" for T in (ComplexF32, ComplexF64)
+            N = 30
+            # Diagonal shift keeps the matrix well-conditioned for the factor/solve tests.
+            jlA = sprand(T, N, N, 0.1) + T(N) * I
+            aaA = AASparseMatrix(jlA)
+            x = rand(T, N)
+            X = rand(T, N, 3)
+            # Sparse * dense matches the dense product.
+            @test aaA * x ≈ Array(jlA) * x
+            @test aaA * X ≈ Array(jlA) * X
+            # Scaled multiply (exercises the Cf/Cd-mangled scalar variant).
+            α = T(2) + T(im) * T(3)
+            @test α * aaA * x ≈ Array(jlA) * (α * x)  # α*A*x = A*(α*x)
+            # muladd!: y += A * x.
+            y = rand(T, N); y0 = copy(y)
+            muladd!(aaA, x, y)
+            @test y ≈ y0 + Array(jlA) * x
+        end
+
+        @testset "adjoint vs transpose $T" for T in (ComplexF32, ComplexF64)
+            N = 8
+            jlA = sprand(T, N, N, 0.5) + T(N) * I
+            aaA = AASparseMatrix(jlA)
+            x = rand(T, N)
+            # transpose: A^T x. adjoint: A^H x (conjugate transpose). Distinct for complex.
+            @test transpose(aaA) * x ≈ transpose(Array(jlA)) * x
+            @test adjoint(aaA)  * x ≈ adjoint(Array(jlA))  * x
+            @test transpose(aaA) * x ≉ adjoint(aaA) * x  # they're not equal in general
+            # Round-trip: (A')' has the same action as A.
+            @test adjoint(adjoint(aaA)) * x ≈ aaA * x
+        end
+
+        @testset "Hermitian detection and factor!" begin
+            N = 10
+            T = ComplexF64
+            # Build a Hermitian positive-definite matrix.
+            temp = sprand(T, N, N, 0.3)
+            H = sparse(temp * adjoint(temp) + N * I)
+            @test ishermitian(H) && !issymmetric(H)
+            aaH = AASparseMatrix(H)
+            @test ishermitian(aaH)
+            @test !issymmetric(aaH)
+            # factor! default for a Hermitian matrix should pick Cholesky.
+            f = AAFactorization(aaH)
+            factor!(f)
+            @test f._factorization.symbolicFactorization.type ==
+                  AppleAccelerate.SparseFactorizationCholesky
+            x = rand(T, N)
+            @test solve(f, H * x) ≈ x
+        end
+
+        @testset "factor/solve square non-Hermitian $T" for T in (ComplexF32, ComplexF64)
+            N = 20
+            jlA = sprand(T, N, N, 0.2) + T(N) * I
+            f = AAFactorization(jlA)
+            # Default for square non-Hermitian complex is LU.
+            x = rand(T, N)
+            B = rand(T, N, 2)
+            @test solve(f, jlA * x) ≈ x
+            @test solve(f, jlA * B) ≈ B
+            @test f._factorization.symbolicFactorization.type in
+                (AppleAccelerate.SparseFactorizationLU,
+                 AppleAccelerate.SparseFactorizationLUUnpivoted,
+                 AppleAccelerate.SparseFactorizationLUSPP,
+                 AppleAccelerate.SparseFactorizationLUTPP)
+        end
+    end
+
     @testset "factorize" begin
         # Use 100x100 to avoid singular matrices from small random sparse matrices
         jlM = sprandn(100, 100, 0.3) + 10I
