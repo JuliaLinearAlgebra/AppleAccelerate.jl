@@ -3,9 +3,9 @@
 using SparseArrays
 using Libdl
 
-# header found at: /Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/System/
-# Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/
-# Versions/A/Headers/Sparse/Solve.h (replace MacOSX15 with correct version number)
+# To find most recent header:
+# "$(xcrun --show-sdk-path)/System/Library/Frameworks/Accelerate.framework/
+# Versions/A/Frameworks/vecLib.framework/Versions/A/Headers/Sparse/Solve.h"
 
 # unused. But if I can find a library that supports C-style structs
 # of packed bitflags with enum fields, then I'll want them.
@@ -30,6 +30,12 @@ end=#
     SparseFactorizationLDLTTPP = 4
     SparseFactorizationQR = 40
     SparseFactorizationCholeskyAtA = 41
+    # LU variants require macOS 15.5+. Calling them on older versions returns
+    # SparseParameterError from libSparse, which factor!'s status check surfaces.
+    SparseFactorizationLU = 80
+    SparseFactorizationLUUnpivoted = 81
+    SparseFactorizationLUSPP = 82
+    SparseFactorizationLUTPP = 83
     SparseFactorizationTBD = 64 # my own addition.
 end
 
@@ -39,12 +45,17 @@ end
     SparseOrderAMD = 2
     SparseOrderMetis = 3
     SparseOrderCOLAMD = 4
+    SparseOrderMTMetis = 5 # macOS 26+
 end
 
 @enum SparseScaling_t::UInt8 begin
     SpraseScalingDefault = 0
     SparseScalingUser = 1
     SparseScalingEquilibriationInf = 2
+    # macOS 26+. Hungarian-and-ordering is only valid in a combined
+    # symbolic+numeric SparseFactor call, and only for LU.
+    SparseScalingHungarianScalingOnly = 3
+    SparseScalingHungarianScalingAndOrdering = 4
 end
 
 @enum SparseStatus_t::Int32 begin
@@ -56,6 +67,8 @@ end
     SparseYetToBeFactored = -5 # my own addition.
     SparseStatusReleased = -2147483647
 end
+# Apple renamed SparseStatusFailed to SparseFactorizationFailed in newer SDKs.
+const SparseFactorizationFailed = SparseStatusFailed
 
 @enum SparseControl_t::UInt32 begin
     SparseDefaultControl = 0
@@ -574,21 +587,21 @@ end
 
 # keep just in case libSparse's default malloc/free cooperate better
 # with the library code (due to being from Objective-C, not from C)
-SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
-    LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
+function SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure)
+    @ccall LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
         arg1::Cuint, arg2::SparseMatrixStructure
     )::SparseOpaqueSymbolicFactorization
-)
+end
 
-SparseFactor(arg1::SparseFactorization_t,
+function SparseFactor(arg1::SparseFactorization_t,
             arg2::SparseMatrixStructure,
-            arg3::SparseSymbolicFactorOptions) = @ccall(
-     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure27SparseSymbolicFactorOptions(
+            arg3::SparseSymbolicFactorOptions)
+    @ccall LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure27SparseSymbolicFactorOptions(
                 arg1::Cuint,
                 arg2::SparseMatrixStructure,
                 arg3::SparseSymbolicFactorOptions
     )::SparseOpaqueSymbolicFactorization
-)
+end
 
 # ============================================================
 # AASparseMatrix
@@ -767,23 +780,36 @@ function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
         if kind == SparseFactorizationTBD
-            # so far I'm only dealing with ordinary and symmetric
+            # Cholesky for symmetric; on macOS 15.5+ LU for square non-symmetric
+            # (faster than QR for square solves); QR otherwise.
+            nrow, ncol = size(aa_fact.matrixObj)
+            lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
             kind = issymmetric(aa_fact.matrixObj) ? SparseFactorizationCholesky :
-                            SparseFactorizationQR
+                   (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
+                                                    SparseFactorizationQR
         end
         aa_fact._factorization = SparseFactor(kind, aa_fact.matrixObj.matrix)
-        if aa_fact._factorization.status == SparseMatrixIsSingular
-            # throw a SingularException? Factoring a singular matrix usually does not
-            # make it this far: the call to SparseFactor throws an error.
-            throw(ErrorException("The matrix is singular."))
-        elseif aa_fact._factorization.status == SparseStatusFailed
-            throw(ErrorException("Factorization failed: check that the matrix"
-                        * " has the correct properties for the factorization."))
-        elseif aa_fact._factorization.status != SparseStatusOk
-            throw(ErrorException("Something went wrong internally. Error type: "
-                                * string(aa_fact._factorization.status)))
-        end
+        _libsparse_throw(aa_fact._factorization.status, "factor")
     end
+end
+
+# Translate a libSparse status code into a typed Julia exception. SparseStatusOk
+# is a no-op so callers can write `_libsparse_throw(result.status, ...)` after
+# every libSparse call without branching.
+function _libsparse_throw(status::SparseStatus_t, op::AbstractString)
+    status == SparseStatusOk && return
+    status == SparseMatrixIsSingular &&
+        throw(LinearAlgebra.SingularException(0))
+    status == SparseParameterError &&
+        throw(ArgumentError("libSparse $(op) failed: parameter error " *
+            "(possibly: matrix lacks the properties required by this factorization, " *
+            "or factorization is unavailable on this macOS version)"))
+    status == SparseStatusFailed &&
+        error("libSparse $(op) failed (check that the matrix has the correct " *
+              "properties for this factorization)")
+    status == SparseInternalError &&
+        error("libSparse $(op) failed: internal error")
+    error("libSparse $(op) failed: status=$(status)")
 end
 
 """

@@ -230,7 +230,8 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 factor!(f)
             catch err1
             end
-            @test occursin("singular", sprint(showerror, err1))
+            @test err1 isa SingularException ||
+                  occursin("singular", lowercase(sprint(showerror, err1)))
 
             err2 = nothing
             temp = sprand(N, N, 0.5)
@@ -322,6 +323,40 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             x = rand(N)
             b = A * x
             @test solve(ldlt_fact, b) ≈ x
+        end
+
+        something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" && @testset "LU" begin
+            for T in (Float32, Float64)
+                @eval begin
+                    N = 50
+                    # Square, non-symmetric, well-conditioned.
+                    jlA = sprand($T, N, N, 0.1) + $T(N) * I
+                    @test !issymmetric(jlA)
+                    lu_fact = AAFactorization(jlA)
+                    # Default for square non-symmetric should be LU.
+                    factor!(lu_fact)
+                    # Default LU currently resolves to LUTPP internally.
+                    @test lu_fact._factorization.symbolicFactorization.type in
+                        (AppleAccelerate.SparseFactorizationLU,
+                         AppleAccelerate.SparseFactorizationLUUnpivoted,
+                         AppleAccelerate.SparseFactorizationLUSPP,
+                         AppleAccelerate.SparseFactorizationLUTPP)
+                    x = rand($T, N)
+                    X = rand($T, N, 3)
+                    b, B = jlA * x, jlA * X
+                    @test solve(lu_fact, b) ≈ x
+                    @test solve(lu_fact, B) ≈ X
+
+                    # Also exercise the explicit LU variants.
+                    for kind in (AppleAccelerate.SparseFactorizationLUUnpivoted,
+                                 AppleAccelerate.SparseFactorizationLUSPP,
+                                 AppleAccelerate.SparseFactorizationLUTPP)
+                        f2 = AAFactorization(jlA)
+                        factor!(f2, kind)
+                        @test solve(f2, b) ≈ x
+                    end
+                end
+            end
         end
 
         @testset "non-square in-place solve" begin
