@@ -507,16 +507,18 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
         end
 
         @testset "complex symmetric (not Hermitian)" begin
-            # Build a complex matrix that's symmetric but not Hermitian
+            # Older macOS libSparse rejects LDLT for complex-symmetric matrices
+            # ("Cannot perform Hermitian matrix factorization..."), even though
+            # newer macOS implements it as LDLᵀ correctly. For cross-version
+            # portability we don't auto-tag — these get stored as ordinary and
+            # factored via LU on full storage. See `factor!` docs for details.
             N = 8
             T = ComplexF64
             M = sprand(T, N, N, 0.3)
             A = sparse(M + transpose(M)) + T(N) * I
             @assert issymmetric(A) && !ishermitian(A)
             aaA = AASparseMatrix(A)
-            # Constructor stores it as ATT_SYMMETRIC (not ATT_HERMITIAN).
-            @test issymmetric(aaA) && !ishermitian(aaA)
-            # factor! falls through to the non-Hermitian branch (LU for square).
+            @test !ishermitian(aaA) && !issymmetric(aaA)  # stored as ordinary
             f = AAFactorization(aaA)
             x = rand(T, N)
             @test solve(f, A * x) ≈ x

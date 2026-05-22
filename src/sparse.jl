@@ -53,7 +53,7 @@ end
     SparseScalingUser = 1
     SparseScalingEquilibriationInf = 2
     # macOS 26+. Hungarian-and-ordering is only valid in a combined
-    # symbolic+numeric SparseFactor call, and only for LU.
+    # symbolic+numeric SparseFactor call, and only for LU. Untested.
     SparseScalingHungarianScalingOnly = 3
     SparseScalingHungarianScalingAndOrdering = 4
 end
@@ -833,14 +833,9 @@ end
 function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
                         attributes::att_type = ATT_ORDINARY) where T<:vTypes
     if attributes == ATT_ORDINARY
-        # `ishermitian` falls back to `issymmetric` for real T, so this branch
-        # is taken for real-symmetric and complex-Hermitian alike — both map
-        # to the Cholesky-amenable kind for their respective attribute layout.
         if ishermitian(sparseM)
             kind = T <: Complex ? ATT_HERMITIAN : ATT_SYMMETRIC
             return AASparseMatrix(tril(sparseM), kind | ATT_LOWER_TRIANGLE)
-        elseif T <: Complex && issymmetric(sparseM)
-            return AASparseMatrix(tril(sparseM), ATT_SYMMETRIC | ATT_LOWER_TRIANGLE)
         elseif istril(sparseM) || istriu(sparseM)
             attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
         end
@@ -888,7 +883,6 @@ _maybe_conjugate(::att_type, ::Type{<:Real}) = false
 function Base.getindex(M::AASparseMatrix{T}, i::Int, j::Int) where T<:vTypes
     ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
     # (i,j) is the *logical* index; map back to the raw CSC layout.
-    # the API says that conjugate transpose flag true implies transpose flag true.
     attrs = M.matrix.structure.attributes
     transposed = (attrs & ATT_TRANSPOSE) != 0
     raw_i, raw_j = transposed ? (j, i) : (i, j)
@@ -1007,24 +1001,38 @@ AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
 """
     factor!(f::AAFactorization, [type::SparseFactorization_t])
 
-Explicitly compute the factorization. If `type` is not specified, Cholesky is used
-for symmetric matrices and QR for non-symmetric. Called automatically by [`solve`](@ref)
-if the factorization has not yet been computed.
+Explicitly compute the factorization. If `type` is not specified, the default
+is chosen from the matrix's kind attribute:
+
+  - Hermitian (real symmetric or complex Hermitian) → Cholesky
+  - square, non-Hermitian → LU (macOS 15.5+; falls back to QR on older systems)
+  - rectangular → QR
+
+Called automatically by [`solve`](@ref) if the factorization has not yet been
+computed.
+
+!!! note "Complex symmetric (not Hermitian)"
+    When the user leaves the factorization type unspecified and passes
+    a complex symmetric (but not Hermitian) matrix, we default to LU factorization.
+    
+    On older versions of MacOS, Apple's `SparseFactorizationLDLT` errors on complex
+    symmetric (non-Hermitian) matrices, reporting "Cannot
+    perform Hermitian matrix factorization of non-Hermitian matrix."
+    On newer versions, it accepts the call and performs a true `LDLᵀ` (not `LDLᴴ`).
+    This behavior isn't documented by Apple; the exact version threshold is
+    unknown.
 """
 function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
         if kind == SparseFactorizationTBD
-            # Cholesky for Hermitian (incl. real symmetric); LDLT for complex-
-            # symmetric-not-Hermitian (LDLT honors ATT_SYMMETRIC + lower-triangle
-            # storage; LU does not, so it would silently use only half the data);
-            # LU for square non-symmetric (macOS 15.5+); QR otherwise.
+            # Cholesky for Hermitian (incl. real symmetric); LU for square
+            # non-Hermitian (macOS 15.5+); QR otherwise.
             nrow, ncol = size(aa_fact.matrixObj)
             lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
             kind = ishermitian(aa_fact.matrixObj) ? SparseFactorizationCholesky :
-                   issymmetric(aa_fact.matrixObj) ? SparseFactorizationLDLT :
-                   (nrow == ncol && lu_ok)         ? SparseFactorizationLU :
-                                                     SparseFactorizationQR
+                   (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
+                                                    SparseFactorizationQR
         end
         aa_fact._factorization = SparseFactor(kind, aa_fact.matrixObj.matrix)
         _libsparse_throw(aa_fact._factorization.status, "factor")
