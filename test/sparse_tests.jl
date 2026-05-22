@@ -142,6 +142,42 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 end
             end
         end
+
+        @testset "_libsparse_throw status mapping" begin
+            # Code coverage reasons: no easy was to trigger the SparseInternalError.
+            AA = AppleAccelerate
+            @test AA._libsparse_throw(AA.SparseStatusOk, "x") === nothing
+            @test_throws SingularException AA._libsparse_throw(
+                AA.SparseMatrixIsSingular, "factor")
+            @test_throws ArgumentError AA._libsparse_throw(
+                AA.SparseParameterError, "factor")
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseStatusFailed, "factor")
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseInternalError, "factor")
+            # Unknown / unmapped status falls through to the generic branch.
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseYetToBeFactored, "factor")
+        end
+
+        @testset "SparseFactorNoErrors" begin
+            # SparseFactor(kind, M, true) should route to SparseFactorNoErrors,
+            # which calls libSparse without our error-handling options wrapper.
+            jlA = sprand(Float64, 5, 5, 0.5) + 5.0I
+            aa = AASparseMatrix(jlA)
+            qr = AppleAccelerate.SparseFactorizationQR
+            f = AppleAccelerate.SparseFactor(qr, aa.matrix, true)
+            @test f.status == AppleAccelerate.SparseStatusOk
+            # Use it to solve so we know it produced a working factorization.
+            x = rand(5); b = jlA * x
+            xb = copy(b)
+            AppleAccelerate.SparseSolve(f, xb)
+            @test xb ≈ x
+            AppleAccelerate.SparseCleanup(f)
+            # TBD is rejected at the SparseFactorNoErrors entry point.
+            @test_throws ArgumentError AppleAccelerate.SparseFactorNoErrors(
+                AppleAccelerate.SparseFactorizationTBD, aa.matrix)
+        end
     end
     @testset "AASparseMatrix" begin
         @testset "arithmetic" begin
@@ -193,9 +229,23 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             # retains the original dimensions, so verify the flag is toggled.
             ATT_TRANSP = AppleAccelerate.ATT_TRANSPOSE
             @test (aaMt.matrix.structure.attributes & ATT_TRANSP) != zero(typeof(ATT_TRANSP))
-            # Double transpose clears the flag
+            # Double transpose clears the flag.
             aaMtt = transpose(aaMt)
             @test (aaMtt.matrix.structure.attributes & ATT_TRANSP) == zero(typeof(ATT_TRANSP))
+            # Dimensions reverse under transpose.
+            @test size(aaM)  == (N, M)
+            @test size(aaMt) == (M, N)
+            # Adjoint is tranpose.
+            aaMa = adjoint(aaM)
+            @test (aaMa.matrix.structure.attributes & ATT_TRANSP) != zero(typeof(ATT_TRANSP))
+            @test size(aaMa) == (M, N)
+            x = rand(N)
+            @test aaMa * x ≈ transpose(Array(sparseM)) * x
+
+            # transpose(M)[i,j] equals M[j, i]
+            for I in 1:M, J in 1:N
+                @test aaMt[I, J] == sparseM[J, I]
+            end
         end
         @testset "special matrices" begin
             N = 3
@@ -427,12 +477,49 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             jlA = sprand(T, N, N, 0.5) + T(N) * I
             aaA = AASparseMatrix(jlA)
             x = rand(T, N)
-            # transpose: A^T x. adjoint: A^H x (conjugate transpose). Distinct for complex.
+            # transpose and adjoint are distinct for complex.
             @test transpose(aaA) * x ≈ transpose(Array(jlA)) * x
             @test adjoint(aaA)  * x ≈ adjoint(Array(jlA))  * x
-            @test transpose(aaA) * x ≉ adjoint(aaA) * x  # they're not equal in general
+            @test transpose(aaA) * x ≉ adjoint(aaA) * x
             # Round-trip: (A')' has the same action as A.
             @test adjoint(adjoint(aaA)) * x ≈ aaA * x
+            # getindex on adjoint should swap indices AND conjugate.
+            adjA = adjoint(aaA)
+            for I in 1:N, J in 1:N
+                @test adjA[I, J] == conj(jlA[J, I])
+            end
+            # adjoint(adjoint(M)) lands in the "no meaning" (F, T) attribute state.
+            # libSparse treats that as identity, and so must getindex — i.e., no
+            # accidental conjugation here. Regression guard for the `ct alone`
+            # check that would have silently broken this.
+            adjAdj = adjoint(adjoint(aaA))
+            for I in 1:N, J in 1:N
+                @test adjAdj[I, J] == jlA[I, J]
+            end
+            # libSparse traps on transpose-of-adjoint or adjoint-of-transpose
+            # Our wrappers convert those to clean Julia errors.
+            @test_throws ArgumentError transpose(adjoint(aaA))
+            @test_throws ArgumentError adjoint(transpose(aaA))
+            # (F,T) state from adjoint(adjoint) is libSparse-identity, so
+            # transposing/re-adjointing it is legal and acts on the original.
+            @test transpose(adjoint(adjoint(aaA))) * x ≈ transpose(Array(jlA)) * x
+            @test adjoint(adjoint(adjoint(aaA)))   * x ≈ adjoint(Array(jlA))   * x
+        end
+
+        @testset "complex symmetric (not Hermitian)" begin
+            # Build a complex matrix that's symmetric but not Hermitian
+            N = 8
+            T = ComplexF64
+            M = sprand(T, N, N, 0.3)
+            A = sparse(M + transpose(M)) + T(N) * I
+            @assert issymmetric(A) && !ishermitian(A)
+            aaA = AASparseMatrix(A)
+            # Constructor stores it as ATT_SYMMETRIC (not ATT_HERMITIAN).
+            @test issymmetric(aaA) && !ishermitian(aaA)
+            # factor! falls through to the non-Hermitian branch (LU for square).
+            f = AAFactorization(aaA)
+            x = rand(T, N)
+            @test solve(f, A * x) ≈ x
         end
 
         @testset "Hermitian detection and factor!" begin

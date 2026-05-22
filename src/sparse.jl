@@ -118,6 +118,8 @@ const ATT_ALLOCATED_BY_SPARSE = att_type(1) << _SHIFT_ALLOCATED
 const ATT_TRIANGLE_MASK     = att_type(1) << _SHIFT_TRIANGLE
 const ATT_KIND_MASK         = ((att_type(1) << _WIDTH_KIND_REAL)    - 1) << _SHIFT_KIND
 const ATT_KIND_MASK_COMPLEX = ((att_type(1) << _WIDTH_KIND_COMPLEX) - 1) << _SHIFT_KIND
+attr_mask(::Type{<:Complex}) = ATT_KIND_MASK_COMPLEX
+attr_mask(::Type{<:Real})    = ATT_KIND_MASK
 
 # Convenience combinations
 const ATT_TRI_LOWER = ATT_TRIANGULAR | ATT_LOWER_TRIANGLE
@@ -750,7 +752,7 @@ end
 SparseFactor(arg1::SparseFactorization_t,
                         arg2::SparseMatrix{T},
                         noErrors::Bool = false) where T <: vTypes =
-                noErrors ? SparseFactor(arg1, arg2) :
+                noErrors ? SparseFactorNoErrors(arg1, arg2) :
                 SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(),
                                          SparseNumericFactorOptions(T))
 
@@ -838,7 +840,6 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
             kind = T <: Complex ? ATT_HERMITIAN : ATT_SYMMETRIC
             return AASparseMatrix(tril(sparseM), kind | ATT_LOWER_TRIANGLE)
         elseif T <: Complex && issymmetric(sparseM)
-            # Complex symmetric (not Hermitian) — rare but valid; not Cholesky-amenable.
             return AASparseMatrix(tril(sparseM), ATT_SYMMETRIC | ATT_LOWER_TRIANGLE)
         elseif istril(sparseM) || istriu(sparseM)
             attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
@@ -854,49 +855,75 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
     return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
 end
 
-Base.size(M::AASparseMatrix) = (M.matrix.structure.rowCount,
-                                    M.matrix.structure.columnCount)
-Base.eltype(M::AASparseMatrix) = eltype(M._nzval)
-# Use the wider (complex) mask everywhere — for real matrices the extra bit is
-# always 0, so the two masks behave identically. For Hermitian (bits 2-4 all
-# set), the wider mask correctly distinguishes Hermitian (28) from Symmetric (12).
-LinearAlgebra.issymmetric(M::AASparseMatrix) = (M.matrix.structure.attributes &
-                                                ATT_KIND_MASK_COMPLEX) == ATT_SYMMETRIC
+# Apple stores the underlying CSC dimensions and uses the transpose attribute
+# bit to "implicitly transpose" the matrix on subsequent ops. Julia callers
+# expect `size(transpose(A))` to reverse the dimensions, so we honor the bit
+# here — matching the contract of `LinearAlgebra.Adjoint` / `Transpose`.
+function Base.size(M::AASparseMatrix)
+    nrow = Int(M.matrix.structure.rowCount)
+    ncol = Int(M.matrix.structure.columnCount)
+    return (M.matrix.structure.attributes & ATT_TRANSPOSE) != 0 ?
+        (ncol, nrow) : (nrow, ncol)
+end
+
+LinearAlgebra.issymmetric(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes &
+                                                attr_mask(T)) == ATT_SYMMETRIC
 LinearAlgebra.ishermitian(M::AASparseMatrix{<:Complex}) = (M.matrix.structure.attributes &
                                                 ATT_KIND_MASK_COMPLEX) == ATT_HERMITIAN
 LinearAlgebra.ishermitian(M::AASparseMatrix{<:Real}) = issymmetric(M)
-istri(M::AASparseMatrix) = (M.matrix.structure.attributes
-                                    & ATT_KIND_MASK_COMPLEX) == ATT_TRIANGULAR
+istri(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes
+                                    & attr_mask(T)) == ATT_TRIANGULAR
 LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_LOWER_TRIANGLE == ATT_UPPER_TRIANGLE)
+                                        ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
 LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_LOWER_TRIANGLE == ATT_LOWER_TRIANGLE)
+                                        ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
 
-function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
+# Both bits encode adjoint; ct alone is the "no meaning" state that
+# libSparse treats as identity (reachable via adjoint(adjoint(M))).
+_maybe_conjugate(attr::att_type, ::Type{<:Complex}) =
+    (attr & (ATT_TRANSPOSE | ATT_CONJUGATE_TRANSPOSE)) ==
+    (ATT_TRANSPOSE | ATT_CONJUGATE_TRANSPOSE)
+_maybe_conjugate(::att_type, ::Type{<:Real}) = false
+
+function Base.getindex(M::AASparseMatrix{T}, i::Int, j::Int) where T<:vTypes
     ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
-    (startCol, endCol) = (M._colptr[j], M._colptr[j+1]-1) .+ 1
+    # (i,j) is the *logical* index; map back to the raw CSC layout.
+    # the API says that conjugate transpose flag true implies transpose flag true.
+    attrs = M.matrix.structure.attributes
+    transposed = (attrs & ATT_TRANSPOSE) != 0
+    raw_i, raw_j = transposed ? (j, i) : (i, j)
+    (startCol, endCol) = (M._colptr[raw_j], M._colptr[raw_j+1]-1) .+ 1
     rowsInCol = @view M._rowval[startCol:endCol]
-    ind = searchsortedfirst(rowsInCol, i-1)
-    if ind <= length(rowsInCol) && rowsInCol[ind] == i-1
-        return M._nzval[startCol+ind-1]
+    ind = searchsortedfirst(rowsInCol, raw_i-1)
+    if ind <= length(rowsInCol) && rowsInCol[ind] == raw_i-1
+        val = M._nzval[startCol+ind-1]
+        return _maybe_conjugate(attrs, T) ? conj(val) : val
     end
     return zero(eltype(M))
 end
 
-function Base.getindex(M::AASparseMatrix, i::Int)
-    1 <= i <= size(M)[1]*size(M)[2] || throw(BoundsError(M, i))
-    return M[(i-1) % size(M)[1] + 1, div(i-1, size(M)[1]) + 1]
+# libSparse traps when transposing an adjoint (T,T): would land on conj(A).
+function Base.transpose(M::AASparseMatrix)
+    attrs = M.matrix.structure.attributes
+    !((attrs & ATT_TRANSPOSE) != 0 && (attrs & ATT_CONJUGATE_TRANSPOSE) != 0) ||
+        throw(ArgumentError("cannot transpose an already-adjointed AASparseMatrix " *
+            "(libSparse cannot represent the resulting `conj(A)` view; " *
+            "apply `conj` to the underlying data instead)"))
+    AASparseMatrix(SparseGetTranspose(M.matrix), M._colptr, M._rowval, M._nzval)
 end
-# Creates a new structure, referring to the same data,
-# but with the transpose flag (in attributes) flipped.
-Base.transpose(M::AASparseMatrix) = AASparseMatrix(SparseGetTranspose(M.matrix),
-                        M._colptr, M._rowval, M._nzval)
-# For real matrices adjoint == transpose, which flips the `transpose` bit.
-# For complex, SparseGetConjugateTranspose flips the `conjugate_transpose`
-# bit; the underlying CSC data is shared in both cases (no copy/conjugation).
+
+# Real: same as transpose. Complex: flip ct (and toggle t); CSC data shared.
 Base.adjoint(M::AASparseMatrix{<:Real}) = transpose(M)
-Base.adjoint(M::AASparseMatrix{T}) where T<:Complex = AASparseMatrix(
-    SparseGetConjugateTranspose(M.matrix), M._colptr, M._rowval, M._nzval)
+function Base.adjoint(M::AASparseMatrix{T}) where T<:Complex
+    attrs = M.matrix.structure.attributes
+    # libSparse traps on adjoint of a transpose-only matrix.
+    !((attrs & ATT_TRANSPOSE) != 0 && (attrs & ATT_CONJUGATE_TRANSPOSE) == 0) ||
+        throw(ArgumentError("cannot adjoint an already-transposed AASparseMatrix " *
+            "(libSparse cannot represent the resulting `conj(A)` view; " *
+            "apply `conj` to the underlying data instead)"))
+    AASparseMatrix(SparseGetConjugateTranspose(M.matrix),
+                   M._colptr, M._rowval, M._nzval)
+end
 
 function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
     size(x)[1] == size(A)[2] || throw(DimensionMismatch(
@@ -988,11 +1015,14 @@ function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
         if kind == SparseFactorizationTBD
-            # Cholesky for symmetric; on macOS 15.5+ LU for square non-symmetric
-            # (faster than QR for square solves); QR otherwise.
+            # Cholesky for Hermitian (incl. real symmetric); LDLT for complex-
+            # symmetric-not-Hermitian (LDLT honors ATT_SYMMETRIC + lower-triangle
+            # storage; LU does not, so it would silently use only half the data);
+            # LU for square non-symmetric (macOS 15.5+); QR otherwise.
             nrow, ncol = size(aa_fact.matrixObj)
             lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
             kind = ishermitian(aa_fact.matrixObj) ? SparseFactorizationCholesky :
+                   issymmetric(aa_fact.matrixObj) ? SparseFactorizationLDLT :
                    (nrow == ncol && lu_ok)         ? SparseFactorizationLU :
                                                      SparseFactorizationQR
         end
