@@ -431,6 +431,22 @@ end
     @test !all(iszero, Y[2])
 end
 
+@testset "Multi-channel Biquad layout (sections × channels)" begin
+    # Distinct per-channel gains with 2 cascaded sections verify both the
+    # (sections, channels) setup argument order and the section-major
+    # coefficient layout. With sections=1 these would be indistinguishable.
+    #   channel 0: two passthrough sections        -> y = x
+    #   channel 1: gains of 2 then 3 (cascaded)     -> y = 6x
+    x = Float32.(collect(1:8))
+    # section-major: [sec0_ch0, sec0_ch1, sec1_ch0, sec1_ch1], each [b0,b1,b2,a1,a2]
+    c = [1.0,0,0,0,0,  2.0,0,0,0,0,     # section 0: ch0 passthrough, ch1 ×2
+         1.0,0,0,0,0,  3.0,0,0,0,0]     # section 1: ch0 passthrough, ch1 ×3
+    setup = AppleAccelerate.biquadm_create(c, 2, 2, Float32)
+    Y = AppleAccelerate.biquadm([copy(x), copy(x)], 8, setup)
+    @test Y[1] ≈ x
+    @test Y[2] ≈ 6 .* x
+end
+
 @testset "deq22 (recursive filter)" begin
     for T in (Float32, Float64)
         @testset "$T" begin
