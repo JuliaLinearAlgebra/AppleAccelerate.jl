@@ -1,0 +1,9 @@
+coverage:
+  status:
+    project:
+      default:
+        # Report coverage but never fail the CI status check.
+        informational: true
+    patch:
+      default:
+        informational: true

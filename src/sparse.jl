@@ -943,9 +943,10 @@ Computes y += A*x in place. Note that this modifies its LAST argument.
 """
 function muladd!(A::AASparseMatrix{T}, x::StridedVecOrMat{T},
                     y::StridedVecOrMat{T}) where T<:vTypes
-    (size(x) == size(y) && size(x)[1] == size(A)[2]) || throw(DimensionMismatch(
-        "Matrix and right-hand side size mismatch: got "
-        * "$(size(A)[2]) and $(size(x, 1))"))
+    (size(x, 1) == size(A)[2] && size(y, 1) == size(A)[1] &&
+        size(x)[2:end] == size(y)[2:end]) || throw(DimensionMismatch(
+        "Dimension mismatch in y += A*x: A is $(size(A)), "
+        * "x is $(size(x)), y is $(size(y))"))
     SparseMultiplyAdd(A.matrix, x, y)
 end
 
@@ -954,9 +955,10 @@ Computes y += alpha*A*x in place. Note that this modifies its LAST argument.
 """
 function muladd!(alpha::T, A::AASparseMatrix{T},
                 x::StridedVecOrMat{T}, y::StridedVecOrMat{T}) where T<:vTypes
-    (size(x) == size(y) && size(x)[1] == size(A)[2]) || throw(DimensionMismatch(
-        "Matrix and right-hand side size mismatch: got "
-        * "$(size(A)[2]) and $(size(x, 1))"))
+    (size(x, 1) == size(A)[2] && size(y, 1) == size(A)[1] &&
+        size(x)[2:end] == size(y)[2:end]) || throw(DimensionMismatch(
+        "Dimension mismatch in y += alpha*A*x: A is $(size(A)), "
+        * "x is $(size(x)), y is $(size(y))"))
     SparseMultiplyAdd(alpha, A.matrix, x, y)
 end
 
@@ -1066,9 +1068,9 @@ The factorization is computed lazily on the first call if not already factored.
 Equivalent to `f \\ b`.
 """
 function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTypes
-    size(aa_fact.matrixObj)[2] != size(b, 1) && throw(DimensionMismatch(
+    size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
         "Matrix and right-hand side size mismatch: got "
-        * "$(size(aa_fact.matrixObj)[2]) and $(size(b, 1))"))
+        * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
     factor!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
@@ -1100,9 +1102,9 @@ LinearAlgebra.ldiv!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T
 function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
                             aa_fact::AAFactorization{T},
                             b::StridedVecOrMat{T}) where T<:vTypes
-    size(aa_fact.matrixObj)[2] != size(b, 1) && throw(DimensionMismatch(
+    size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
         "Matrix and right-hand side size mismatch: got "
-        * "$(size(aa_fact.matrixObj)[2]) and $(size(b, 1))"))
+        * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
     size(aa_fact.matrixObj)[2] != size(x, 1) && throw(DimensionMismatch(
         "Matrix and output size mismatch: got "
         * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))

@@ -27,16 +27,18 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             # less copy-paste heavy way via meta programming features?
             for T in (Float32, Float64)
                 @eval begin
-                    dense = rand($T, 3,3)
-                    denseV = rand($T, 3)
+                    # Non-square (3 rows × 4 cols): the input operands have 4
+                    # rows (the column count) and the results have 3.
+                    dense = rand($T, 4,3)
+                    denseV = rand($T, 4)
                     dense2 = zeros($T, 3,3)
                     denseV2 = zeros($T, 3)
-                    sparseM = sprand($T, 3, 3, 0.5)
+                    sparseM = sprand($T, 3, 4, 0.5)
                     sparse_data = sparseM.nzval
                     col_inds =  Clong.(sparseM.colptr .+ -1)
                     row_inds = Cint.(sparseM.rowval .+ -1)
                     GC.@preserve col_inds row_inds sparse_data begin
-                        s = AppleAccelerate.SparseMatrixStructure(3, 3,
+                        s = AppleAccelerate.SparseMatrixStructure(3, 4,
                             pointer(col_inds), pointer(row_inds),
                             AppleAccelerate.ATT_ORDINARY, 1
                         )
@@ -68,17 +70,17 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             end
         end
         @testset "cconvert and unsafe_convert dense" begin
-            dense = rand(3,3)
-            denseV = rand(3)
+            dense = rand(4,3)
+            denseV = rand(4)
             dense2 = zeros(3, 3)
             denseV2 = zeros(3)
-            sparseM = sprand(3, 3, 0.5)
+            sparseM = sprand(3, 4, 0.5)
             sparse_data = sparseM.nzval
             col_inds =  Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
             # for lack of a way to call cconvert directly, I'll use the matrix multiply routines.
             GC.@preserve sparse_data col_inds row_inds begin
-                s = AppleAccelerate.SparseMatrixStructure(3, 3,
+                s = AppleAccelerate.SparseMatrixStructure(3, 4,
                         pointer(col_inds), pointer(row_inds),
                         AppleAccelerate.ATT_ORDINARY, 1)
                 sparse_matrix = AppleAccelerate.SparseMatrix{Cdouble}(s, pointer(sparse_data))
@@ -181,22 +183,24 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
     end
     @testset "AASparseMatrix" begin
         @testset "arithmetic" begin
-            N = 10
-            sparseM = sprand(N, N, 0.3)
+            # Non-square (R rows, C cols) so a row/column mix-up in the
+            # multiply/muladd wrappers can't slip through.
+            R, C = 10, 7
+            sparseM = sprand(R, C, 0.3)
             alpha = rand(Float64)
             aaM = AASparseMatrix(sparseM)
-            X, x = rand(N, N), rand(N)
+            X, x = rand(C, 4), rand(C)
             @test aaM*x ≈ sparseM*x
             @test aaM*X ≈ sparseM*X
             @test alpha*aaM*x ≈ alpha*sparseM*x
             @test alpha*aaM*X ≈ alpha*sparseM*X
-            Y, y = rand(N,N), rand(N)
+            Y, y = rand(R, 4), rand(R)
             FMA, fma = sparseM*X + Y, sparseM*x + y
             muladd!(aaM, x, y)
             muladd!(aaM, X, Y)
             @test Y ≈ FMA
             @test y ≈ fma
-            Y, y = rand(N,N), rand(N)
+            Y, y = rand(R, 4), rand(R)
             FMA2, fma2 = alpha*sparseM*X + Y, alpha*sparseM*x + y
             muladd!(alpha, aaM, x, y)
             muladd!(alpha, aaM, X, Y)
@@ -284,6 +288,17 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                     @test solve(test_fact, b) ≈ Array(jlA) \ b
                     @test test_fact \ B ≈ Array(jlA) \ B
                     @test test_fact \ b ≈ Array(jlA) \ b
+
+                    # Overdetermined (tall) system: QR solve should match the
+                    # dense least-squares solution. The rhs has N rows and the
+                    # solution has M = N ÷ 2 rows.
+                    M = N ÷ 2
+                    tallA = sprand($T, N, M, 0.3) + $T(N) * [I; spzeros($T, N - M, M)]
+                    tall_fact = AAFactorization(tallA)
+                    Btall = rand($T, N, 3)
+                    @test solve(tall_fact, Btall) ≈ Array(tallA) \ Btall
+                    btall = rand($T, N)
+                    @test solve(tall_fact, btall) ≈ Array(tallA) \ btall
                 end
             end
         end
@@ -334,19 +349,21 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 jlA = sprand(Float64, N, M, 0.5)
             end
             f = AAFactorization(jlA)
+            # For an N×M matrix the right-hand side must have N rows (one entry
+            # per equation) and the solution must have M rows (one per unknown).
 
-            # Test solve with wrong dimension vector
-            wrong_b = rand(Float64, N)  # should be M
+            # Test solve with wrong dimension vector (needs N rows, not M)
+            wrong_b = rand(Float64, M)
             @test_throws DimensionMismatch solve(f, wrong_b)
 
-            # Test solve with wrong dimension matrix
-            wrong_B = rand(Float64, N, 3)  # should be M x 3
+            # Test solve with wrong dimension matrix (needs N rows, not M)
+            wrong_B = rand(Float64, M, 3)
             @test_throws DimensionMismatch solve(f, wrong_B)
 
-            # Test ldiv! with wrong dimensions
-            x = rand(Float64, N)
-            b = rand(Float64, M)
-            @test_throws DimensionMismatch LinearAlgebra.ldiv!(x, f, b)
+            # Test ldiv! with a correctly-sized rhs but wrong-sized output
+            good_b = rand(Float64, N)
+            wrong_x = rand(Float64, N)  # should have M rows
+            @test_throws DimensionMismatch LinearAlgebra.ldiv!(wrong_x, f, good_b)
         end
 
         @testset "ArgumentError for in-place solve" begin
