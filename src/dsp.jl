@@ -299,6 +299,12 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
         Creates a multi-channel biquad IIR filter setup. `coefficients` must contain
         `5 * channels * sections` Float64 values. Delay values are initialized to zero.
 
+        The coefficients are laid out section-major: for each section (outer), the
+        five values `[b0, b1, b2, a1, a2]` are given for every channel (inner). That
+        is, element `5 * (section * channels + channel)` begins the block for a given
+        `(section, channel)`. With a single section this is just the per-channel
+        blocks back to back.
+
         Returns: BiquadMulti{$($T)}
         """
         function biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int, ::Type{$T})
@@ -347,7 +353,10 @@ biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int) =
     biquadm_create(coefficients, channels, sections, [T=Float32])
 
 Create a multi-channel biquad IIR filter setup. `coefficients` must contain
-`5 * channels * sections` Float64 values. Returns a `BiquadMulti{T}` setup object.
+`5 * channels * sections` Float64 values, laid out section-major: for each
+section, the `[b0, b1, b2, a1, a2]` block is given for every channel (so element
+`5 * (section * channels + channel)` starts a given `(section, channel)` block).
+Returns a `BiquadMulti{T}` setup object.
 Wraps [`vDSP_biquadm_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_createsetup).
 """
 biquadm_create

@@ -1705,9 +1705,14 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             nr, nc = size(A)
             size(F) == (3, 3) || throw(DimensionMismatch("Filter must be 3×3"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            # vDSP interprets data in row-major order; Julia matrices are
+            # column-major, so a (nr, nc) Julia matrix is laid out as an
+            # (nc, nr) row-major image. Swap the dimensions so the convolution
+            # operates on the intended matrix (and the result reads back
+            # correctly as a column-major (nr, nc) matrix).
             ccall(($(string("vDSP_f3x3", suff)), libacc), Cvoid,
                   (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
-                  A, UInt64(nr), UInt64(nc), F, C)
+                  A, UInt64(nc), UInt64(nr), F, C)
             return C
         end
         function f3x3(A::Matrix{$T}, F::Matrix{$T})
@@ -1718,9 +1723,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             nr, nc = size(A)
             size(F) == (5, 5) || throw(DimensionMismatch("Filter must be 5×5"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            # See note in `f3x3!`: swap dims for row-major vs column-major.
             ccall(($(string("vDSP_f5x5", suff)), libacc), Cvoid,
                   (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
-                  A, UInt64(nr), UInt64(nc), F, C)
+                  A, UInt64(nc), UInt64(nr), F, C)
             return C
         end
         function f5x5(A::Matrix{$T}, F::Matrix{$T})
@@ -1731,9 +1737,11 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             nr, nc = size(A)
             fr, fc = size(F)
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
+            # See note in `f3x3!`: vDSP reads row-major while Julia is
+            # column-major, so swap both the image and filter dimensions.
             ccall(($(string("vDSP_imgfir", suff)), libacc), Cvoid,
                   (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}, UInt64, UInt64),
-                  A, UInt64(nr), UInt64(nc), F, C, UInt64(fr), UInt64(fc))
+                  A, UInt64(nc), UInt64(nr), F, C, UInt64(fc), UInt64(fr))
             return C
         end
         function imgfir(A::Matrix{$T}, F::Matrix{$T})
