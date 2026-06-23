@@ -3,9 +3,9 @@
 using SparseArrays
 using Libdl
 
-# header found at: /Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/System/
-# Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/
-# Versions/A/Headers/Sparse/Solve.h (replace MacOSX15 with correct version number)
+# To find most recent header:
+# "$(xcrun --show-sdk-path)/System/Library/Frameworks/Accelerate.framework/
+# Versions/A/Frameworks/vecLib.framework/Versions/A/Headers/Sparse/Solve.h"
 
 # unused. But if I can find a library that supports C-style structs
 # of packed bitflags with enum fields, then I'll want them.
@@ -30,6 +30,12 @@ end=#
     SparseFactorizationLDLTTPP = 4
     SparseFactorizationQR = 40
     SparseFactorizationCholeskyAtA = 41
+    # LU variants require macOS 15.5+. Calling them on older versions returns
+    # SparseParameterError from libSparse, which factor!'s status check surfaces.
+    SparseFactorizationLU = 80
+    SparseFactorizationLUUnpivoted = 81
+    SparseFactorizationLUSPP = 82
+    SparseFactorizationLUTPP = 83
     SparseFactorizationTBD = 64 # my own addition.
 end
 
@@ -39,12 +45,17 @@ end
     SparseOrderAMD = 2
     SparseOrderMetis = 3
     SparseOrderCOLAMD = 4
+    SparseOrderMTMetis = 5 # macOS 26+
 end
 
 @enum SparseScaling_t::UInt8 begin
     SpraseScalingDefault = 0
     SparseScalingUser = 1
     SparseScalingEquilibriationInf = 2
+    # macOS 26+. Hungarian-and-ordering is only valid in a combined
+    # symbolic+numeric SparseFactor call, and only for LU. Untested.
+    SparseScalingHungarianScalingOnly = 3
+    SparseScalingHungarianScalingAndOrdering = 4
 end
 
 @enum SparseStatus_t::Int32 begin
@@ -56,27 +67,65 @@ end
     SparseYetToBeFactored = -5 # my own addition.
     SparseStatusReleased = -2147483647
 end
+# Apple renamed SparseStatusFailed to SparseFactorizationFailed in newer SDKs.
+const SparseFactorizationFailed = SparseStatusFailed
 
 @enum SparseControl_t::UInt32 begin
     SparseDefaultControl = 0
 end
 
-# can't implement SparseAttributes directly. Workaround:
+# Julia can't represent C bitfields directly, so we work at the bit level: define
+# constants and shift to appropriate offsets. In the header, 2 separate structs:
+# SparseAttributes_t and SparseAttributesComplex_t, but similar enough to treat together.
 const att_type = Cuint
-const ATT_TRANSPOSE = att_type(1)
-const ATT_UPPER_TRIANGLE = att_type(0)
-const ATT_LOWER_TRIANGLE = att_type(2)
-const ATT_ORDINARY = att_type(0)
-const ATT_TRIANGULAR = att_type(4)
-const ATT_UNIT_TRIANGULAR = att_type(8)
-const ATT_SYMMETRIC = att_type(12)
-const ATT_ALLOCATED_BY_SPARSE = att_type(1) << 15
+
+# Kind takes up 1 additional bit for complex (Hermitian).
+const _WIDTH_KIND_REAL    = 2
+const _WIDTH_KIND_COMPLEX = 3
+
+# Bit positions.
+const _SHIFT_TRANSPOSE           = 0
+const _SHIFT_TRIANGLE            = 1
+const _SHIFT_KIND                = 2
+const _SHIFT_CONJUGATE_TRANSPOSE = _SHIFT_KIND + _WIDTH_KIND_COMPLEX
+const _SHIFT_ALLOCATED           = 15
+
+# Bitfields, lsb to msb:
+# (1) bool transpose: 1 bit
+const ATT_TRANSPOSE           = att_type(1) << _SHIFT_TRANSPOSE
+
+# (2) SparseTriangle_t: 1 bit
+const ATT_UPPER_TRIANGLE      = att_type(0) << _SHIFT_TRIANGLE
+const ATT_LOWER_TRIANGLE      = att_type(1) << _SHIFT_TRIANGLE
+
+# (3) SparseKind_t: 2 bits for real, 3 bits for complex (to accommodate Hermitian)
+#     Ordinary=0, Triangular=1, UnitTriangular=2, Symmetric=3, Hermitian=7 (complex only).
+const ATT_ORDINARY        = att_type(0) << _SHIFT_KIND
+const ATT_TRIANGULAR      = att_type(1) << _SHIFT_KIND
+const ATT_UNIT_TRIANGULAR = att_type(2) << _SHIFT_KIND
+const ATT_SYMMETRIC       = att_type(3) << _SHIFT_KIND
+const ATT_HERMITIAN       = att_type(7) << _SHIFT_KIND
+
+# (4) bool conjugate_transpose: 1 bit, complex only
+const ATT_CONJUGATE_TRANSPOSE = att_type(1) << _SHIFT_CONJUGATE_TRANSPOSE
+
+# _reserved: middle bits "for future expansion." skip.
+
+# (5) bool _allocatedBySparse: highest 1 bit.
+const ATT_ALLOCATED_BY_SPARSE = att_type(1) << _SHIFT_ALLOCATED
+
+# Masks for extracting fields
+const ATT_TRIANGLE_MASK     = att_type(1) << _SHIFT_TRIANGLE
+const ATT_KIND_MASK         = ((att_type(1) << _WIDTH_KIND_REAL)    - 1) << _SHIFT_KIND
+const ATT_KIND_MASK_COMPLEX = ((att_type(1) << _WIDTH_KIND_COMPLEX) - 1) << _SHIFT_KIND
+attr_mask(::Type{<:Complex}) = ATT_KIND_MASK_COMPLEX
+attr_mask(::Type{<:Real})    = ATT_KIND_MASK
+
+# Convenience combinations
 const ATT_TRI_LOWER = ATT_TRIANGULAR | ATT_LOWER_TRIANGLE
 const ATT_TRI_UPPER = ATT_TRIANGULAR | ATT_UPPER_TRIANGLE
-const ATT_KIND_MASK = att_type(12)
-const ATT_TRIANGLE_MASK = att_type(4)
 
-const vTypes = Union{Cfloat, Cdouble}
+const vTypes = Union{Cfloat, Cdouble, ComplexF32, ComplexF64}
 
 struct SparseMatrixStructure
     rowCount::Cint
@@ -96,12 +145,13 @@ struct SparseNumericFactorOptions
 end
 
 # default tolerance parameters found in SolveImplementation.h header.
+# For complex types, use the real-part's eps and precision tier.
 SparseNumericFactorOptions(T::Type) = SparseNumericFactorOptions(
     SparseDefaultControl,
     SpraseScalingDefault,
     C_NULL,
-    T == Cfloat ? 0.1 : 0.01,
-    eps(T)*1e-4
+    real(T) == Float32 ? 0.1 : 0.01,
+    eps(real(T))*1e-4
 )
 
 # Note: to use system defaults, values of malloc/free should be
@@ -315,6 +365,33 @@ end
     Cvoid,
     Cdouble,  SparseMatrix, StridedVector, StridedVector)
 
+# complex variants of SparseMultiply (macOS 15.5+). Note: scaled-multiply mangling
+# uses Cf/Cd (not f/d) since the scalar is float/double complex.
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply26SparseMatrix_Complex_Float25DenseVector_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiply27SparseMatrix_Complex_Double26DenseVector_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyCf26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS1_,
+    ComplexF32, Cvoid, ComplexF32, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyCd27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS1_,
+    ComplexF64, Cvoid, ComplexF64, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyCf26SparseMatrix_Complex_Float25DenseVector_Complex_FloatS1_,
+    ComplexF32, Cvoid, ComplexF32, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiply,
+    :_Z14SparseMultiplyCd27SparseMatrix_Complex_Double26DenseVector_Complex_DoubleS1_,
+    ComplexF64, Cvoid, ComplexF64, SparseMatrix, StridedVector, StridedVector)
+
 # dense matrix += sparse * (dense matrix)
 @generateDemangled(SparseMultiplyAdd,
     :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_,
@@ -367,6 +444,32 @@ end
     Cvoid,
     Cdouble, SparseMatrix, StridedVector, StridedVector)
 
+# complex variants of SparseMultiplyAdd (macOS 15.5+). Scaled mangling uses Cf/Cd.
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd26SparseMatrix_Complex_Float25DenseVector_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAdd27SparseMatrix_Complex_Double26DenseVector_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddCf26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS1_,
+    ComplexF32, Cvoid, ComplexF32, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddCd27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS1_,
+    ComplexF64, Cvoid, ComplexF64, SparseMatrix, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddCf26SparseMatrix_Complex_Float25DenseVector_Complex_FloatS1_,
+    ComplexF32, Cvoid, ComplexF32, SparseMatrix, StridedVector, StridedVector)
+@generateDemangled(SparseMultiplyAdd,
+    :_Z17SparseMultiplyAddCd27SparseMatrix_Complex_Double26DenseVector_Complex_DoubleS1_,
+    ComplexF64, Cvoid, ComplexF64, SparseMatrix, StridedVector, StridedVector)
+
 # transpose of matrix
 @generateDemangled(SparseGetTranspose,
     :_Z18SparseGetTranspose18SparseMatrix_Float,
@@ -392,6 +495,35 @@ end
     Cdouble,
     SparseOpaqueFactorization,
     SparseOpaqueFactorization)
+
+# complex variants of SparseGetTranspose (macOS 15.5+)
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose26SparseMatrix_Complex_Float,
+    ComplexF32, SparseMatrix, SparseMatrix)
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose27SparseMatrix_Complex_Double,
+    ComplexF64, SparseMatrix, SparseMatrix)
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose39SparseOpaqueFactorization_Complex_Float,
+    ComplexF32, SparseOpaqueFactorization, SparseOpaqueFactorization)
+@generateDemangled(SparseGetTranspose,
+    :_Z18SparseGetTranspose40SparseOpaqueFactorization_Complex_Double,
+    ComplexF64, SparseOpaqueFactorization, SparseOpaqueFactorization)
+
+# conjugate-transpose: complex-only (no real analogue, since for real it == transpose).
+# Flips the conjugate_transpose attribute bit; underlying CSC data unchanged.
+@generateDemangled(SparseGetConjugateTranspose,
+    :_Z27SparseGetConjugateTranspose26SparseMatrix_Complex_Float,
+    ComplexF32, SparseMatrix, SparseMatrix)
+@generateDemangled(SparseGetConjugateTranspose,
+    :_Z27SparseGetConjugateTranspose27SparseMatrix_Complex_Double,
+    ComplexF64, SparseMatrix, SparseMatrix)
+@generateDemangled(SparseGetConjugateTranspose,
+    :_Z27SparseGetConjugateTranspose39SparseOpaqueFactorization_Complex_Float,
+    ComplexF32, SparseOpaqueFactorization, SparseOpaqueFactorization)
+@generateDemangled(SparseGetConjugateTranspose,
+    :_Z27SparseGetConjugateTranspose40SparseOpaqueFactorization_Complex_Double,
+    ComplexF64, SparseOpaqueFactorization, SparseOpaqueFactorization)
 
 # TODO: these 4 SparseConvertFromCoord functions are unused and untested.
 @generateDemangled(SparseConvertFromCoordinate,
@@ -446,6 +578,20 @@ end
     SparseOpaqueFactorization
 )
 
+# complex variants of SparseCleanup (macOS 15.5+)
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup26SparseMatrix_Complex_Float,
+    ComplexF32, Cvoid, SparseMatrix)
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup27SparseMatrix_Complex_Double,
+    ComplexF64, Cvoid, SparseMatrix)
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup39SparseOpaqueFactorization_Complex_Float,
+    ComplexF32, Cvoid, SparseOpaqueFactorization)
+@generateDemangled(SparseCleanup,
+    :_Z13SparseCleanup40SparseOpaqueFactorization_Complex_Double,
+    ComplexF64, Cvoid, SparseOpaqueFactorization)
+
 # factor: factorization type, matrix
 # additional outer function for error handling with the added TBD factorization type.
 # The "NoErrors" part: if the call throws, Julia won't recognize the thrown
@@ -463,6 +609,16 @@ end
     SparseOpaqueFactorization,
     SparseFactorization_t, SparseMatrix
 )
+
+# complex variants of _SparseFactorNoErrors_inner (macOS 15.5+)
+@generateDemangled(_SparseFactorNoErrors_inner,
+    :_Z12SparseFactorh26SparseMatrix_Complex_Float,
+    ComplexF32, SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix)
+@generateDemangled(_SparseFactorNoErrors_inner,
+    :_Z12SparseFactorh27SparseMatrix_Complex_Double,
+    ComplexF64, SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix)
 
 function SparseFactorNoErrors(arg1::SparseFactorization_t,
                             arg2::SparseMatrix{T}) where T <: vTypes
@@ -486,6 +642,16 @@ end
     SparseFactorization_t, SparseMatrix, SparseSymbolicFactorOptions, SparseNumericFactorOptions
 )
 
+# complex variants of _SparseFactor_inner (macOS 15.5+)
+@generateDemangled(_SparseFactor_inner,
+    :_Z12SparseFactorh26SparseMatrix_Complex_Float27SparseSymbolicFactorOptions26SparseNumericFactorOptions,
+    ComplexF32, SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix, SparseSymbolicFactorOptions, SparseNumericFactorOptions)
+@generateDemangled(_SparseFactor_inner,
+    :_Z12SparseFactorh27SparseMatrix_Complex_Double27SparseSymbolicFactorOptions26SparseNumericFactorOptions,
+    ComplexF64, SparseOpaqueFactorization,
+    SparseFactorization_t, SparseMatrix, SparseSymbolicFactorOptions, SparseNumericFactorOptions)
+
 function SparseFactor(arg1::SparseFactorization_t,
                         arg2::SparseMatrix{T},
                         arg3::SparseSymbolicFactorOptions,
@@ -493,6 +659,9 @@ function SparseFactor(arg1::SparseFactorization_t,
     arg1 != SparseFactorizationTBD || throw(ArgumentError("Factorization type must be specified"))
     _SparseFactor_inner(arg1, arg2, arg3, arg4)
 end
+
+# TODO: SparseSolve variants that take a trailing `void*` workspace pointer, for repeated
+# factorizations. would require adding a workspace buffer to AAFactorization.
 
 # in-place solve, matrix RHS
 @generateDemangled(SparseSolve,
@@ -509,6 +678,14 @@ end
     SparseOpaqueFactorization, StridedMatrix
 )
 
+# complex variants of in-place matrix solve (macOS 15.5+)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseMatrix_Complex_Float,
+    ComplexF32, Cvoid, SparseOpaqueFactorization, StridedMatrix)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseMatrix_Complex_Double,
+    ComplexF64, Cvoid, SparseOpaqueFactorization, StridedMatrix)
+
 # solve, matrix RHS (modifies 3nd argument instead of returning)
 @generateDemangled(SparseSolve,
     :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatS0_,
@@ -524,14 +701,26 @@ end
     SparseOpaqueFactorization, StridedMatrix, StridedMatrix
 )
 
+# complex variants of solve-with-output, matrix RHS (macOS 15.5+)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseMatrix_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseOpaqueFactorization, StridedMatrix, StridedMatrix)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseMatrix_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseOpaqueFactorization, StridedMatrix, StridedMatrix)
+
 # in-place solve, vector RHS. The resize call prevents me from doing @generateDemangled.
-for T in (Cdouble, Cfloat)
-    local sparseSolveVecInPlace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_Float :
-                                :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_Double
+const _SOLVE_VEC_INPLACE_SYM = Dict(
+    Cfloat     => :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_Float,
+    Cdouble    => :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_Double,
+    ComplexF32 => :_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseVector_Complex_Float,
+    ComplexF64 => :_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseVector_Complex_Double,
+)
+for (T, sym) in _SOLVE_VEC_INPLACE_SYM
     @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
                                 arg2::StridedVector{$T})
-        @ccall LIBSPARSE.$sparseSolveVecInPlace(arg1::SparseOpaqueFactorization{$T},
-                                            arg2::DenseVector{$T})::Cvoid
+        @ccall LIBSPARSE.$sym(arg1::SparseOpaqueFactorization{$T},
+                              arg2::DenseVector{$T})::Cvoid
         resize!(arg2, arg1.symbolicFactorization.columnCount)
     end
 end
@@ -551,11 +740,19 @@ end
     SparseOpaqueFactorization, StridedVector,StridedVector
 )
 
+# complex variants of solve-with-output, vector RHS (macOS 15.5+)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseVector_Complex_FloatS0_,
+    ComplexF32, Cvoid, SparseOpaqueFactorization, StridedVector, StridedVector)
+@generateDemangled(SparseSolve,
+    :_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseVector_Complex_DoubleS0_,
+    ComplexF64, Cvoid, SparseOpaqueFactorization, StridedVector, StridedVector)
+
 # calls to SparseFactor default to the version with error handling.
 SparseFactor(arg1::SparseFactorization_t,
                         arg2::SparseMatrix{T},
                         noErrors::Bool = false) where T <: vTypes =
-                noErrors ? SparseFactor(arg1, arg2) :
+                noErrors ? SparseFactorNoErrors(arg1, arg2) :
                 SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(),
                                          SparseNumericFactorOptions(T))
 
@@ -574,21 +771,26 @@ end
 
 # keep just in case libSparse's default malloc/free cooperate better
 # with the library code (due to being from Objective-C, not from C)
-SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
-    LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
+# TODO: libSparse also exposes symbolic-only SparseFactor variants taking
+# `SparseMatrixStructureComplex` (e.g. _Z12SparseFactorh28SparseMatrixStructureComplex)
+# for complex matrices. Not wrapped here — the symbolic-only path is barely
+# used today, and adding it would require introducing a complex-attributes
+# variant of SparseMatrixStructure.
+function SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure)
+    @ccall LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
         arg1::Cuint, arg2::SparseMatrixStructure
     )::SparseOpaqueSymbolicFactorization
-)
+end
 
-SparseFactor(arg1::SparseFactorization_t,
+function SparseFactor(arg1::SparseFactorization_t,
             arg2::SparseMatrixStructure,
-            arg3::SparseSymbolicFactorOptions) = @ccall(
-     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure27SparseSymbolicFactorOptions(
+            arg3::SparseSymbolicFactorOptions)
+    @ccall LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure27SparseSymbolicFactorOptions(
                 arg1::Cuint,
                 arg2::SparseMatrixStructure,
                 arg3::SparseSymbolicFactorOptions
     )::SparseOpaqueSymbolicFactorization
-)
+end
 
 # ============================================================
 # AASparseMatrix
@@ -630,10 +832,13 @@ end
 
 function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
                         attributes::att_type = ATT_ORDINARY) where T<:vTypes
-    if issymmetric(sparseM) && attributes == ATT_ORDINARY
-        return AASparseMatrix(tril(sparseM), ATT_SYMMETRIC | ATT_LOWER_TRIANGLE)
-    elseif (istril(sparseM) || istriu(sparseM)) && attributes == ATT_ORDINARY
-        attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
+    if attributes == ATT_ORDINARY
+        if ishermitian(sparseM)
+            kind = T <: Complex ? ATT_HERMITIAN : ATT_SYMMETRIC
+            return AASparseMatrix(tril(sparseM), kind | ATT_LOWER_TRIANGLE)
+        elseif istril(sparseM) || istriu(sparseM)
+            attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
+        end
     end
     if attributes in (ATT_TRI_LOWER, ATT_TRI_UPPER) &&
                     all(diag(sparseM) .== one(eltype(sparseM)))
@@ -645,37 +850,74 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
     return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
 end
 
-Base.size(M::AASparseMatrix) = (M.matrix.structure.rowCount,
-                                    M.matrix.structure.columnCount)
-Base.eltype(M::AASparseMatrix) = eltype(M._nzval)
-LinearAlgebra.issymmetric(M::AASparseMatrix) = (M.matrix.structure.attributes &
-                                                ATT_KIND_MASK) == ATT_SYMMETRIC
-istri(M::AASparseMatrix) = (M.matrix.structure.attributes
-                                    & ATT_KIND_MASK) == ATT_TRIANGULAR
-LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_LOWER_TRIANGLE == ATT_UPPER_TRIANGLE)
-LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_LOWER_TRIANGLE == ATT_LOWER_TRIANGLE)
+# Apple stores the underlying CSC dimensions and uses the transpose attribute
+# bit to "implicitly transpose" the matrix on subsequent ops. Julia callers
+# expect `size(transpose(A))` to reverse the dimensions, so we honor the bit
+# here — matching the contract of `LinearAlgebra.Adjoint` / `Transpose`.
+function Base.size(M::AASparseMatrix)
+    nrow = Int(M.matrix.structure.rowCount)
+    ncol = Int(M.matrix.structure.columnCount)
+    return (M.matrix.structure.attributes & ATT_TRANSPOSE) != 0 ?
+        (ncol, nrow) : (nrow, ncol)
+end
 
-function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
+LinearAlgebra.issymmetric(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes &
+                                                attr_mask(T)) == ATT_SYMMETRIC
+LinearAlgebra.ishermitian(M::AASparseMatrix{<:Complex}) = (M.matrix.structure.attributes &
+                                                ATT_KIND_MASK_COMPLEX) == ATT_HERMITIAN
+LinearAlgebra.ishermitian(M::AASparseMatrix{<:Real}) = issymmetric(M)
+istri(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes
+                                    & attr_mask(T)) == ATT_TRIANGULAR
+LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
+                                        ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
+LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
+                                        ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
+
+# Both bits encode adjoint; ct alone is the "no meaning" state that
+# libSparse treats as identity (reachable via adjoint(adjoint(M))).
+_maybe_conjugate(attr::att_type, ::Type{<:Complex}) =
+    (attr & (ATT_TRANSPOSE | ATT_CONJUGATE_TRANSPOSE)) ==
+    (ATT_TRANSPOSE | ATT_CONJUGATE_TRANSPOSE)
+_maybe_conjugate(::att_type, ::Type{<:Real}) = false
+
+function Base.getindex(M::AASparseMatrix{T}, i::Int, j::Int) where T<:vTypes
     ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
-    (startCol, endCol) = (M._colptr[j], M._colptr[j+1]-1) .+ 1
+    # (i,j) is the *logical* index; map back to the raw CSC layout.
+    attrs = M.matrix.structure.attributes
+    transposed = (attrs & ATT_TRANSPOSE) != 0
+    raw_i, raw_j = transposed ? (j, i) : (i, j)
+    (startCol, endCol) = (M._colptr[raw_j], M._colptr[raw_j+1]-1) .+ 1
     rowsInCol = @view M._rowval[startCol:endCol]
-    ind = searchsortedfirst(rowsInCol, i-1)
-    if ind <= length(rowsInCol) && rowsInCol[ind] == i-1
-        return M._nzval[startCol+ind-1]
+    ind = searchsortedfirst(rowsInCol, raw_i-1)
+    if ind <= length(rowsInCol) && rowsInCol[ind] == raw_i-1
+        val = M._nzval[startCol+ind-1]
+        return _maybe_conjugate(attrs, T) ? conj(val) : val
     end
     return zero(eltype(M))
 end
 
-function Base.getindex(M::AASparseMatrix, i::Int)
-    1 <= i <= size(M)[1]*size(M)[2] || throw(BoundsError(M, i))
-    return M[(i-1) % size(M)[1] + 1, div(i-1, size(M)[1]) + 1]
+# libSparse traps when transposing an adjoint (T,T): would land on conj(A).
+function Base.transpose(M::AASparseMatrix)
+    attrs = M.matrix.structure.attributes
+    !((attrs & ATT_TRANSPOSE) != 0 && (attrs & ATT_CONJUGATE_TRANSPOSE) != 0) ||
+        throw(ArgumentError("cannot transpose an already-adjointed AASparseMatrix " *
+            "(libSparse cannot represent the resulting `conj(A)` view; " *
+            "apply `conj` to the underlying data instead)"))
+    AASparseMatrix(SparseGetTranspose(M.matrix), M._colptr, M._rowval, M._nzval)
 end
-# Creates a new structure, referring to the same data,
-# but with the transpose flag (in attributes) flipped.
-Base.transpose(M::AASparseMatrix) = AASparseMatrix(SparseGetTranspose(M.matrix),
-                        M._colptr, M._rowval, M._nzval)
+
+# Real: same as transpose. Complex: flip ct (and toggle t); CSC data shared.
+Base.adjoint(M::AASparseMatrix{<:Real}) = transpose(M)
+function Base.adjoint(M::AASparseMatrix{T}) where T<:Complex
+    attrs = M.matrix.structure.attributes
+    # libSparse traps on adjoint of a transpose-only matrix.
+    !((attrs & ATT_TRANSPOSE) != 0 && (attrs & ATT_CONJUGATE_TRANSPOSE) == 0) ||
+        throw(ArgumentError("cannot adjoint an already-transposed AASparseMatrix " *
+            "(libSparse cannot represent the resulting `conj(A)` view; " *
+            "apply `conj` to the underlying data instead)"))
+    AASparseMatrix(SparseGetConjugateTranspose(M.matrix),
+                   M._colptr, M._rowval, M._nzval)
+end
 
 function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
     size(x)[1] == size(A)[2] || throw(DimensionMismatch(
@@ -761,31 +1003,61 @@ AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
 """
     factor!(f::AAFactorization, [type::SparseFactorization_t])
 
-Explicitly compute the factorization. If `type` is not specified, Cholesky is used
-for symmetric matrices and QR for non-symmetric. Called automatically by [`solve`](@ref)
-if the factorization has not yet been computed.
+Explicitly compute the factorization. If `type` is not specified, the default
+is chosen from the matrix's kind attribute:
+
+  - Hermitian (real symmetric or complex Hermitian) → Cholesky
+  - square, non-Hermitian → LU (macOS 15.5+; falls back to QR on older systems)
+  - rectangular → QR
+
+Called automatically by [`solve`](@ref) if the factorization has not yet been
+computed.
+
+!!! note "Complex symmetric (not Hermitian)"
+    When the user leaves the factorization type unspecified and passes
+    a complex symmetric (but not Hermitian) matrix, we default to LU factorization.
+    
+    On older versions of MacOS, Apple's `SparseFactorizationLDLT` errors on complex
+    symmetric (non-Hermitian) matrices, reporting "Cannot
+    perform Hermitian matrix factorization of non-Hermitian matrix."
+    On newer versions, it accepts the call and performs a true `LDLᵀ` (not `LDLᴴ`).
+    This behavior isn't documented by Apple; the exact version threshold is
+    unknown.
 """
 function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
         if kind == SparseFactorizationTBD
-            # so far I'm only dealing with ordinary and symmetric
-            kind = issymmetric(aa_fact.matrixObj) ? SparseFactorizationCholesky :
-                            SparseFactorizationQR
+            # Cholesky for Hermitian (incl. real symmetric); LU for square
+            # non-Hermitian (macOS 15.5+); QR otherwise.
+            nrow, ncol = size(aa_fact.matrixObj)
+            lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
+            kind = ishermitian(aa_fact.matrixObj) ? SparseFactorizationCholesky :
+                   (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
+                                                    SparseFactorizationQR
         end
         aa_fact._factorization = SparseFactor(kind, aa_fact.matrixObj.matrix)
-        if aa_fact._factorization.status == SparseMatrixIsSingular
-            # throw a SingularException? Factoring a singular matrix usually does not
-            # make it this far: the call to SparseFactor throws an error.
-            throw(ErrorException("The matrix is singular."))
-        elseif aa_fact._factorization.status == SparseStatusFailed
-            throw(ErrorException("Factorization failed: check that the matrix"
-                        * " has the correct properties for the factorization."))
-        elseif aa_fact._factorization.status != SparseStatusOk
-            throw(ErrorException("Something went wrong internally. Error type: "
-                                * string(aa_fact._factorization.status)))
-        end
+        _libsparse_throw(aa_fact._factorization.status, "factor")
     end
+end
+
+# Translate a libSparse status code into a typed Julia exception. SparseStatusOk
+# is a no-op so callers can write `_libsparse_throw(result.status, ...)` after
+# every libSparse call without branching.
+function _libsparse_throw(status::SparseStatus_t, op::AbstractString)
+    status == SparseStatusOk && return
+    status == SparseMatrixIsSingular &&
+        throw(LinearAlgebra.SingularException(0))
+    status == SparseParameterError &&
+        throw(ArgumentError("libSparse $(op) failed: parameter error " *
+            "(possibly: matrix lacks the properties required by this factorization, " *
+            "or factorization is unavailable on this macOS version)"))
+    status == SparseStatusFailed &&
+        error("libSparse $(op) failed (check that the matrix has the correct " *
+              "properties for this factorization)")
+    status == SparseInternalError &&
+        error("libSparse $(op) failed: internal error")
+    error("libSparse $(op) failed: status=$(status)")
 end
 
 """

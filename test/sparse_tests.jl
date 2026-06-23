@@ -5,6 +5,23 @@ using LinearAlgebra
 import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve, solve!
 
 @testset "Sparse Linear Algebra" begin
+    @testset "attribute bitfields" begin
+        AA = AppleAccelerate
+        # Independent C bitfields must not share bits with each other.
+        @test AA.ATT_TRANSPOSE           & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_LOWER_TRIANGLE      & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_CONJUGATE_TRANSPOSE & AA.ATT_KIND_MASK_COMPLEX == 0
+        @test AA.ATT_TRANSPOSE      & AA.ATT_LOWER_TRIANGLE      == 0
+        @test AA.ATT_TRANSPOSE      & AA.ATT_CONJUGATE_TRANSPOSE == 0
+        @test AA.ATT_LOWER_TRIANGLE & AA.ATT_CONJUGATE_TRANSPOSE == 0
+
+        # OR-combined constants must let each field be extracted back via its mask.
+        @test AA.ATT_TRI_LOWER & AA.ATT_KIND_MASK     == AA.ATT_TRIANGULAR
+        @test AA.ATT_TRI_LOWER & AA.ATT_TRIANGLE_MASK == AA.ATT_LOWER_TRIANGLE
+        @test AA.ATT_TRI_UPPER & AA.ATT_KIND_MASK     == AA.ATT_TRIANGULAR
+        @test AA.ATT_TRI_UPPER & AA.ATT_TRIANGLE_MASK == AA.ATT_UPPER_TRIANGLE
+    end
+
     @testset "wrappers" begin
         @testset "SparseMultiply and SparseMultiplyAdd" begin
             # less copy-paste heavy way via meta programming features?
@@ -127,6 +144,42 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 end
             end
         end
+
+        @testset "_libsparse_throw status mapping" begin
+            # Code coverage reasons: no easy was to trigger the SparseInternalError.
+            AA = AppleAccelerate
+            @test AA._libsparse_throw(AA.SparseStatusOk, "x") === nothing
+            @test_throws SingularException AA._libsparse_throw(
+                AA.SparseMatrixIsSingular, "factor")
+            @test_throws ArgumentError AA._libsparse_throw(
+                AA.SparseParameterError, "factor")
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseStatusFailed, "factor")
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseInternalError, "factor")
+            # Unknown / unmapped status falls through to the generic branch.
+            @test_throws ErrorException AA._libsparse_throw(
+                AA.SparseYetToBeFactored, "factor")
+        end
+
+        @testset "SparseFactorNoErrors" begin
+            # SparseFactor(kind, M, true) should route to SparseFactorNoErrors,
+            # which calls libSparse without our error-handling options wrapper.
+            jlA = sprand(Float64, 5, 5, 0.5) + 5.0I
+            aa = AASparseMatrix(jlA)
+            qr = AppleAccelerate.SparseFactorizationQR
+            f = AppleAccelerate.SparseFactor(qr, aa.matrix, true)
+            @test f.status == AppleAccelerate.SparseStatusOk
+            # Use it to solve so we know it produced a working factorization.
+            x = rand(5); b = jlA * x
+            xb = copy(b)
+            AppleAccelerate.SparseSolve(f, xb)
+            @test xb ≈ x
+            AppleAccelerate.SparseCleanup(f)
+            # TBD is rejected at the SparseFactorNoErrors entry point.
+            @test_throws ArgumentError AppleAccelerate.SparseFactorNoErrors(
+                AppleAccelerate.SparseFactorizationTBD, aa.matrix)
+        end
     end
     @testset "AASparseMatrix" begin
         @testset "arithmetic" begin
@@ -180,9 +233,23 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             # retains the original dimensions, so verify the flag is toggled.
             ATT_TRANSP = AppleAccelerate.ATT_TRANSPOSE
             @test (aaMt.matrix.structure.attributes & ATT_TRANSP) != zero(typeof(ATT_TRANSP))
-            # Double transpose clears the flag
+            # Double transpose clears the flag.
             aaMtt = transpose(aaMt)
             @test (aaMtt.matrix.structure.attributes & ATT_TRANSP) == zero(typeof(ATT_TRANSP))
+            # Dimensions reverse under transpose.
+            @test size(aaM)  == (N, M)
+            @test size(aaMt) == (M, N)
+            # Adjoint is tranpose.
+            aaMa = adjoint(aaM)
+            @test (aaMa.matrix.structure.attributes & ATT_TRANSP) != zero(typeof(ATT_TRANSP))
+            @test size(aaMa) == (M, N)
+            x = rand(N)
+            @test aaMa * x ≈ transpose(Array(sparseM)) * x
+
+            # transpose(M)[i,j] equals M[j, i]
+            for I in 1:M, J in 1:N
+                @test aaMt[I, J] == sparseM[J, I]
+            end
         end
         @testset "special matrices" begin
             N = 3
@@ -245,7 +312,8 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 factor!(f)
             catch err1
             end
-            @test occursin("singular", sprint(showerror, err1))
+            @test err1 isa SingularException ||
+                  occursin("singular", lowercase(sprint(showerror, err1)))
 
             err2 = nothing
             temp = sprand(N, N, 0.5)
@@ -341,6 +409,40 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             @test solve(ldlt_fact, b) ≈ x
         end
 
+        something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" && @testset "LU" begin
+            for T in (Float32, Float64)
+                @eval begin
+                    N = 50
+                    # Square, non-symmetric, well-conditioned.
+                    jlA = sprand($T, N, N, 0.1) + $T(N) * I
+                    @test !issymmetric(jlA)
+                    lu_fact = AAFactorization(jlA)
+                    # Default for square non-symmetric should be LU.
+                    factor!(lu_fact)
+                    # Default LU currently resolves to LUTPP internally.
+                    @test lu_fact._factorization.symbolicFactorization.type in
+                        (AppleAccelerate.SparseFactorizationLU,
+                         AppleAccelerate.SparseFactorizationLUUnpivoted,
+                         AppleAccelerate.SparseFactorizationLUSPP,
+                         AppleAccelerate.SparseFactorizationLUTPP)
+                    x = rand($T, N)
+                    X = rand($T, N, 3)
+                    b, B = jlA * x, jlA * X
+                    @test solve(lu_fact, b) ≈ x
+                    @test solve(lu_fact, B) ≈ X
+
+                    # Also exercise the explicit LU variants.
+                    for kind in (AppleAccelerate.SparseFactorizationLUUnpivoted,
+                                 AppleAccelerate.SparseFactorizationLUSPP,
+                                 AppleAccelerate.SparseFactorizationLUTPP)
+                        f2 = AAFactorization(jlA)
+                        factor!(f2, kind)
+                        @test solve(f2, b) ≈ x
+                    end
+                end
+            end
+        end
+
         @testset "non-square in-place solve" begin
             # using high density to avoid structurally singular matrices.
             tallMatrix = sprand(6,3,0.9)
@@ -366,6 +468,115 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             # @test BX ≈ X
         end
     end
+    # Complex sparse support is macOS 15.5+ only.
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" && @testset "Complex" begin
+        @testset "multiply $T" for T in (ComplexF32, ComplexF64)
+            N = 30
+            # Diagonal shift keeps the matrix well-conditioned for the factor/solve tests.
+            jlA = sprand(T, N, N, 0.1) + T(N) * I
+            aaA = AASparseMatrix(jlA)
+            x = rand(T, N)
+            X = rand(T, N, 3)
+            # Sparse * dense matches the dense product.
+            @test aaA * x ≈ Array(jlA) * x
+            @test aaA * X ≈ Array(jlA) * X
+            # Scaled multiply (exercises the Cf/Cd-mangled scalar variant).
+            α = T(2) + T(im) * T(3)
+            @test α * aaA * x ≈ Array(jlA) * (α * x)  # α*A*x = A*(α*x)
+            # muladd!: y += A * x.
+            y = rand(T, N); y0 = copy(y)
+            muladd!(aaA, x, y)
+            @test y ≈ y0 + Array(jlA) * x
+        end
+
+        @testset "adjoint vs transpose $T" for T in (ComplexF32, ComplexF64)
+            N = 8
+            jlA = sprand(T, N, N, 0.5) + T(N) * I
+            aaA = AASparseMatrix(jlA)
+            x = rand(T, N)
+            # transpose and adjoint are distinct for complex.
+            @test transpose(aaA) * x ≈ transpose(Array(jlA)) * x
+            @test adjoint(aaA)  * x ≈ adjoint(Array(jlA))  * x
+            @test transpose(aaA) * x ≉ adjoint(aaA) * x
+            # Round-trip: (A')' has the same action as A.
+            @test adjoint(adjoint(aaA)) * x ≈ aaA * x
+            # getindex on adjoint should swap indices AND conjugate.
+            adjA = adjoint(aaA)
+            for I in 1:N, J in 1:N
+                @test adjA[I, J] == conj(jlA[J, I])
+            end
+            # adjoint(adjoint(M)) lands in the "no meaning" (F, T) attribute state.
+            # libSparse treats that as identity, and so must getindex — i.e., no
+            # accidental conjugation here. Regression guard for the `ct alone`
+            # check that would have silently broken this.
+            adjAdj = adjoint(adjoint(aaA))
+            for I in 1:N, J in 1:N
+                @test adjAdj[I, J] == jlA[I, J]
+            end
+            # libSparse traps on transpose-of-adjoint or adjoint-of-transpose
+            # Our wrappers convert those to clean Julia errors.
+            @test_throws ArgumentError transpose(adjoint(aaA))
+            @test_throws ArgumentError adjoint(transpose(aaA))
+            # (F,T) state from adjoint(adjoint) is libSparse-identity, so
+            # transposing/re-adjointing it is legal and acts on the original.
+            @test transpose(adjoint(adjoint(aaA))) * x ≈ transpose(Array(jlA)) * x
+            @test adjoint(adjoint(adjoint(aaA)))   * x ≈ adjoint(Array(jlA))   * x
+        end
+
+        @testset "complex symmetric (not Hermitian)" begin
+            # Older macOS libSparse rejects LDLT for complex-symmetric matrices
+            # ("Cannot perform Hermitian matrix factorization..."), even though
+            # newer macOS implements it as LDLᵀ correctly. For cross-version
+            # portability we don't auto-tag — these get stored as ordinary and
+            # factored via LU on full storage. See `factor!` docs for details.
+            N = 8
+            T = ComplexF64
+            M = sprand(T, N, N, 0.3)
+            A = sparse(M + transpose(M)) + T(N) * I
+            @assert issymmetric(A) && !ishermitian(A)
+            aaA = AASparseMatrix(A)
+            @test !ishermitian(aaA) && !issymmetric(aaA)  # stored as ordinary
+            f = AAFactorization(aaA)
+            x = rand(T, N)
+            @test solve(f, A * x) ≈ x
+        end
+
+        @testset "Hermitian detection and factor!" begin
+            N = 10
+            T = ComplexF64
+            # Build a Hermitian positive-definite matrix.
+            temp = sprand(T, N, N, 0.3)
+            H = sparse(temp * adjoint(temp) + N * I)
+            @test ishermitian(H) && !issymmetric(H)
+            aaH = AASparseMatrix(H)
+            @test ishermitian(aaH)
+            @test !issymmetric(aaH)
+            # factor! default for a Hermitian matrix should pick Cholesky.
+            f = AAFactorization(aaH)
+            factor!(f)
+            @test f._factorization.symbolicFactorization.type ==
+                  AppleAccelerate.SparseFactorizationCholesky
+            x = rand(T, N)
+            @test solve(f, H * x) ≈ x
+        end
+
+        @testset "factor/solve square non-Hermitian $T" for T in (ComplexF32, ComplexF64)
+            N = 20
+            jlA = sprand(T, N, N, 0.2) + T(N) * I
+            f = AAFactorization(jlA)
+            # Default for square non-Hermitian complex is LU.
+            x = rand(T, N)
+            B = rand(T, N, 2)
+            @test solve(f, jlA * x) ≈ x
+            @test solve(f, jlA * B) ≈ B
+            @test f._factorization.symbolicFactorization.type in
+                (AppleAccelerate.SparseFactorizationLU,
+                 AppleAccelerate.SparseFactorizationLUUnpivoted,
+                 AppleAccelerate.SparseFactorizationLUSPP,
+                 AppleAccelerate.SparseFactorizationLUTPP)
+        end
+    end
+
     @testset "factorize" begin
         # Use 100x100 to avoid singular matrices from small random sparse matrices
         jlM = sprandn(100, 100, 0.3) + 10I
