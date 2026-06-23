@@ -44,6 +44,21 @@ function _vdsp_unsupported(x)
     end
 end
 
+# Is another AbstractFFTs backend (FFTW) loaded that we can hand off to?
+_other_fft_backend_loaded() = any(id.name == "FFTW" for id in keys(Base.loaded_modules))
+
+# vDSP only handles power-of-2 1D/2D transforms. For everything else (odd sizes,
+# 3D+, empty), defer to a general backend if one is loaded — `invoke` skips our
+# own (more specific) `Array{Complex}` methods and lands on FFTW's `StridedArray`
+# method, so loading AppleAccelerate no longer breaks generic `plan_fft` calls.
+# Without such a backend, raise the clear "use FFTW.jl" error.
+function _delegate_unsupported(planner, x, region; kwargs...)
+    _other_fft_backend_loaded() || _vdsp_unsupported(x)
+    return invoke(planner,
+                  Tuple{StridedArray{<:Union{ComplexF64,ComplexF32}}, typeof(region)},
+                  x, region; kwargs...)
+end
+
 # --- Region helpers ---
 # Normalize region to a Set of dimension indices.
 _region_set(region) = Set(collect(region))
@@ -96,37 +111,37 @@ AbstractFFTs.AdjointStyle(::VDSPBFFTPlan) = AbstractFFTs.FFTAdjointStyle()
 # --- Out-of-place plan creation (1D, 2D, N-d) ---
 
 function AbstractFFTs.plan_fft(x::Vector{Complex{T}}, region=1:1; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_fft, x, region; kwargs...)
     setup = FFTSetup{T}(length(x))
     VDSPFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_bfft(x::Vector{Complex{T}}, region=1:1; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_bfft, x, region; kwargs...)
     setup = FFTSetup{T}(length(x))
     VDSPBFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_fft(x::Matrix{Complex{T}}, region=1:2; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_fft, x, region; kwargs...)
     nrows, ncols = size(x)
     setup = FFTSetup{T}(max(nrows, ncols))
     VDSPFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_bfft(x::Matrix{Complex{T}}, region=1:2; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_bfft, x, region; kwargs...)
     nrows, ncols = size(x)
     setup = FFTSetup{T}(max(nrows, ncols))
     VDSPBFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_fft(x::Array{Complex{T},N}, region=1:N; kwargs...) where {T<:Union{Float32,Float64},N}
-    _vdsp_unsupported(x)
+    _delegate_unsupported(AbstractFFTs.plan_fft, x, region; kwargs...)
 end
 
 function AbstractFFTs.plan_bfft(x::Array{Complex{T},N}, region=1:N; kwargs...) where {T<:Union{Float32,Float64},N}
-    _vdsp_unsupported(x)
+    _delegate_unsupported(AbstractFFTs.plan_bfft, x, region; kwargs...)
 end
 
 # --- Out-of-place execution ---
@@ -238,37 +253,37 @@ AbstractFFTs.AdjointStyle(::VDSPInplaceBFFTPlan) = AbstractFFTs.FFTAdjointStyle(
 # --- In-place plan creation (1D, 2D, N-d) ---
 
 function AbstractFFTs.plan_fft!(x::Vector{Complex{T}}, region=1:1; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_fft!, x, region; kwargs...)
     setup = FFTSetup{T}(length(x))
     VDSPInplaceFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_bfft!(x::Vector{Complex{T}}, region=1:1; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_bfft!, x, region; kwargs...)
     setup = FFTSetup{T}(length(x))
     VDSPInplaceBFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_fft!(x::Matrix{Complex{T}}, region=1:2; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_fft!, x, region; kwargs...)
     nrows, ncols = size(x)
     setup = FFTSetup{T}(max(nrows, ncols))
     VDSPInplaceFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_bfft!(x::Matrix{Complex{T}}, region=1:2; kwargs...) where {T<:Union{Float32,Float64}}
-    _can_vdsp(x) || _vdsp_unsupported(x)
+    _can_vdsp(x) || return _delegate_unsupported(AbstractFFTs.plan_bfft!, x, region; kwargs...)
     nrows, ncols = size(x)
     setup = FFTSetup{T}(max(nrows, ncols))
     VDSPInplaceBFFTPlan{T}(setup, size(x), region)
 end
 
 function AbstractFFTs.plan_fft!(x::Array{Complex{T},N}, region=1:N; kwargs...) where {T<:Union{Float32,Float64},N}
-    _vdsp_unsupported(x)
+    _delegate_unsupported(AbstractFFTs.plan_fft!, x, region; kwargs...)
 end
 
 function AbstractFFTs.plan_bfft!(x::Array{Complex{T},N}, region=1:N; kwargs...) where {T<:Union{Float32,Float64},N}
-    _vdsp_unsupported(x)
+    _delegate_unsupported(AbstractFFTs.plan_bfft!, x, region; kwargs...)
 end
 
 # --- In-place execution ---
