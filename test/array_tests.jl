@@ -1120,25 +1120,54 @@ end
 # ============================================================
 # Batch 8: Image Convolution
 # ============================================================
+# Reference zero-padded 2D convolution (correlation, as vDSP computes), used to
+# validate the image-convolution wrappers on non-square inputs and asymmetric
+# filters where any row/column mix-up would show up.
+function naive_imgfir(A::Matrix, F::Matrix)
+    nr, nc = size(A)
+    fr, fc = size(F)
+    pr, pc = fr ÷ 2, fc ÷ 2
+    C = zeros(eltype(A), nr, nc)
+    for i in 1:nr, j in 1:nc
+        s = zero(eltype(A))
+        for u in 1:fr, v in 1:fc
+            ai = i + (u - 1 - pr)
+            aj = j + (v - 1 - pc)
+            (1 <= ai <= nr && 1 <= aj <= nc) || continue
+            s += A[ai, aj] * F[u, v]
+        end
+        C[i, j] = s
+    end
+    return C
+end
+
 for T in (Float32, Float64)
     @testset "vDSP Image Convolution::$T" begin
-        # Identity filter for f3x3
-        A = randn(T, 10, 10)
-        F3 = zeros(T, 3, 3)
-        F3[2, 2] = T(1)  # identity kernel
+        # Non-square input so a row/column swap can't pass unnoticed.
+        A = randn(T, 11, 9)
+
+        # f3x3 with an asymmetric kernel
+        F3 = T[1 2 3; 4 5 6; 7 8 9]
         C = AppleAccelerate.f3x3(A, F3)
-        # Interior should match; border is zero
-        @test C[2:9, 2:9] ≈ A[2:9, 2:9]
+        ref3 = naive_imgfir(A, F3)
+        @test C[2:10, 2:8] ≈ ref3[2:10, 2:8] atol=T(1e-4)
 
-        # Identity filter for f5x5
-        F5 = zeros(T, 5, 5)
-        F5[3, 3] = T(1)
+        # f5x5 with an asymmetric kernel
+        F5 = T.(reshape(1:25, 5, 5))
         C5 = AppleAccelerate.f5x5(A, F5)
-        @test C5[3:8, 3:8] ≈ A[3:8, 3:8]
+        ref5 = naive_imgfir(A, F5)
+        @test C5[3:9, 3:7] ≈ ref5[3:9, 3:7] atol=T(1e-3)
 
-        # imgfir with 3x3 identity should match f3x3
-        C_imgfir = AppleAccelerate.imgfir(A, F3)
-        @test C_imgfir[2:9, 2:9] ≈ A[2:9, 2:9]
+        # imgfir with a non-square, asymmetric kernel (odd dims so the
+        # centering is unambiguous while fr != fc still exercises the swap)
+        F = T.(reshape(1:15, 3, 5))   # 3×5
+        C_imgfir = AppleAccelerate.imgfir(A, F)
+        ref = naive_imgfir(A, F)
+        @test C_imgfir[2:10, 3:7] ≈ ref[2:10, 3:7] atol=T(1e-3)
+
+        # imgfir with a 3×3 identity should reproduce the interior of A
+        Fid = zeros(T, 3, 3); Fid[2, 2] = T(1)
+        @test AppleAccelerate.imgfir(A, Fid)[2:10, 2:8] ≈ A[2:10, 2:8]
     end
 end
 
