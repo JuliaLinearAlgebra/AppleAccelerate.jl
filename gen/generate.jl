@@ -25,9 +25,26 @@ args = get_default_args()
 push!(args, "-isysroot", SDK)
 push!(args, "-I", VECLIB)
 
-# Proof-of-concept scope: just the Quadrature subframework. Adding BNNS, Sparse,
-# vForce, etc. is a matter of appending their headers here.
+# In-scope headers. Excluded by design:
+#   - cblas*.h / blas_new.h / lapack*.h / clapack.h / fortran_blas.h
+#     → BLAS/LAPACK are forwarded via libblastrampoline, not ccall.
+#   - LinearAlgebra/  → C++ generics, not C-mappable.
+#   - Sparse/BLAS.h   → C++ name-mangled dense×sparse multiply (hand-wrapped in sparse.jl).
+# We include Sparse/Solve.h (the C solver API) directly rather than Sparse/Sparse.h so we
+# don't pull in the C++ BLAS.h. Likewise the BNNS umbrella + graph headers pull in the
+# struct/constant headers transitively.
 headers = [
+    joinpath(VECLIB, "vDSP.h"),
+    joinpath(VECLIB, "vForce.h"),
+    joinpath(VECLIB, "vBasicOps.h"),
+    joinpath(VECLIB, "vfp.h"),
+    joinpath(VECLIB, "vectorOps.h"),
+    joinpath(VECLIB, "vBigNum.h"),
+    joinpath(VECLIB, "Sparse", "Solve.h"),
+    joinpath(VECLIB, "BNNS", "bnns.h"),
+    # bnns_graph.h is routed through a shim that neutralizes trailing availability
+    # attributes which otherwise break Clang.jl's anonymous-struct typedef resolution.
+    joinpath(@__DIR__, "shims", "bnns_graph_shim.h"),
     joinpath(VECLIB, "Quadrature", "Quadrature.h"),
 ]
 
