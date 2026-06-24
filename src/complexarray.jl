@@ -17,8 +17,29 @@ end
 
 DSPSplitComplex(realp::Vector{Float32}, imagp::Vector{Float32}) = DSPSplitComplex(pointer(realp), pointer(imagp))
 
+# ------------------------------------------------------------
+# Interleaved ⇄ split-complex bridge
+#
+# A Julia `Vector{Complex{T}}` is stored interleaved as [re, im, re, im, …].
+# A DSPSplitComplex whose `realp` points at the base and whose `imagp` points
+# one real element later describes exactly that layout *if* the vDSP routine is
+# given a stride of 2 (`_CSTRIDE`): element i is then at realp[2i] / imagp[2i],
+# i.e. base[2i] / base[2i+1]. This lets the split-complex vDSP routines read and
+# write Julia complex buffers directly — no deinterleave/reinterleave copies, and
+# the mutating (`!`) variants become genuinely in-place and allocation-free.
+#
+# The returned struct only borrows the pointer; callers MUST keep the backing
+# array alive with `GC.@preserve` for the duration of the ccall.
+# ------------------------------------------------------------
+const _CSTRIDE = 2
+
+@inline _split_view(::Type{DSPSplitComplex}, p::Ptr) =
+    DSPSplitComplex(Ptr{Float32}(p), Ptr{Float32}(p) + sizeof(Float32))
+@inline _split_view(::Type{DSPDoubleSplitComplex}, p::Ptr) =
+    DSPDoubleSplitComplex(Ptr{Float64}(p), Ptr{Float64}(p) + sizeof(Float64))
+
 # ============================================================
-# Complex → Complex unary operations (split-complex in/out)
+# Complex → Complex unary operations (operate on interleaved storage)
 # ============================================================
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
@@ -28,16 +49,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function vneg!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vneg!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvneg", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, 1, osplit, 1, n)
+                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function vneg(X::Vector{Complex{$T}})
@@ -51,16 +69,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function vconj!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vconj!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvconj", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, 1, osplit, 1, n)
+                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function vconj(X::Vector{Complex{$T}})
@@ -73,16 +88,15 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     @eval begin
         function vcopy(X::Vector{Complex{$T}})
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                osplit = $DSPSplit(o_re, o_im)
+            result = Vector{Complex{$T}}(undef, n)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvmov", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, 1, osplit, 1, n)
+                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            return complex.(o_re, o_im)
+            return result
         end
     end
 end
@@ -103,7 +117,7 @@ Wraps [`vDSP_zvmov`](https://developer.apple.com/documentation/accelerate/vdsp_z
 """ vcopy
 
 # ============================================================
-# Complex → Complex binary operations (split-complex in/out)
+# Complex → Complex binary operations (operate on interleaved storage)
 # ============================================================
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
@@ -113,18 +127,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function vmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             length(X) == length(Y) == length(result) || throw(DimensionMismatch("vmul!: X, Y, and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            y_re = real.(Y); y_im = imag.(Y)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im y_re y_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                ysplit = $DSPSplit(y_re, y_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve X Y result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                ysplit = _split_view($DSPSplit, pointer(Y))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvmul", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, Cint),
-                      xsplit, 1, ysplit, 1, osplit, 1, n, Cint(1))
+                      xsplit, _CSTRIDE, ysplit, _CSTRIDE, osplit, _CSTRIDE, n, Cint(1))
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function vmul(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
@@ -139,18 +149,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function vdiv!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             length(X) == length(Y) == length(result) || throw(DimensionMismatch("vdiv!: X, Y, and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            y_re = real.(Y); y_im = imag.(Y)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im y_re y_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                ysplit = $DSPSplit(y_re, y_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve X Y result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                ysplit = _split_view($DSPSplit, pointer(Y))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvdiv", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      ysplit, 1, xsplit, 1, osplit, 1, n)
+                      ysplit, _CSTRIDE, xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function vdiv(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
@@ -165,18 +171,15 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function vsmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, c::Complex{$T})
             length(X) == length(result) || throw(DimensionMismatch("vsmul!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            c_re = $T[real(c)]; c_im = $T[imag(c)]
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve x_re x_im c_re c_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                csplit = $DSPSplit(c_re, c_im)
-                osplit = $DSPSplit(o_re, o_im)
+            c2 = $T[real(c), imag(c)]
+            GC.@preserve X result c2 begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                csplit = _split_view($DSPSplit, pointer(c2))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvzsml", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, 1, csplit, osplit, 1, n)
+                      xsplit, _CSTRIDE, csplit, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function vsmul(X::Vector{Complex{$T}}, c::Complex{$T})
@@ -187,7 +190,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 end
 
 # ============================================================
-# Complex → Real operations (split-complex in, real out)
+# Complex → Real operations (interleaved complex in, real out)
 # ============================================================
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
@@ -195,13 +198,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vabs: complex absolute value (modulus)
     @eval begin
         function vabs!(result::Vector{$T}, X::Vector{Complex{$T}})
+            length(X) == length(result) || throw(DimensionMismatch("vabs!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            GC.@preserve x_re x_im begin
-                xsplit = $DSPSplit(x_re, x_im)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
                 ccall(($(string("vDSP_zvabs", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, 1, result, 1, n)
+                      xsplit, _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -214,13 +217,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vphase: complex phase (angle)
     @eval begin
         function vphase!(result::Vector{$T}, X::Vector{Complex{$T}})
+            length(X) == length(result) || throw(DimensionMismatch("vphase!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            GC.@preserve x_re x_im begin
-                xsplit = $DSPSplit(x_re, x_im)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
                 ccall(($(string("vDSP_zvphas", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, 1, result, 1, n)
+                      xsplit, _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -233,13 +236,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vmags: squared magnitude (abs2)
     @eval begin
         function vmags!(result::Vector{$T}, X::Vector{Complex{$T}})
+            length(X) == length(result) || throw(DimensionMismatch("vmags!: X and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            GC.@preserve x_re x_im begin
-                xsplit = $DSPSplit(x_re, x_im)
+            GC.@preserve X result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
                 ccall(($(string("vDSP_zvmags", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, 1, result, 1, n)
+                      xsplit, _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -252,13 +255,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vmagsa: squared magnitude + accumulate: abs2(X) + B
     @eval begin
         function vmagsa!(result::Vector{$T}, X::Vector{Complex{$T}}, B::Vector{$T})
+            length(X) == length(B) == length(result) || throw(DimensionMismatch("vmagsa!: X, B, and result must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            GC.@preserve x_re x_im begin
-                xsplit = $DSPSplit(x_re, x_im)
+            GC.@preserve X B result begin
+                xsplit = _split_view($DSPSplit, pointer(X))
                 ccall(($(string("vDSP_zvmgsa", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, 1, B, 1, result, 1, n)
+                      xsplit, _CSTRIDE, B, 1, result, 1, n)
             end
             return result
         end
@@ -300,19 +303,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
     @eval begin
         function dot(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+            length(X) == length(Y) || throw(DimensionMismatch("dot: X and Y must have equal lengths"))
             n = length(X)
-            x_re = real.(X); x_im = imag.(X)
-            y_re = real.(Y); y_im = imag.(Y)
-            o_re = $T[0]; o_im = $T[0]
-            GC.@preserve x_re x_im y_re y_im o_re o_im begin
-                xsplit = $DSPSplit(x_re, x_im)
-                ysplit = $DSPSplit(y_re, y_im)
-                osplit = $DSPSplit(o_re, o_im)
+            out = $T[0, 0]                 # interleaved [re, im] scalar result
+            GC.@preserve X Y out begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                ysplit = _split_view($DSPSplit, pointer(Y))
+                osplit = _split_view($DSPSplit, pointer(out))
                 ccall(($(string("vDSP_zdotpr", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, UInt64),
-                      xsplit, 1, ysplit, 1, osplit, n)
+                      xsplit, _CSTRIDE, ysplit, _CSTRIDE, osplit, n)
             end
-            return complex(o_re[1], o_im[1])
+            return complex(out[1], out[2])
         end
     end
 end
@@ -327,11 +329,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function polar(X::Vector{Complex{$T}})
             n = length(X)
-            interleaved_in = reinterpret($T, X)
             interleaved_out = Vector{$T}(undef, 2 * n)
-            ccall(($(string("vDSP_polar", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  interleaved_in, 2, interleaved_out, 2, n)
+            GC.@preserve X interleaved_out begin
+                ccall(($(string("vDSP_polar", suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                      pointer(X), 2, interleaved_out, 2, n)
+            end
             magnitudes = interleaved_out[1:2:end]
             angles = interleaved_out[2:2:end]
             return (magnitudes, angles)
@@ -342,15 +345,18 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vDSP_rect takes interleaved [mag, angle, mag, angle, ...] and writes [re, im, re, im, ...]
     @eval begin
         function rect(magnitudes::Vector{$T}, angles::Vector{$T})
+            length(magnitudes) == length(angles) || throw(DimensionMismatch("rect: magnitudes and angles must have equal lengths"))
             n = length(magnitudes)
             interleaved_in = Vector{$T}(undef, 2 * n)
             interleaved_in[1:2:end] .= magnitudes
             interleaved_in[2:2:end] .= angles
-            interleaved_out = Vector{$T}(undef, 2 * n)
-            ccall(($(string("vDSP_rect", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  interleaved_in, 2, interleaved_out, 2, n)
-            return collect(reinterpret(Complex{$T}, interleaved_out))
+            result = Vector{Complex{$T}}(undef, n)
+            GC.@preserve interleaved_in result begin
+                ccall(($(string("vDSP_rect", suff)), libacc), Cvoid,
+                      (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
+                      interleaved_in, 2, pointer(result), 2, n)
+            end
+            return result
         end
     end
 end
@@ -383,18 +389,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvadd!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvadd", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvadd(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
@@ -408,18 +410,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvsub!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvsub", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvsub(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
@@ -433,18 +431,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvcmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvcmul!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvcmul", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvcmul(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
@@ -460,16 +454,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zrvmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvmul!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zrvmul", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, B, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zrvmul(A::Vector{Complex{$T}}, B::Vector{$T})
@@ -483,16 +474,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zrvdiv!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvdiv!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zrvdiv", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, B, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zrvdiv(A::Vector{Complex{$T}}, B::Vector{$T})
@@ -506,16 +494,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zrvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvadd!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zrvadd", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, B, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zrvadd(A::Vector{Complex{$T}}, B::Vector{$T})
@@ -529,16 +514,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zrvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvsub!: A, B, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zrvsub", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, B, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zrvsub(A::Vector{Complex{$T}}, B::Vector{$T})
@@ -554,20 +536,15 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvcma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
             length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvcma!: A, B, C, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            c_re = real.(C); c_im = imag.(C)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                csplit = $DSPSplit(c_re, c_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B C result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                csplit = _split_view($DSPSplit, pointer(C))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvcma", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, 1, csplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvcma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
@@ -581,20 +558,15 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
             length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvma!: A, B, C, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            c_re = real.(C); c_im = imag.(C)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                csplit = $DSPSplit(c_re, c_im)
-                osplit = $DSPSplit(o_re, o_im)
+            GC.@preserve A B C result begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                csplit = _split_view($DSPSplit, pointer(C))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvma", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, 1, csplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
@@ -608,20 +580,16 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function zvsma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
             length(A) == length(C) == length(result) || throw(DimensionMismatch("zvsma!: A, C, and result must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = $T[real(b)]; b_im = $T[imag(b)]
-            c_re = real.(C); c_im = imag.(C)
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve a_re a_im b_re b_im c_re c_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                csplit = $DSPSplit(c_re, c_im)
-                osplit = $DSPSplit(o_re, o_im)
+            b2 = $T[real(b), imag(b)]
+            GC.@preserve A C result b2 begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(b2))
+                csplit = _split_view($DSPSplit, pointer(C))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvsma", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, 1, bsplit, csplit, 1, osplit, 1, n)
+                      asplit, _CSTRIDE, bsplit, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zvsma(A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
@@ -635,36 +603,35 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zidotpr: conjugate dot product — sum(conj(A) .* B)
     @eval begin
         function zidotpr(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            length(A) == length(B) || throw(DimensionMismatch("zidotpr: A and B must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            o_re = $T[0]; o_im = $T[0]
-            GC.@preserve a_re a_im b_re b_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                bsplit = $DSPSplit(b_re, b_im)
-                osplit = $DSPSplit(o_re, o_im)
+            out = $T[0, 0]
+            GC.@preserve A B out begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                osplit = _split_view($DSPSplit, pointer(out))
                 ccall(($(string("vDSP_zidotpr", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, UInt64),
-                      asplit, 1, bsplit, 1, osplit, n)
+                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, n)
             end
-            return complex(o_re[1], o_im[1])
+            return complex(out[1], out[2])
         end
     end
 
     # zrdotpr: complex-real dot product — sum(A .* B) where B is real
     @eval begin
         function zrdotpr(A::Vector{Complex{$T}}, B::Vector{$T})
+            length(A) == length(B) || throw(DimensionMismatch("zrdotpr: A and B must have equal lengths"))
             n = length(A)
-            a_re = real.(A); a_im = imag.(A)
-            o_re = $T[0]; o_im = $T[0]
-            GC.@preserve a_re a_im o_re o_im begin
-                asplit = $DSPSplit(a_re, a_im)
-                osplit = $DSPSplit(o_re, o_im)
+            out = $T[0, 0]
+            GC.@preserve A B out begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                osplit = _split_view($DSPSplit, pointer(out))
                 ccall(($(string("vDSP_zrdotpr", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, UInt64),
-                      asplit, 1, B, 1, osplit, n)
+                      asplit, _CSTRIDE, B, 1, osplit, n)
             end
-            return complex(o_re[1], o_im[1])
+            return complex(out[1], out[2])
         end
     end
 
@@ -674,16 +641,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     @eval begin
         function zvfill!(result::Vector{Complex{$T}}, c::Complex{$T})
             n = length(result)
-            c_re = $T[real(c)]; c_im = $T[imag(c)]
-            o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
-            GC.@preserve c_re c_im o_re o_im begin
-                csplit = $DSPSplit(c_re, c_im)
-                osplit = $DSPSplit(o_re, o_im)
+            c2 = $T[real(c), imag(c)]
+            GC.@preserve result c2 begin
+                csplit = _split_view($DSPSplit, pointer(c2))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zvfill", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, UInt64),
-                      csplit, osplit, 1, n)
+                      csplit, osplit, _CSTRIDE, n)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
     end
@@ -696,21 +661,17 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             xn = length(X)
             kn = length(K)
             rn = length(result)
-            x_re = real.(X); x_im = imag.(X)
-            k_re = real.(K); k_im = imag.(K)
-            o_re = Vector{$T}(undef, rn); o_im = Vector{$T}(undef, rn)
-            # Pad X with kn-1 zeros like real conv
-            xpad_re = [zeros($T, kn-1); x_re; zeros($T, kn)]
-            xpad_im = [zeros($T, kn-1); x_im; zeros($T, kn)]
-            GC.@preserve xpad_re xpad_im k_re k_im o_re o_im begin
-                xsplit = $DSPSplit(xpad_re, xpad_im)
-                ksplit = $DSPSplit(k_re, k_im)
-                osplit = $DSPSplit(o_re, o_im)
+            # Pad X with (kn-1) leading and kn trailing zeros, matching the real conv path.
+            xpad = zeros(Complex{$T}, xn + 2kn - 1)
+            copyto!(xpad, kn, X, 1, xn)
+            GC.@preserve xpad K result begin
+                xsplit = _split_view($DSPSplit, pointer(xpad))
+                ksplit = _split_view($DSPSplit, pointer(K))
+                osplit = _split_view($DSPSplit, pointer(result))
                 ccall(($(string("vDSP_zconv", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64),
-                      xsplit, 1, ksplit, 1, osplit, 1, rn, kn)
+                      xsplit, _CSTRIDE, ksplit, _CSTRIDE, osplit, _CSTRIDE, rn, kn)
             end
-            copyto!(result, complex.(o_re, o_im))
             return result
         end
         function zconv(X::Vector{Complex{$T}}, K::Vector{Complex{$T}})
@@ -729,19 +690,15 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             p2, n = size(B)
             p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
             size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n"))
-            a_re = real.(A); a_im = imag.(A)
-            b_re = real.(B); b_im = imag.(B)
-            o_re = Matrix{$T}(undef, m, n); o_im = Matrix{$T}(undef, m, n)
-            GC.@preserve a_re a_im b_re b_im o_re o_im begin
-                asplit = $DSPSplit(pointer(a_re), pointer(a_im))
-                bsplit = $DSPSplit(pointer(b_re), pointer(b_im))
-                osplit = $DSPSplit(pointer(o_re), pointer(o_im))
+            GC.@preserve A B C begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                osplit = _split_view($DSPSplit, pointer(C))
                 # Same trick as mmul: swap for col-major → row-major
                 ccall(($(string("vDSP_zmmul", suff)), libacc), Cvoid,
                       (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64, UInt64),
-                      bsplit, 1, asplit, 1, osplit, 1, UInt64(n), UInt64(m), UInt64(p))
+                      bsplit, _CSTRIDE, asplit, _CSTRIDE, osplit, _CSTRIDE, UInt64(n), UInt64(m), UInt64(p))
             end
-            copyto!(C, complex.(o_re, o_im))
             return C
         end
         function zmmul(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}})
