@@ -325,7 +325,12 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
                 factor!(f, AppleAccelerate.SparseFactorizationCholesky)
             catch err2
             end
-            @test err2 !== nothing
+            # Cholesky of a non-positive-definite matrix must raise, and the
+            # error should actually describe a factorization/property failure
+            # rather than being any arbitrary exception.
+            @test err2 isa Exception
+            @test occursin(r"properties|singular|factoriz|parameter|positive",
+                           lowercase(sprint(showerror, err2)))
 
             err3 = nothing
             nonSymmetric = sparse(temp*temp' + diagm(rand(N)) + singular)
@@ -449,7 +454,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
             aa_fact = AAFactorization(tallMatrix)
             x, X = rand(3), rand(3, 3)
             b, B = tallMatrix * x, tallMatrix * X
-            @test isapprox(solve!(aa_fact, b), x; 0.001)
+            @test isapprox(solve!(aa_fact, b), x; atol=1e-3)
             # solve!(aa_fact, B)
             # @test isapprox(B, X; 0.001)
             shortMatrix = sprand(3,4,0.9)
