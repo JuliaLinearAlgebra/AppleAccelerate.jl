@@ -187,12 +187,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:findmax, :maxvi), (:findmin, :minvi))
         @eval begin
             function ($f)(X::Vector{$T})
-                index = Ref{Int}(0)
+                index = Ref{UInt}(0)
                 val = Ref{$T}(0.0)
                 ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64,  Ref{$T}, Ref{Int}, UInt64),
+                      (Ptr{$T}, Int64,  Ref{$T}, Ref{UInt}, UInt64),
                       X, 1, val, index, length(X))
-                return (val[], index[]+1)
+                return (val[], Int(index[])+1)
             end
         end
     end
@@ -413,9 +413,10 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
         function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
-            ccall(($(string("vDSP_vsadd", suff), libacc)),  Cvoid,
-                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
-                    -X, 1, Ref(c), result, 1, length(result))
+            # c - X == X * (-1) + c, computed in one pass via vDSP_vsmsa (D = A*B + C)
+            ccall(($(string("vDSP_vsmsa", suff), libacc)),  Cvoid,
+                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
+                    X, 1, Ref(-one($T)), Ref(c), result, 1, length(result))
             return result
         end
     end
@@ -1433,6 +1434,17 @@ end
 
 @doc "Sort vector in-place. `ascending=true` for ascending order. Wraps [`vDSP_vsort`](https://developer.apple.com/documentation/accelerate/vdsp_vsort)." vsort!
 @doc "Return sort permutation (1-based indices). Wraps [`vDSP_vsorti`](https://developer.apple.com/documentation/accelerate/vdsp_vsorti)." vsorti
+
+@doc """
+    vsorti!(indices::Vector{UInt}, X::Vector{T}, ascending::Bool=true)
+
+In-place index sort. `indices` MUST be pre-filled with the 0-based identity
+permutation `0:length(X)-1` before calling; `vDSP_vsorti` reorders those existing
+indices rather than generating them. Passing an uninitialized (`undef`) or otherwise
+non-identity buffer yields a silently wrong permutation. Use the allocating
+[`vsorti`](@ref) if you want the initialization handled for you. Wraps
+[`vDSP_vsorti`](https://developer.apple.com/documentation/accelerate/vdsp_vsorti).
+""" vsorti!
 
 # --- Table lookup ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))

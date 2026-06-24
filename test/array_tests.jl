@@ -168,6 +168,8 @@ for T in (Float32, Float64)
             @eval fa = AppleAccelerate.$f
             @test fa(X)[1] ≈ fb(X)[1]
             @test fa(X)[2] ≈ fb(X)[2]
+            # Public index return type must remain Int
+            @test typeof(fa(X)[2]) == Int
         end
 
         @testset "Testing meanmag::$T" begin
@@ -1017,6 +1019,23 @@ for T in (Float32, Float64)
         # vsorti
         perm = AppleAccelerate.vsorti(X, true)
         @test X[perm] ≈ sort(X)
+
+        # vsorti! directly, with the documented pre-filled 0-based identity
+        # buffer. The returned indices are 0-based; +1 gives a Julia permutation.
+        idx = UInt.(0:length(X)-1)
+        ret = AppleAccelerate.vsorti!(idx, X, true)
+        @test ret === idx                                 # mutates & returns same buffer
+        @test sort(Int.(idx)) == collect(0:length(X)-1)   # still a valid permutation
+        @test X[Int.(idx) .+ 1] ≈ sort(X)                 # and it actually sorts X
+
+        # descending
+        idx_desc = UInt.(0:length(X)-1)
+        AppleAccelerate.vsorti!(idx_desc, X, false)
+        @test sort(Int.(idx_desc)) == collect(0:length(X)-1)
+        @test X[Int.(idx_desc) .+ 1] ≈ sort(X, rev=true)
+
+        # vsorti! and the allocating vsorti must agree
+        @test (Int.(idx) .+ 1) == AppleAccelerate.vsorti(X, true)
     end
 end
 
@@ -1183,6 +1202,35 @@ for T in (Float32, Float64)
 
         Y = AppleAccelerate.ztoc(re, im)
         @test Y ≈ X
+    end
+end
+
+# ============================================================
+# svsub correctness + edge cases
+# ============================================================
+for T in (Float32, Float64)
+    @testset "svsub correctness::$T" begin
+        X::Vector{T} = randn(N)
+        c::T = randn()
+
+        # Allocating svsub computes c - X
+        @test AppleAccelerate.svsub(X, c) ≈ (c .- X)
+
+        # Mutating svsub! matches allocating result
+        out = similar(X)
+        AppleAccelerate.svsub!(out, X, c)
+        @test out ≈ (c .- X)
+        @test out ≈ AppleAccelerate.svsub(X, c)
+
+        # In-place aliasing (out === X) works for a mutating op
+        Z = copy(X)
+        AppleAccelerate.vadd!(Z, Z, X)
+        @test Z ≈ (X .+ X)
+
+        # Single-element array
+        x1 = T[3]
+        @test AppleAccelerate.svsub(x1, T(5)) ≈ T[2]
+        @test AppleAccelerate.vadd(x1, x1) ≈ T[6]
     end
 end
 
