@@ -224,6 +224,9 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
                 error("Incomplete delay specification provided - delays must contain 2*M + 2
                                 values where M is the number of sections in the biquad")
             end
+            if numelem > length(X)
+                error("numelem = $numelem exceeds the input length $(length(X))")
+            end
             result::Vector{$T} = similar(X)
             ccall(($(string("vDSP_biquad", suff), libacc)),  Cvoid,
                   (Ptr{Cvoid},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
@@ -326,10 +329,20 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
         function biquadm(X::Vector{Vector{$T}}, numelem::Int, setup::BiquadMulti{$T})
             M = setup.channels
             length(X) == M || error("Expected $M channels, got $(length(X))")
+            all(x -> length(x) >= numelem, X) ||
+                error("Each input channel must contain at least numelem = $numelem elements")
             Y = [similar(x) for x in X]
-            xptrs = [pointer(x) for x in X]
-            yptrs = [pointer(y) for y in Y]
-            GC.@preserve X Y begin
+            # Build the pointer arrays inside GC.@preserve so the channel buffers
+            # (and the Ptr arrays passed as Ptr{Ptr{T}}) stay rooted for the whole
+            # ccall. Taking the pointers before the preserve region left them
+            # unprotected and intermittently produced an unwritten channel.
+            xptrs = Vector{Ptr{$T}}(undef, M)
+            yptrs = Vector{Ptr{$T}}(undef, M)
+            GC.@preserve X Y xptrs yptrs begin
+                for i in 1:M
+                    xptrs[i] = pointer(X[i])
+                    yptrs[i] = pointer(Y[i])
+                end
                 ccall(($(string("vDSP_biquadm", suff)), libacc), Cvoid,
                       (Ptr{Cvoid}, Ptr{Ptr{$T}}, Int64, Ptr{Ptr{$T}}, Int64, UInt64),
                       setup.setup, xptrs, 1, yptrs, 1, numelem)
