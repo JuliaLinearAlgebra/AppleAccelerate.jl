@@ -169,6 +169,13 @@ function __init__()
         return
     end
     load_accelerate(; clear = false, load_ilp64=true)
+    # libSparse lives at a hard-coded path (LIBSPARSE in sparse.jl). Probe it once
+    # here so a future macOS layout change surfaces a clear diagnostic instead of
+    # an opaque dlopen error at the first sparse ccall.
+    if dlopen_e(LIBSPARSE) == C_NULL
+        @warn "AppleAccelerate.jl: libSparse could not be loaded from '$(LIBSPARSE)'; \
+               sparse linear algebra (AASparseMatrix, factorizations, solvers) will be unavailable"
+    end
 end
 
 @static if Sys.isapple()

@@ -49,7 +49,7 @@ end
 end
 
 @enum SparseScaling_t::UInt8 begin
-    SpraseScalingDefault = 0
+    SparseScalingDefault = 0
     SparseScalingUser = 1
     SparseScalingEquilibriationInf = 2
     # macOS 26+. Hungarian-and-ordering is only valid in a combined
@@ -148,7 +148,7 @@ end
 # For complex types, use the real-part's eps and precision tier.
 SparseNumericFactorOptions(T::Type) = SparseNumericFactorOptions(
     SparseDefaultControl,
-    SpraseScalingDefault,
+    SparseScalingDefault,
     C_NULL,
     real(T) == Float32 ? 0.1 : 0.01,
     eps(real(T))*1e-4
@@ -302,8 +302,6 @@ macro generateDemangled(jlName, cName, param, retType, jlArgTypes...)
     local jlCall = Expr(:(::), Expr(:call, esc(jlName), jlArgExprs...), retTypeWParam)
     # Build ccall directly instead of using @ccall macro to avoid variable name conflicts
     local cArgNames = [Symbol("arg$i") for i in 1:length(cArgTypesWParams)]
-    local LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions"*
-                    "/A/Frameworks/vecLib.framework/libSparse.dylib"
     # Construct ccall((:cName, LIBSPARSE), retType, (argTypes...), args...)
     local cCallExpr = Expr(:call, :ccall,
                           Expr(:tuple, esc(cName), LIBSPARSE),
@@ -719,9 +717,28 @@ const _SOLVE_VEC_INPLACE_SYM = Dict(
 for (T, sym) in _SOLVE_VEC_INPLACE_SYM
     @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
                                 arg2::StridedVector{$T})
+        nrows = Int(arg1.symbolicFactorization.rowCount)
+        ncols = Int(arg1.symbolicFactorization.columnCount)
+        # libSparse reads the RHS and writes the solution into the same buffer,
+        # which must therefore hold at least max(rows, cols) elements. Validate
+        # before the ccall so an undersized buffer can't be written out of bounds.
+        length(arg2) >= max(nrows, ncols) ||
+            throw(DimensionMismatch(
+                "in-place vector solve needs a buffer of at least " *
+                "max(rows, cols) = $(max(nrows, ncols)) elements; got $(length(arg2))"))
         @ccall LIBSPARSE.$sym(arg1::SparseOpaqueFactorization{$T},
                               arg2::DenseVector{$T})::Cvoid
-        resize!(arg2, arg1.symbolicFactorization.columnCount)
+        if length(arg2) != ncols
+            # Non-square system: trim the buffer down to the solution length.
+            # Only a real Vector can be resized; a view cannot.
+            arg2 isa Vector ||
+                throw(ArgumentError(
+                    "in-place solve of a non-square system needs a resizable " *
+                    "Vector RHS (got a $(typeof(arg2))); use the allocating " *
+                    "`solve`/`ldiv!(x, f, b)` instead"))
+            resize!(arg2, ncols)
+        end
+        return arg2
     end
 end
 
@@ -1036,8 +1053,19 @@ function factor!(aa_fact::AAFactorization{T},
                    (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
                                                     SparseFactorizationQR
         end
-        aa_fact._factorization = SparseFactor(kind, aa_fact.matrixObj.matrix)
-        _libsparse_throw(aa_fact._factorization.status, "factor")
+        fact = SparseFactor(kind, aa_fact.matrixObj.matrix)
+        if fact.status == SparseStatusOk
+            aa_fact._factorization = fact
+        else
+            # The factorization failed (e.g. singular matrix). Free whatever
+            # SparseFactor allocated for the failed attempt, but leave the
+            # original yet-to-be-factored placeholder in place so (a) the
+            # finalizer never calls SparseCleanup on a non-Ok object and
+            # (b) a subsequent factor! retries instead of silently reusing a
+            # broken factorization.
+            SparseCleanup(fact)
+            _libsparse_throw(fact.status, "factor")
+        end
     end
 end
 
