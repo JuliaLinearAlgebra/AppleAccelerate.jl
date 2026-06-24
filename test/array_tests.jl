@@ -249,6 +249,39 @@ for T in (Float32, Float64)
 end
 
 for T in (Float32, Float64)
+    @testset "libvMisc/vForce::$T" begin
+        X::Vector{T} = randn(N)
+        Y::Vector{T} = randn(N)
+        Z::Vector{T} = similar(X)
+
+        # cbrt: cube root (defined for negative inputs too)
+        @test AppleAccelerate.cbrt(X) ≈ cbrt.(X)
+        AppleAccelerate.cbrt!(Z, X)
+        @test Z ≈ cbrt.(X)
+
+        # remainder: IEEE-754 remainder == rem(x, y, RoundNearest)
+        @test AppleAccelerate.remainder(X, Y) ≈ rem.(X, Y, RoundNearest)
+        AppleAccelerate.remainder!(Z, X, Y)
+        @test Z ≈ rem.(X, Y, RoundNearest)
+
+        # nextafter: next representable value from X toward Y
+        nextref = [X[i] < Y[i] ? nextfloat(X[i]) :
+                   X[i] > Y[i] ? prevfloat(X[i]) : Y[i] for i in eachindex(X)]
+        @test AppleAccelerate.nextafter(X, Y) == nextref
+        AppleAccelerate.nextafter!(Z, X, Y)
+        @test Z == nextref
+
+        # pows: vector base raised to a scalar exponent
+        Xpos::Vector{T} = abs.(randn(N))
+        y::T = randn()
+        @test AppleAccelerate.pows(Xpos, y) ≈ Xpos .^ y
+        Zp::Vector{T} = similar(Xpos)
+        AppleAccelerate.pows!(Zp, Xpos, y)
+        @test Zp ≈ Xpos .^ y
+    end
+end
+
+for T in (Float32, Float64)
     @testset "vDSP Unary::$T" begin
         X::Vector{T} = randn(N)
         Z::Vector{T} = similar(X)
