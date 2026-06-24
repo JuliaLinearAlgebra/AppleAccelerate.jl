@@ -26,6 +26,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vneg: negate complex vector
     @eval begin
         function vneg!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
+            length(X) == length(result) || throw(DimensionMismatch("vneg!: X and result must have equal lengths"))
             n = length(X)
             x_re = real.(X); x_im = imag.(X)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -48,6 +49,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vconj: conjugate complex vector
     @eval begin
         function vconj!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
+            length(X) == length(result) || throw(DimensionMismatch("vconj!: X and result must have equal lengths"))
             n = length(X)
             x_re = real.(X); x_im = imag.(X)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -109,6 +111,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vmul: element-wise complex multiply (conjugate flag = +1 for normal multiply)
     @eval begin
         function vmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+            length(X) == length(Y) == length(result) || throw(DimensionMismatch("vmul!: X, Y, and result must have equal lengths"))
             n = length(X)
             x_re = real.(X); x_im = imag.(X)
             y_re = real.(Y); y_im = imag.(Y)
@@ -134,6 +137,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # Note: vDSP_zvdiv computes B/A, so we swap: pass Y as A and X as B to get X/Y
     @eval begin
         function vdiv!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+            length(X) == length(Y) == length(result) || throw(DimensionMismatch("vdiv!: X, Y, and result must have equal lengths"))
             n = length(X)
             x_re = real.(X); x_im = imag.(X)
             y_re = real.(Y); y_im = imag.(Y)
@@ -159,6 +163,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vDSP_zvzsml: A * B → C where B is a single split-complex element
     @eval begin
         function vsmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, c::Complex{$T})
+            length(X) == length(result) || throw(DimensionMismatch("vsmul!: X and result must have equal lengths"))
             n = length(X)
             x_re = real.(X); x_im = imag.(X)
             c_re = $T[real(c)]; c_im = $T[imag(c)]
@@ -345,7 +350,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             ccall(($(string("vDSP_rect", suff)), libacc), Cvoid,
                   (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
                   interleaved_in, 2, interleaved_out, 2, n)
-            return reinterpret(Complex{$T}, interleaved_out)
+            return collect(reinterpret(Complex{$T}, interleaved_out))
         end
     end
 end
@@ -376,6 +381,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvadd: C = A + B
     @eval begin
         function zvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zvadd!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = real.(B); b_im = imag.(B)
@@ -400,6 +406,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvsub: C = A - B  (NOTE: vDSP_zvsub computes __A - __B, pass A as first, B as second)
     @eval begin
         function zvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zvsub!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = real.(B); b_im = imag.(B)
@@ -424,6 +431,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvcmul: C = conj(A) * B
     @eval begin
         function zvcmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zvcmul!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = real.(B); b_im = imag.(B)
@@ -450,6 +458,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zrvmul: C = A * B (complex * real)
     @eval begin
         function zrvmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvmul!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -472,6 +481,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zrvdiv: C = A / B (complex / real) — NOTE: vDSP_zrvdiv computes B/A, swap
     @eval begin
         function zrvdiv!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvdiv!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -494,6 +504,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zrvadd: C = A + B (add real to complex, adds to real part)
     @eval begin
         function zrvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvadd!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -516,6 +527,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zrvsub: C = A - B (complex - real) — NOTE: vDSP_zrvsub computes B - A, swap
     @eval begin
         function zrvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+            length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvsub!: A, B, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             o_re = Vector{$T}(undef, n); o_im = Vector{$T}(undef, n)
@@ -540,6 +552,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvcma: D = conj(A)*B + C
     @eval begin
         function zvcma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvcma!: A, B, C, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = real.(B); b_im = imag.(B)
@@ -566,6 +579,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvma: D = A*B + C
     @eval begin
         function zvma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+            length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvma!: A, B, C, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = real.(B); b_im = imag.(B)
@@ -592,6 +606,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zvsma: D = A*b[scalar] + C
     @eval begin
         function zvsma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
+            length(A) == length(C) == length(result) || throw(DimensionMismatch("zvsma!: A, C, and result must have equal lengths"))
             n = length(A)
             a_re = real.(A); a_im = imag.(A)
             b_re = $T[real(b)]; b_im = $T[imag(b)]

@@ -45,6 +45,13 @@ for T in (Float32, Float64)
         @test AppleAccelerate.zrvsub(A, B) ≈ expected_sub
         AppleAccelerate.zrvsub!(R, A, B)
         @test R ≈ expected_sub
+
+        # zrvdiv: complex / real (elementwise)
+        Bnz::Vector{T} = B .+ T(2)  # ensure nonzero divisor
+        expected_div = A ./ Bnz
+        @test AppleAccelerate.zrvdiv(A, Bnz) ≈ expected_div
+        AppleAccelerate.zrvdiv!(R, A, Bnz)
+        @test R ≈ expected_div
     end
 end
 
@@ -102,9 +109,20 @@ for T in (Float32, Float64)
         K = complex.(randn(T, 5), randn(T, 5))
         result = AppleAccelerate.zconv(X, K)
         @test length(result) == length(X) + length(K) - 1
-        # Check a few inner elements using naive convolution
-        # The full result should match DSP.conv if available, but let's verify length and type
         @test eltype(result) == Complex{T}
+        # Numerical correctness: vDSP_zconv applies the kernel without reversal
+        # (correlation-style), matching DSP.conv with a reversed kernel.
+        @test result ≈ DSP.conv(X, reverse(K)) atol=T(1e-3)
+    end
+end
+
+for T in (Float32, Float64)
+    @testset "Complex DimensionMismatch::$T" begin
+        A::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        B::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Rbad = similar(A, N - 1)
+        @test_throws DimensionMismatch AppleAccelerate.zvadd!(Rbad, A, B)
+        @test_throws DimensionMismatch AppleAccelerate.zvsub!(Rbad, A, B)
     end
 end
 
