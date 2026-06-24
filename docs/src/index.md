@@ -1,6 +1,6 @@
 # Introduction
 
-A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/accelerate/), providing high-performance BLAS/LAPACK, vectorized math operations, DSP/FFT, and sparse linear algebra on macOS.
+A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing high-performance BLAS/LAPACK, vectorized math operations, DSP/FFT, and sparse linear algebra on macOS.
 
 ## Installation
 

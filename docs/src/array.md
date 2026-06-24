@@ -502,6 +502,29 @@ AppleAccelerate.veqvi
 | signed int → float | `vflt8`, `vflt16`, `vflt32` | Signed integer to float |
 | unsigned int → float | `vfltu8`, `vfltu16`, `vfltu32` | Unsigned integer to float |
 
+Every function in this family has an allocating variant and a mutating variant
+`f!(C, A)` that writes into a preallocated `C`. The number in the name is the integer
+bit width (`8`, `16`, `32`), so `vfix32` truncates to `Int32`, `vfltu16` converts
+`UInt16` to float, and so on. Both `Float32` and `Float64` are supported.
+
+The two directions differ in how the output type is chosen. For **float → int** the
+integer type is fixed by the function name, so the allocating form is `f(A)`. For
+**int → float** the float width is ambiguous, so the allocating form takes it
+explicitly as `f(A, Float64)` (or `Float32`).
+
+```@example array
+X = Float64[-1.7, 0.4, 2.9]
+
+I32 = AppleAccelerate.vfix32(X)            # truncate toward zero → Int32[-1, 0, 2]
+R32 = AppleAccelerate.vfixr32(X)           # round to nearest    → Int32[-2, 0, 3]
+Xf  = AppleAccelerate.vflt32(I32, Float64) # back to Float64 (target type required)
+
+# Mutating variant writes into a preallocated output
+out = Vector{Int32}(undef, length(X))
+AppleAccelerate.vfix32!(out, X)
+nothing # hide
+```
+
 ## Image Convolution
 
 | Function | Description |

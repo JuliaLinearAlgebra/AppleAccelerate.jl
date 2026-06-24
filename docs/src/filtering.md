@@ -42,9 +42,14 @@ AppleAccelerate.xcorr!
 
 Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad). IIR filtering via cascaded biquad sections. Both `Float64` and `Float32` processing are supported; coefficients are always `Float64`.
 
+Each section takes 5 coefficients in the order `[b0, b1, b2, a1, a2]` (feedforward
+then feedback). Use real filter-design coefficients rather than random values — an
+arbitrary `a1`/`a2` can place the poles outside the unit circle and make the filter
+unstable. The example below is a stable second-order lowpass:
+
 ```@example filtering
 X = randn(Float64, 100)
-coefficients = randn(5)  # 5 coefficients per section
+coefficients = [0.2929, 0.5858, 0.2929, 0.0, 0.1716]  # [b0, b1, b2, a1, a2]
 bq = AppleAccelerate.biquadcreate(coefficients, 1)  # defaults to Float64
 delays = zeros(4)
 result = AppleAccelerate.biquad(X, delays, length(X), bq)
