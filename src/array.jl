@@ -78,6 +78,61 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         end
     end
 
+    # 1-arg cube root. Kept in its own loop (rather than added to the shared
+    # `onearg_funcs` tuple) because `onearg_funcs` also drives the broadcasting
+    # overrides below, which would install `Base.broadcasted(::typeof(cbrt), …)`
+    # methods on top of `Base.cbrt` and change global broadcast behaviour.
+    for (f, fa) in ((:cbrt,:cbrt),)
+        f! = Symbol("$(f)!")
+        @eval begin
+            function ($f)(X::Array{$T})
+                out = Array{$T}(undef, size(X))
+                ($f!)(out, X)
+            end
+            function ($f!)(out::Array{$T}, X::Array{$T})
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ref{Cint}),out,X,length(X))
+                out
+            end
+        end
+    end
+
+    # 2-arg functions where the C prototype takes the operands in the order
+    # (z, y, x, n) and computes z = op(y, x). The Julia-facing call is
+    # `f(X, Y) = op(X, Y)`, so we pass the C-args as (out, X, Y, n).
+    for (f, fa) in ((:nextafter,:nextafter), (:remainder,:remainder))
+        f! = Symbol("$(f)!")
+        @eval begin
+            function ($f)(X::Array{$T}, Y::Array{$T})
+                size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
+                out = Array{$T}(undef, size(X))
+                ($f!)(out, X, Y)
+            end
+            function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,X,Y,length(X))
+                out
+            end
+        end
+    end
+
+    # vvpows(z, y, x, n): z[i] = pow(x[i], y) for a vector base x and a SCALAR
+    # exponent y (passed by reference). Julia-facing: `pows(X, y) = X .^ y`.
+    for (f, fa) in ((:pows,:pows),)
+        f! = Symbol("$(f)!")
+        @eval begin
+            function ($f)(X::Array{$T}, y::$T)
+                out = Array{$T}(undef, size(X))
+                ($f!)(out, X, y)
+            end
+            function ($f!)(out::Array{$T}, X::Array{$T}, y::$T)
+                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
+                      (Ptr{$T},Ref{$T},Ptr{$T},Ref{Cint}),out,y,X,length(X))
+                out
+            end
+        end
+    end
+
     # two-arg return
     for (f, _) in ((:sincos,:sincos),)
         f! = Symbol("$(f)!")
@@ -165,6 +220,63 @@ Returns a `Complex{T}` array. Equivalent to `exp.(im .* X)` but faster.
 The mutating variant `cis!(out, X)` stores results in a preallocated complex array.
 """
 cis
+
+"""
+    cbrt(X::Array{T}) where T <: Union{Float32, Float64}
+
+Compute the cube root of each element via vecLib
+[`vvcbrt`](https://developer.apple.com/documentation/accelerate/vvcbrt(_:_:_:)),
+i.e. `out[i] = cbrt(X[i])`.
+
+The mutating variant `cbrt!(out, X)` stores results in a preallocated array.
+"""
+cbrt
+
+"""
+    nextafter(X::Array{T}, Y::Array{T}) where T <: Union{Float32, Float64}
+
+Compute the next machine-representable floating-point value after each `X[i]` in
+the direction of `Y[i]`, via vecLib
+[`vvnextafter`](https://developer.apple.com/documentation/accelerate/vvnextafter(_:_:_:_:)),
+i.e. `out[i] = nextafter(X[i], Y[i])`.
+
+The C prototype is `vvnextafter(z, y, x, n)` computing `z[i] = nextafter(y[i], x[i])`,
+so the Julia call passes the arrays as `(out, X, Y)`.
+
+The mutating variant `nextafter!(out, X, Y)` stores results in a preallocated array.
+"""
+nextafter
+
+"""
+    remainder(X::Array{T}, Y::Array{T}) where T <: Union{Float32, Float64}
+
+Compute the IEEE-754 remainder of each `X[i]` divided by `Y[i]` via vecLib
+[`vvremainder`](https://developer.apple.com/documentation/accelerate/vvremainder(_:_:_:_:)),
+i.e. `out[i] = X[i] - k*Y[i]` where `k` is the integer nearest `X[i]/Y[i]`
+(ties to even). The result satisfies `abs(out[i]) <= abs(Y[i])/2`. This matches
+`rem(X[i], Y[i], RoundNearest)`.
+
+The C prototype is `vvremainder(z, y, x, n)` computing `z[i] = y[i] - k*x[i]`,
+so the Julia call passes the arrays as `(out, X, Y)`.
+
+The mutating variant `remainder!(out, X, Y)` stores results in a preallocated array.
+"""
+remainder
+
+"""
+    pows(X::Array{T}, y::T) where T <: Union{Float32, Float64}
+
+Raise each element of the vector base `X` to the scalar exponent `y` via vecLib
+[`vvpows`](https://developer.apple.com/documentation/accelerate/vvpows(_:_:_:_:)),
+i.e. `out[i] = X[i]^y`. Equivalent to `X .^ y`.
+
+The C prototype is `void vvpows(double *z, const double *y, const double *x, const int *n)`
+with `z[i] = pow(x[i], y)`, where `y` is a scalar exponent (passed by reference)
+and `x` is the vector base. The Julia call passes `(out, X, y)`.
+
+The mutating variant `pows!(out, X, y)` stores results in a preallocated array.
+"""
+pows
 
 # Functions over single vectors that return scalars/tuples
 for (T, suff) in ((Float32, ""), (Float64, "D"))
