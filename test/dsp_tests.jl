@@ -414,23 +414,6 @@ end
     end
 end
 
-@testset "Multi-channel Biquad::Float32" begin
-    # Simple lowpass filter coefficients (1 section per channel)
-    c = [0.1, 0.2, 0.1, -0.5, 0.2,   # channel 1
-         0.1, 0.2, 0.1, -0.5, 0.2]    # channel 2
-    channels = 2
-    sections = 1
-    setup = AppleAccelerate.biquadm_create(c, channels, sections, Float32)
-    X = [Float32.(randn(64)), Float32.(randn(64))]
-    Y = AppleAccelerate.biquadm(X, 64, setup)
-    @test length(Y) == 2
-    @test length(Y[1]) == 64
-    @test length(Y[2]) == 64
-    # Results should not be all zeros (filter was applied)
-    @test !all(iszero, Y[1])
-    @test !all(iszero, Y[2])
-end
-
 @testset "Multi-channel Biquad layout (sections × channels)" begin
     # Distinct per-channel gains with 2 cascaded sections verify both the
     # (sections, channels) setup argument order and the section-major
@@ -445,6 +428,8 @@ end
     Y = AppleAccelerate.biquadm([copy(x), copy(x)], 8, setup)
     @test Y[1] ≈ x
     @test Y[2] ≈ 6 .* x
+    # numelem larger than the channel length must be rejected, not read OOB
+    @test_throws ErrorException AppleAccelerate.biquadm([copy(x), copy(x)], 9, setup)
 end
 
 @testset "deq22 (recursive filter)" begin
