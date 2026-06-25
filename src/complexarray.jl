@@ -298,8 +298,39 @@ Wraps [`vDSP_zvmgsa`](https://developer.apple.com/documentation/accelerate/vdsp_
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
     @eval begin
+        @doc """
+            dot(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
+
+        Conjugated complex dot product `sum(conj(X) .* Y)`, matching
+        `LinearAlgebra.dot`. Wraps the conjugating routine
+        [`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr).
+        For the un-conjugated product `sum(X .* Y)` use [`dotu`](@ref).
+        """
         function dot(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dot: X and Y must have equal lengths"))
+            n = length(X)
+            out = $T[0, 0]                 # interleaved [re, im] scalar result
+            GC.@preserve X Y out begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                ysplit = _split_view($DSPSplit, pointer(Y))
+                osplit = _split_view($DSPSplit, pointer(out))
+                # vDSP_zidotpr conjugates its FIRST argument: result = sum(conj(X) .* Y).
+                LibAccelerate.$(Symbol(string("vDSP_zidotpr", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), n)
+            end
+            return complex(out[1], out[2])
+        end
+
+        @doc """
+            dotu(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
+
+        Un-conjugated complex dot product `sum(X .* Y)` (the "bilinear" dot,
+        without conjugating `X`). Wraps
+        [`vDSP_zdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zdotpr).
+        For the conjugated product matching `LinearAlgebra.dot` use [`dot`](@ref).
+        """
+        function dotu(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+            length(X) == length(Y) || throw(DimensionMismatch("dotu: X and Y must have equal lengths"))
             n = length(X)
             out = $T[0, 0]                 # interleaved [re, im] scalar result
             GC.@preserve X Y out begin
@@ -714,7 +745,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             o_re = Vector{$T}(undef, n)
             o_im = Vector{$T}(undef, n)
-            GC.@preserve o_re o_im begin
+            GC.@preserve X o_re o_im begin
                 osplit = $DSPSplit(o_re, o_im)
                 LibAccelerate.$(Symbol(string("vDSP_ctoz", suff)))(
                       pointer(X), 2, Ref(osplit), 1, n)
@@ -724,7 +755,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         function ztoc(re::Vector{$T}, im::Vector{$T})
             n = length(re)
             result = Vector{Complex{$T}}(undef, n)
-            GC.@preserve re im begin
+            GC.@preserve re im result begin
                 isplit = $DSPSplit(re, im)
                 LibAccelerate.$(Symbol(string("vDSP_ztoc", suff)))(
                       Ref(isplit), 1, pointer(result), 2, n)

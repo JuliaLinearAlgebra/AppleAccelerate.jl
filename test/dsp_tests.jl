@@ -503,6 +503,16 @@ end
             @test Cout ≈ Cref
         end
     end
+
+    # Regression: P = UInt64(length(F)); length(A) - P used to underflow when
+    # the filter is longer than the signal, instead of erroring clearly.
+    @testset "desamp errors when filter longer than signal::$T" for T in (Float32, Float64)
+        Ashort = randn(T, 3)
+        Flong = randn(T, 5)
+        @test_throws ErrorException AppleAccelerate.desamp(Ashort, 1, Flong)
+        Cout = Vector{T}(undef, 1)
+        @test_throws ErrorException AppleAccelerate.desamp!(Cout, Ashort, 1, Flong)
+    end
 end
 
 @testset "wiener (Wiener-Levinson)" begin

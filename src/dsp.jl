@@ -592,10 +592,14 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         Returns: `C`
         """
         function desamp!(C::Vector{$T}, A::Vector{$T}, DF::Int, F::Vector{$T})
-            P = UInt64(length(F))
-            Nout = UInt64(div(length(A) - P, DF) + 1)
-            length(C) >= Nout || error("C must have at least $(Nout) elements")
-            LibAccelerate.$(Symbol(string("vDSP_desamp", suff)))(A,DF,F,C,Nout,P)
+            # Compute the output count in SIGNED arithmetic; converting to
+            # UInt64 first would underflow when length(F) > length(A).
+            length(A) >= length(F) ||
+                error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
+            P = length(F)
+            nout = div(length(A) - P, DF) + 1
+            length(C) >= nout || error("C must have at least $(nout) elements")
+            LibAccelerate.$(Symbol(string("vDSP_desamp", suff)))(A, DF, F, C, UInt64(nout), UInt64(P))
             return C
         end
 
@@ -608,6 +612,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         Returns: `Vector{$($T)}`
         """
         function desamp(A::Vector{$T}, DF::Int, F::Vector{$T})
+            length(A) >= length(F) ||
+                error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
             P = length(F)
             Nout = div(length(A) - P, DF) + 1
             C = Vector{$T}(undef, Nout)
