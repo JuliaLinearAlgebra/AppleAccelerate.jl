@@ -43,6 +43,23 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+  bindings:
+    name: LibAccelerate bindings up to date
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Regenerate bindings and check for drift
+        run: |
+          julia --project=gen -e 'using Pkg; Pkg.instantiate()'
+          julia --project=gen gen/generate.jl
+          git diff --exit-code -- src/lib/LibAccelerate.jl \
+            || (echo "::error::src/lib/LibAccelerate.jl is out of date with the SDK headers. Run 'julia --project=gen gen/generate.jl' and commit the result." && exit 1)
+      - name: Binding coverage (informational)
+        run: julia --project=. gen/coverage.jl
   docs:
     name: Documentation
     runs-on: macOS-latest

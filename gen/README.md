@@ -35,17 +35,42 @@ output, so CI can regenerate and diff to catch drift when a new SDK adds symbols
 
 ## Scope
 
-Currently generates only the **Quadrature** subframework, as a proof of concept.
-To extend coverage, append headers to the `headers` list in
-[`generate.jl`](./generate.jl) (e.g. `BNNS/bnns.h`, `Sparse/Solve.h`,
-`vForce.h`). The BLAS/LAPACK path is intentionally excluded — it is forwarded
-through libblastrampoline, not ccall.
+Generates the in-scope headers listed in [`generate.jl`](./generate.jl): vDSP,
+vForce, vBasicOps, vfp, vectorOps, vBigNum, `Sparse/Solve.h` (the C solver API),
+BNNS (+ graph), and Quadrature — ~900 functions, 110+ structs, 60 enums. Extend
+coverage by appending headers to that list.
+
+**Intentionally excluded:**
+- BLAS/LAPACK (`cblas*.h`, `lapack*.h`, …) — forwarded via libblastrampoline, not
+  ccall. They get transitively pulled in via `Sparse/Types.h`, so `generate.jl`
+  post-processes the output to strip the `cblas_*`/`catlas_*`/`clapack_*` wrappers.
+- `LinearAlgebra/` — C++ generics, not C-mappable.
+- `Sparse/BLAS.h` dense×sparse multiply — C++ name-mangled (hand-wrapped elsewhere).
+
+## Known limitations
+
+- A few vDSP functions whose signatures use `arm_neon`/`simd` vector types or
+  CoreFoundation-gated availability are dropped by libclang under the default GCC
+  artifact include path (we capture ~93% of vDSP, all the pointer/length array
+  ops). These SIMD-typed overloads are not part of the idiomatic surface anyway.
+
+## Coverage report
+
+[`coverage.jl`](./coverage.jl) reports, per subframework, how many generated
+functions have a hand-written idiomatic wrapper:
+
+```sh
+julia --project=. gen/coverage.jl           # print the table
+julia --project=. gen/coverage.jl --write   # also refresh docs/src/coverage.md
+```
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `generate.jl` | Entry point: resolves SDK paths, runs Clang.jl |
+| `generate.jl` | Entry point: resolves SDK paths, runs Clang.jl, strips out-of-scope BLAS |
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
-| `prologue.jl` | Spliced into the generated module — defines `libacc` |
+| `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
+| `shims/bnns_graph_shim.h` | Neutralizes availability attributes that break Clang.jl |
+| `coverage.jl` | Report-only binding-coverage table |
 | `Project.toml` | Pins Clang.jl for the generator environment |

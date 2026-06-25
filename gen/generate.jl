@@ -24,6 +24,9 @@ options = load_options(joinpath(@__DIR__, "generator.toml"))
 args = get_default_args()
 push!(args, "-isysroot", SDK)
 push!(args, "-I", VECLIB)
+# Resolve `<CoreFoundation/CFAvailability.h>` and other framework headers that vDSP.h pulls
+# in for its availability annotations.
+push!(args, "-iframework", joinpath(SDK, "System", "Library", "Frameworks"))
 
 # In-scope headers. Excluded by design:
 #   - cblas*.h / blas_new.h / lapack*.h / clapack.h / fortran_blas.h
@@ -50,3 +53,34 @@ headers = [
 
 ctx = create_context(headers, args, options)
 build!(ctx)
+
+# Post-process: strip BLAS/LAPACK function wrappers that are transitively pulled in via
+# Sparse/Types.h (which includes cblas.h for its index/order types). BLAS and LAPACK are
+# forwarded through libblastrampoline, not ccall, so these wrappers are explicitly out of
+# scope. We remove only the `function cblas_*`/`catlas_*`/`clapack_*` wrapper blocks; the
+# CBLAS enum/constant type definitions are left in place because Sparse references them. This
+# runs as part of the generator, so the committed output remains fully reproducible.
+function strip_out_of_scope_blas!(path)
+    lines = readlines(path)
+    out = String[]
+    blas = r"^function\s+(cblas_|catlas_|clapack_|appleblas_)"
+    i, n, removed = 1, length(lines), 0
+    while i <= n
+        if occursin(blas, lines[i])
+            while i <= n && lines[i] != "end"
+                i += 1
+            end
+            i += 1                                   # skip the closing `end`
+            i <= n && isempty(lines[i]) && (i += 1)  # swallow one trailing blank line
+            removed += 1
+        else
+            push!(out, lines[i]); i += 1
+        end
+    end
+    write(path, join(out, "\n") * "\n")
+    return removed
+end
+
+out_path = joinpath(@__DIR__, "..", "src", "lib", "LibAccelerate.jl")
+removed = strip_out_of_scope_blas!(out_path)
+@info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"

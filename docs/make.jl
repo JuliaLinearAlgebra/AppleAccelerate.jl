@@ -12,6 +12,7 @@ makedocs(;
         "FFT & Transforms" => "fft.md",
         "Filtering & Spectral" => "filtering.md",
         "Benchmarks" => "benchmarks.md",
+        "Binding Coverage" => "coverage.md",
     ],
     format = Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
