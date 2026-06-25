@@ -185,6 +185,7 @@ end
     include("lib/LibAccelerate.jl")
 
     include("array.jl")
+    include("vmath.jl")
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")
