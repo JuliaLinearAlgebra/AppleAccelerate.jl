@@ -2039,7 +2039,7 @@ const DOUBLE_COMPLEX_SPLIT = DSPDoubleSplitComplex
 
 const __float_complex_t = ComplexF32
 
-const __double_complex_t = ComplexF32
+const __double_complex_t = ComplexF64
 
 function vvrecf(arg1, arg2, arg3)
     @ccall libacc.vvrecf(arg1::Ptr{Cfloat}, arg2::Ptr{Cfloat}, arg3::Ptr{Cint})::Cvoid
@@ -2965,7 +2965,7 @@ function Base.propertynames(x::SparseAttributes_t, private::Bool = false)
         end...)
 end
 
-const __SPARSE_double_complex = ComplexF32
+const __SPARSE_double_complex = ComplexF64
 
 struct SparseAttributesComplex_t
     data::NTuple{4, UInt8}
