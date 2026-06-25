@@ -1,16 +1,21 @@
 ## dsp.jl ##
 #
-# RAW-LAYER MIGRATION NOTE: the real-valued vDSP wrappers here (conv, biquad /
-# biquadm, deq22, desamp, wiener, the *_window generators, and DCT/DFT execute /
-# destroy) now call the generated `LibAccelerate` submodule instead of embedding
-# `ccall` strings. Two groups are intentionally left as direct `ccall`s:
-#   1. Setup creators that return an opaque `Ptr{Cvoid}` (e.g. vDSP_*_CreateSetup,
-#      vDSP_create_fftsetup, vDSP_DFT_zop_CreateSetup): they have a non-`Cvoid`
-#      return and are kept as-is to avoid churn around the opaque handle types.
-#   2. Split-complex spectral / FFT routines (zaspec, zcoher, ztrans, zcspec and
-#      the fft_zop/zip/zrop family): these pass `Ref{DSPSplitComplex}` built from
-#      the local struct, which does not convert to the `Ptr{LibAccelerate struct}`
-#      the generated wrappers expect (same reason as complexarray.jl).
+# RAW-LAYER MIGRATION NOTE: the vDSP wrappers here now call the generated
+# `LibAccelerate` submodule instead of embedding `ccall` strings. This includes the
+# real-valued routines (conv, biquad / biquadm, deq22, desamp, wiener, the *_window
+# generators, DCT/DFT execute / destroy) AND, as of the complex/FFT migration, the
+# split-complex spectral routines (zaspec, zcoher, ztrans, zcspec) and the full FFT
+# family (fft_zop/zip/zrop, 1D and 2D, plus create/destroy_fftsetup). The
+# split-complex routines now pass `Ref{DSPSplitComplex}` / `Ref{DSPDoubleSplitComplex}`
+# built from the structs that `complexarray.jl` aliases directly to
+# `LibAccelerate.DSPSplitComplex` / `LibAccelerate.DSPDoubleSplitComplex`, so the
+# `Ref` converts cleanly to the `Ptr{DSPSplitComplex}` the generated wrappers expect.
+#
+# A few setup CREATORS are still direct `ccall`s on purpose: vDSP_DCT_CreateSetup and
+# vDSP_DFT_zop_CreateSetup{,D} return an opaque `Ptr{Cvoid}` and chain a `previous`
+# handle; they are kept as-is to avoid churn around the opaque handle types. (The FFT
+# setup creators ARE migrated, converting the generated `FFTSetup` pointer result back
+# to the `Ptr{Cvoid}` field type.)
 
 mutable struct DFTSetup{T}
     setup::Ptr{Cvoid}
@@ -399,9 +404,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             imagp = $T.(imag.(A))
             GC.@preserve realp imagp begin
                 sc = $SC(pointer(realp), pointer(imagp))
-                ccall(($(string("vDSP_zaspec", suff)), libacc), Cvoid,
-                      (Ref{$SC}, Ptr{$T}, UInt64),
-                      sc, C, n)
+                LibAccelerate.$(Symbol(string("vDSP_zaspec", suff)))(Ref(sc), C, n)
             end
             return C
         end
@@ -423,9 +426,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             ci = $T.(imag.(C))
             GC.@preserve cr ci begin
                 sc = $SC(pointer(cr), pointer(ci))
-                ccall(($(string("vDSP_zcoher", suff)), libacc), Cvoid,
-                      (Ptr{$T}, Ptr{$T}, Ref{$SC}, Ptr{$T}, UInt64),
-                      A, B, sc, D, n)
+                LibAccelerate.$(Symbol(string("vDSP_zcoher", suff)))(A, B, Ref(sc), D, n)
             end
             return D
         end
@@ -450,9 +451,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             GC.@preserve br bi cr ci begin
                 scb = $SC(pointer(br), pointer(bi))
                 scc = $SC(pointer(cr), pointer(ci))
-                ccall(($(string("vDSP_ztrans", suff)), libacc), Cvoid,
-                      (Ptr{$T}, Ref{$SC}, Ref{$SC}, UInt64),
-                      A, scb, scc, n)
+                LibAccelerate.$(Symbol(string("vDSP_ztrans", suff)))(A, Ref(scb), Ref(scc), n)
             end
             @inbounds for i in 1:n
                 C[i] = complex(cr[i], ci[i])
@@ -483,9 +482,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
                 sca = $SC(pointer(ar), pointer(ai))
                 scb = $SC(pointer(br), pointer(bi))
                 scc = $SC(pointer(cr), pointer(ci))
-                ccall(($(string("vDSP_zcspec", suff)), libacc), Cvoid,
-                      (Ref{$SC}, Ref{$SC}, Ref{$SC}, UInt64),
-                      sca, scb, scc, n)
+                LibAccelerate.$(Symbol(string("vDSP_zcspec", suff)))(Ref(sca), Ref(scb), Ref(scc), n)
             end
             @inbounds for i in 1:n
                 C[i] = complex(cr[i], ci[i])
@@ -910,7 +907,7 @@ mutable struct FFTSetup{T}
     function FFTSetup{Float64}(n::Integer, radix::Integer = 2)
         @assert ispow2(n) "n must be a power of 2"
         logn = trailing_zeros(n)
-        plan = ccall(("vDSP_create_fftsetupD", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+        plan = Ptr{Cvoid}(LibAccelerate.vDSP_create_fftsetupD(logn, radix))
         setup = new{Float64}(plan)
         finalizer(destroy_fftsetup, setup)
         setup
@@ -919,7 +916,7 @@ mutable struct FFTSetup{T}
     function FFTSetup{Float32}(n::Integer, radix::Integer = 2)
         @assert ispow2(n) "n must be a power of 2"
         logn = trailing_zeros(n)
-        plan = ccall(("vDSP_create_fftsetup", libacc), Ptr{Cvoid}, (Culong, Cint), logn, radix)
+        plan = Ptr{Cvoid}(LibAccelerate.vDSP_create_fftsetup(logn, radix))
         setup = new{Float32}(plan)
         finalizer(destroy_fftsetup, setup)
         setup
@@ -971,10 +968,8 @@ function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     GC.@preserve realp imagp retr reti begin
         input = DSPDoubleSplitComplex(realp, imagp)
         output = DSPDoubleSplitComplex(retr, reti)
-        ccall(("vDSP_fft_zopD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
-               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+        LibAccelerate.vDSP_fft_zopD(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                    Ref(output), SIGNAL_STRIDE, logn, direction)
     end
 
     return complex.(retr, reti)
@@ -993,10 +988,8 @@ function _fft1d(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     GC.@preserve realp imagp retr reti begin
         input = DSPSplitComplex(realp, imagp)
         output = DSPSplitComplex(retr, reti)
-        ccall(("vDSP_fft_zop", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
-               Ref{DSPSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, direction)
+        LibAccelerate.vDSP_fft_zop(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                   Ref(output), SIGNAL_STRIDE, logn, direction)
     end
 
     return complex.(retr, reti)
@@ -1018,11 +1011,9 @@ function _fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     GC.@preserve realp imagp retr reti begin
         input = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
         output = DSPDoubleSplitComplex(pointer(retr), pointer(reti))
-        ccall(("vDSP_fft2d_zopD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Clong,
-               Ref{DSPDoubleSplitComplex}, Clong, Clong, Culong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, 0, output, SIGNAL_STRIDE, 0,
-              log2nr, log2nc, direction)
+        LibAccelerate.vDSP_fft2d_zopD(setup.plan, Ref(input), SIGNAL_STRIDE, 0,
+                                      Ref(output), SIGNAL_STRIDE, 0,
+                                      log2nr, log2nc, direction)
     end
 
     return complex.(retr, reti)
@@ -1042,11 +1033,9 @@ function _fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     GC.@preserve realp imagp retr reti begin
         input = DSPSplitComplex(pointer(realp), pointer(imagp))
         output = DSPSplitComplex(pointer(retr), pointer(reti))
-        ccall(("vDSP_fft2d_zop", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Clong,
-               Ref{DSPSplitComplex}, Clong, Clong, Culong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, 0, output, SIGNAL_STRIDE, 0,
-              log2nr, log2nc, direction)
+        LibAccelerate.vDSP_fft2d_zop(setup.plan, Ref(input), SIGNAL_STRIDE, 0,
+                                     Ref(output), SIGNAL_STRIDE, 0,
+                                     log2nr, log2nc, direction)
     end
 
     return complex.(retr, reti)
@@ -1110,9 +1099,7 @@ function _fft1d!(x::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int
 
     GC.@preserve realp imagp begin
         c = DSPDoubleSplitComplex(realp, imagp)
-        ccall(("vDSP_fft_zipD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
-              setup.plan, c, SIGNAL_STRIDE, logn, direction)
+        LibAccelerate.vDSP_fft_zipD(setup.plan, Ref(c), SIGNAL_STRIDE, logn, direction)
     end
 
     @inbounds for i in eachindex(x)
@@ -1131,9 +1118,7 @@ function _fft1d!(x::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int
 
     GC.@preserve realp imagp begin
         c = DSPSplitComplex(realp, imagp)
-        ccall(("vDSP_fft_zip", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Culong, Cint),
-              setup.plan, c, SIGNAL_STRIDE, logn, direction)
+        LibAccelerate.vDSP_fft_zip(setup.plan, Ref(c), SIGNAL_STRIDE, logn, direction)
     end
 
     @inbounds for i in eachindex(x)
@@ -1155,9 +1140,8 @@ function _fft2d!(x::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int
 
     GC.@preserve realp imagp begin
         c = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
-        ccall(("vDSP_fft2d_zipD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong, Clong, Culong, Culong, Cint),
-              setup.plan, c, SIGNAL_STRIDE, 0, log2nr, log2nc, direction)
+        LibAccelerate.vDSP_fft2d_zipD(setup.plan, Ref(c), SIGNAL_STRIDE, 0,
+                                      log2nr, log2nc, direction)
     end
 
     @inbounds for i in eachindex(x)
@@ -1177,9 +1161,8 @@ function _fft2d!(x::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int
 
     GC.@preserve realp imagp begin
         c = DSPSplitComplex(pointer(realp), pointer(imagp))
-        ccall(("vDSP_fft2d_zip", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong, Clong, Culong, Culong, Cint),
-              setup.plan, c, SIGNAL_STRIDE, 0, log2nr, log2nc, direction)
+        LibAccelerate.vDSP_fft2d_zip(setup.plan, Ref(c), SIGNAL_STRIDE, 0,
+                                     log2nr, log2nc, direction)
     end
 
     @inbounds for i in eachindex(x)
@@ -1258,10 +1241,8 @@ function _rfft1d(x::Vector{Float64}, setup::FFTSetup{Float64})
     GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
         input = DSPDoubleSplitComplex(inp_realp, inp_imagp)
         output = DSPDoubleSplitComplex(out_realp, out_imagp)
-        ccall(("vDSP_fft_zropD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
-               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_FORWARD)
+        LibAccelerate.vDSP_fft_zropD(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                     Ref(output), SIGNAL_STRIDE, logn, FFT_FORWARD)
     end
 
     # Unpack and divide by 2 (vDSP scales forward real FFT by 2)
@@ -1288,10 +1269,8 @@ function _rfft1d(x::Vector{Float32}, setup::FFTSetup{Float32})
     GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
         input = DSPSplitComplex(inp_realp, inp_imagp)
         output = DSPSplitComplex(out_realp, out_imagp)
-        ccall(("vDSP_fft_zrop", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
-               Ref{DSPSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_FORWARD)
+        LibAccelerate.vDSP_fft_zrop(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                    Ref(output), SIGNAL_STRIDE, logn, FFT_FORWARD)
     end
 
     result = Vector{ComplexF32}(undef, half + 1)
@@ -1328,10 +1307,8 @@ function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
     GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
         input = DSPDoubleSplitComplex(inp_realp, inp_imagp)
         output = DSPDoubleSplitComplex(out_realp, out_imagp)
-        ccall(("vDSP_fft_zropD", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPDoubleSplitComplex}, Clong,
-               Ref{DSPDoubleSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_INVERSE)
+        LibAccelerate.vDSP_fft_zropD(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                     Ref(output), SIGNAL_STRIDE, logn, FFT_INVERSE)
     end
 
     # Unpack interleaved real output
@@ -1364,10 +1341,8 @@ function _brfft1d(X::Vector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
     GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
         input = DSPSplitComplex(inp_realp, inp_imagp)
         output = DSPSplitComplex(out_realp, out_imagp)
-        ccall(("vDSP_fft_zrop", libacc), Cvoid,
-              (Ptr{Cvoid}, Ref{DSPSplitComplex}, Clong,
-               Ref{DSPSplitComplex}, Clong, Culong, Cint),
-              setup.plan, input, SIGNAL_STRIDE, output, SIGNAL_STRIDE, logn, FFT_INVERSE)
+        LibAccelerate.vDSP_fft_zrop(setup.plan, Ref(input), SIGNAL_STRIDE,
+                                    Ref(output), SIGNAL_STRIDE, logn, FFT_INVERSE)
     end
 
     result = Vector{Float32}(undef, n)
