@@ -810,6 +810,83 @@ function SparseFactor(arg1::SparseFactorization_t,
 end
 
 # ============================================================
+# Refactorization (numeric refactor reusing a symbolic factorization)
+# ============================================================
+#
+# `SparseRefactor` in Apple's header is an inline C++ helper that dispatches on
+# the symbolic factorization's `type` and calls one of the exported
+# `_SparseRefactor{Symmetric,QR,LU}_{Float,Double,...}` symbols, passing a
+# scratch workspace of `symbolicFactorization.workspaceSize`. We replicate that
+# dispatch in Julia. The numeric factorization is updated *in place*: given a
+# new SparseMatrix with the *same sparsity pattern* as the one originally
+# factored, it recomputes the numeric factors without redoing the (expensive)
+# symbolic analysis/ordering. This is the workhorse for repeated solves where
+# only the matrix values change (e.g. Newton iterations, time stepping).
+#
+# These low-level symbols take the matrix by value, a pointer to the opaque
+# factorization (mutated in place), a pointer to numeric options, and a
+# workspace pointer.
+const _REFACTOR_SYM = Dict(
+    # (T, kind) => (symbol)
+    (Cfloat,     :Symmetric) => :_SparseRefactorSymmetric_Float,
+    (Cdouble,    :Symmetric) => :_SparseRefactorSymmetric_Double,
+    (ComplexF32, :Symmetric) => :_SparseRefactorSymmetric_Complex_Float,
+    (ComplexF64, :Symmetric) => :_SparseRefactorSymmetric_Complex_Double,
+    (Cfloat,     :QR)        => :_SparseRefactorQR_Float,
+    (Cdouble,    :QR)        => :_SparseRefactorQR_Double,
+    (ComplexF32, :QR)        => :_SparseRefactorQR_Complex_Float,
+    (ComplexF64, :QR)        => :_SparseRefactorQR_Complex_Double,
+    (Cfloat,     :LU)        => :_SparseRefactorLU_Float,
+    (Cdouble,    :LU)        => :_SparseRefactorLU_Double,
+    (ComplexF32, :LU)        => :_SparseRefactorLU_Complex_Float,
+    (ComplexF64, :LU)        => :_SparseRefactorLU_Complex_Double,
+)
+
+# Map a SparseFactorization_t (read from the symbolic factorization) to the
+# refactor family. Mirrors the switch in SparseRefactor (SolveImplementationTyped.h).
+function _refactor_family(t::SparseFactorization_t)
+    if t in (SparseFactorizationQR, SparseFactorizationCholeskyAtA)
+        return :QR
+    elseif t in (SparseFactorizationLU, SparseFactorizationLUUnpivoted,
+                 SparseFactorizationLUSPP, SparseFactorizationLUTPP)
+        return :LU
+    else
+        # Cholesky and the LDLT family all go through the "symmetric" refactor.
+        return :Symmetric
+    end
+end
+
+# Per-type workspace size of the symbolic factorization.
+_refactor_workspace_size(s::SparseOpaqueSymbolicFactorization, ::Type{<:Union{Cfloat,ComplexF32}}) =
+    Int(s.workspaceSize_Float)
+_refactor_workspace_size(s::SparseOpaqueSymbolicFactorization, ::Type{<:Union{Cdouble,ComplexF64}}) =
+    Int(s.workspaceSize_Double)
+
+# Low-level refactor: recompute the numeric factorization of `fact` in place
+# using the values of `matrix`. `matrix` must share the sparsity pattern of the
+# matrix `fact` was originally built from. Returns the (mutated) factorization.
+for ((T, kind), sym) in _REFACTOR_SYM
+    @eval function _sparse_refactor!(fact::Base.RefValue{SparseOpaqueFactorization{$T}},
+                                     matrix::SparseMatrix{$T},
+                                     nfopts::Base.RefValue{SparseNumericFactorOptions},
+                                     ::Val{$(QuoteNode(kind))})
+        symb = fact[].symbolicFactorization
+        wsize = _refactor_workspace_size(symb, $T)
+        workspace = Libc.malloc(wsize)
+        workspace != C_NULL || throw(OutOfMemoryError())
+        try
+            @ccall LIBSPARSE.$sym(matrix::SparseMatrix{$T},
+                                  fact::Ptr{SparseOpaqueFactorization{$T}},
+                                  nfopts::Ptr{SparseNumericFactorOptions},
+                                  workspace::Ptr{Cvoid})::Cvoid
+        finally
+            Libc.free(workspace)
+        end
+        return fact[]
+    end
+end
+
+# ============================================================
 # AASparseMatrix
 # ============================================================
 
@@ -1087,6 +1164,64 @@ function _libsparse_throw(status::SparseStatus_t, op::AbstractString)
         error("libSparse $(op) failed: internal error")
     error("libSparse $(op) failed: status=$(status)")
 end
+
+"""
+    refactor!(f::AAFactorization, A::AASparseMatrix)
+    refactor!(f::AAFactorization, A::SparseMatrixCSC)
+
+Recompute the numeric factorization stored in `f` using the values of `A`,
+**reusing the existing symbolic factorization** (the fill-reducing ordering and
+sparsity analysis). `A` must have the **same sparsity pattern** as the matrix
+`f` was originally factored from; only its numeric values may differ.
+
+This is substantially cheaper than building a fresh [`AAFactorization`](@ref)
+whenever a matrix changes values but not structure — the common case in Newton
+iterations, implicit time stepping, and parameter sweeps.
+
+`f` must already hold a completed factorization (call [`factor!`](@ref) or
+[`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown.
+The factorization object `f` is mutated in place and returned. After
+`refactor!`, `f` references `A`'s data, so keep `A` alive as long as `f` is used.
+
+!!! warning
+    Apple's libSparse does not validate that the new pattern matches the old
+    one. Passing a matrix with a different sparsity pattern is undefined
+    behavior. The dimensions and stored nonzero count are checked here as a
+    cheap guard, but an identical count with a different pattern will not be
+    caught.
+"""
+function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:vTypes
+    status = aa_fact._factorization.status
+    status == SparseStatusOk || throw(ArgumentError(
+        "refactor! requires an already-computed factorization; call factor! or " *
+        "solve first (current status: $status)"))
+    old = aa_fact.matrixObj
+    size(old) == size(A) || throw(DimensionMismatch(
+        "refactor! requires matching dimensions: factored matrix is $(size(old)), " *
+        "new matrix is $(size(A))"))
+    length(old._nzval) == length(A._nzval) || throw(ArgumentError(
+        "refactor! requires the same number of stored nonzeros (same sparsity " *
+        "pattern): factored matrix has $(length(old._nzval)), new matrix has " *
+        "$(length(A._nzval))"))
+
+    family = _refactor_family(aa_fact._factorization.symbolicFactorization.type)
+    nfopts = Ref(SparseNumericFactorOptions(T))
+    factref = Ref(aa_fact._factorization)
+    GC.@preserve A begin
+        _sparse_refactor!(factref, A.matrix, nfopts, Val(family))
+    end
+    new_fact = factref[]
+    _libsparse_throw(new_fact.status, "refactor")
+    aa_fact._factorization = new_fact
+    # Keep the new matrix alive: its CSC buffers now back the numeric factors'
+    # input, and dropping the old wrapper avoids confusion about which values
+    # the factorization reflects.
+    aa_fact.matrixObj = A
+    return aa_fact
+end
+
+refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}) where T<:vTypes =
+    refactor!(aa_fact, AASparseMatrix(A))
 
 """
     solve(f::AAFactorization, b::StridedVecOrMat)

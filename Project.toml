@@ -12,6 +12,7 @@ AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 
 [extensions]
 AppleAccelerateAbstractFFTsExt = "AbstractFFTs"
+AppleAccelerateSparseArraysExt = "SparseArrays"
 
 [compat]
 AbstractFFTs = "1.5"
