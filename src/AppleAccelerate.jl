@@ -188,6 +188,7 @@ end
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")
+    include("linearalgebra.jl")
     include("quadrature.jl")
 end
 
