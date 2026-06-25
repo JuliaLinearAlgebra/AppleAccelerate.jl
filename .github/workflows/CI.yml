@@ -58,14 +58,18 @@ jobs:
       - uses: julia-actions/cache@v3
       - name: Regenerate bindings and report drift
         run: |
+          # Informational: never fail. Clang parse warnings (e.g. arm_neon under the GCC
+          # artifact include path) and SDK differences across runners are expected.
+          set +e
           julia --project=gen -e 'using Pkg; Pkg.instantiate()'
           julia --project=gen gen/generate.jl
           if ! git diff --quiet -- src/lib/LibAccelerate.jl; then
             echo "::notice::src/lib/LibAccelerate.jl differs from a fresh regeneration on this runner's SDK ($(xcrun --show-sdk-path)). This is expected when the runner SDK differs from the reference SDK."
-            git diff --stat -- src/lib/LibAccelerate.jl || true
+            git diff --stat -- src/lib/LibAccelerate.jl
           fi
+          exit 0
       - name: Binding coverage (informational)
-        run: julia --project=. gen/coverage.jl
+        run: julia --project=. gen/coverage.jl || true
   docs:
     name: Documentation
     runs-on: macOS-latest
