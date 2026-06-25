@@ -81,6 +81,33 @@ function strip_out_of_scope_blas!(path)
     return removed
 end
 
+# Post-process: correct the double-precision complex typedefs. Apple's headers define the
+# complex element types via anonymous `_Complex` typedefs (e.g. `typedef _Complex double
+# __double_complex_t;`). Clang.jl mis-resolves these anonymous-`_Complex` typedefs and emits
+# the double-precision ones as `ComplexF32` instead of `ComplexF64`, which would silently give
+# half-width buffers to any double-complex symbol (e.g. `vvcosisin`, `SparseMatrix_Complex_Double`).
+# The single-precision typedefs (`__float_complex_t`, `__SPARSE_float_complex`) are correctly
+# `ComplexF32` and are left untouched. This is a targeted, idempotent rewrite of exactly the two
+# offending `const … = ComplexF32` lines, so the committed output stays deterministic.
+function fix_double_complex_typedefs!(path)
+    lines = readlines(path)
+    fixed = 0
+    for name in ("__double_complex_t", "__SPARSE_double_complex")
+        wrong = "const $name = ComplexF32"
+        right = "const $name = ComplexF64"
+        for i in eachindex(lines)
+            if lines[i] == wrong
+                lines[i] = right
+                fixed += 1
+            end
+        end
+    end
+    write(path, join(lines, "\n") * "\n")
+    return fixed
+end
+
 out_path = joinpath(@__DIR__, "..", "src", "lib", "LibAccelerate.jl")
 removed = strip_out_of_scope_blas!(out_path)
 @info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"
+fixed = fix_double_complex_typedefs!(out_path)
+@info "Corrected $fixed double-precision complex typedef(s) (Clang.jl anonymous-_Complex bug)"
