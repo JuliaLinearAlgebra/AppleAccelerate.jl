@@ -1032,6 +1032,83 @@ function AAFactorization(A::AASparseMatrix{T}) where T<:vTypes
 end
 
 # ============================================================
+# Low-level numeric refactorization kernels
+# ============================================================
+# These call the plain-C `_SparseRefactor*` symbols directly and depend only on
+# the raw structs/enums + `LIBSPARSE` (no LinearAlgebra), so they live in core.
+# The user-facing `refactor!` that drives them is added by the LinearAlgebra
+# extension. (They were previously referenced by the extension but not defined
+# anywhere, which precompiled on Julia 1.11+ — where `using M: <undefined>` is
+# lazy — but failed on the 1.10 floor, where the import is eager.)
+
+const _REFACTOR_SYM = Dict(
+    # (T, kind) => (symbol)
+    (Cfloat,     :Symmetric) => :_SparseRefactorSymmetric_Float,
+    (Cdouble,    :Symmetric) => :_SparseRefactorSymmetric_Double,
+    (ComplexF32, :Symmetric) => :_SparseRefactorSymmetric_Complex_Float,
+    (ComplexF64, :Symmetric) => :_SparseRefactorSymmetric_Complex_Double,
+    (Cfloat,     :QR)        => :_SparseRefactorQR_Float,
+    (Cdouble,    :QR)        => :_SparseRefactorQR_Double,
+    (ComplexF32, :QR)        => :_SparseRefactorQR_Complex_Float,
+    (ComplexF64, :QR)        => :_SparseRefactorQR_Complex_Double,
+    (Cfloat,     :LU)        => :_SparseRefactorLU_Float,
+    (Cdouble,    :LU)        => :_SparseRefactorLU_Double,
+    (ComplexF32, :LU)        => :_SparseRefactorLU_Complex_Float,
+    (ComplexF64, :LU)        => :_SparseRefactorLU_Complex_Double,
+)
+
+# Map a SparseFactorization_t (read from the symbolic factorization) to the
+# refactor family. Mirrors the switch in SparseRefactor (SolveImplementationTyped.h).
+function _refactor_family(t::SparseFactorization_t)
+    if t in (SparseFactorizationQR, SparseFactorizationCholeskyAtA)
+        return :QR
+    elseif t in (SparseFactorizationLU, SparseFactorizationLUUnpivoted,
+                 SparseFactorizationLUSPP, SparseFactorizationLUTPP)
+        return :LU
+    else
+        # Cholesky and the LDLT family all go through the "symmetric" refactor.
+        return :Symmetric
+    end
+end
+
+# Per-type workspace size of the symbolic factorization.
+_refactor_workspace_size(s::SparseOpaqueSymbolicFactorization, ::Type{<:Union{Cfloat,ComplexF32}}) =
+    Int(s.workspaceSize_Float)
+_refactor_workspace_size(s::SparseOpaqueSymbolicFactorization, ::Type{<:Union{Cdouble,ComplexF64}}) =
+    Int(s.workspaceSize_Double)
+
+# Low-level refactor: recompute the numeric factorization of `fact` in place
+# using the values of `matrix`. `matrix` must share the sparsity pattern of the
+# matrix `fact` was originally built from. Returns the (mutated) factorization.
+for ((T, kind), sym) in _REFACTOR_SYM
+    @eval function _sparse_refactor!(fact::Base.RefValue{SparseOpaqueFactorization{$T}},
+                                     matrix::SparseMatrix{$T},
+                                     nfopts::Base.RefValue{SparseNumericFactorOptions},
+                                     ::Val{$(QuoteNode(kind))})
+        symb = fact[].symbolicFactorization
+        wsize = _refactor_workspace_size(symb, $T)
+        workspace = Libc.malloc(wsize)
+        workspace != C_NULL || throw(OutOfMemoryError())
+        try
+            # The plain-C `_SparseRefactor*` symbols take the matrix BY POINTER
+            # (`SparseMatrix_Double *`), unlike the C++ `SparseFactor` entry point
+            # which takes it by value. Passing the struct by value misaligns the
+            # x86_64 SysV argument registers (it lands on the stack), which crashed
+            # libSparse with SIGILL on Intel macOS while happening to work on arm64
+            # (large structs are passed indirectly there). Pass via `Ref` so ccall
+            # hands over a GC-rooted pointer matching the generated ABI.
+            @ccall LIBSPARSE.$sym(matrix::Ref{SparseMatrix{$T}},
+                                  fact::Ptr{SparseOpaqueFactorization{$T}},
+                                  nfopts::Ptr{SparseNumericFactorOptions},
+                                  workspace::Ptr{Cvoid})::Cvoid
+        finally
+            Libc.free(workspace)
+        end
+        return fact[]
+    end
+end
+
+# ============================================================
 # Stubs for the factorize/solve subsystem (implemented in extensions)
 # ============================================================
 #
