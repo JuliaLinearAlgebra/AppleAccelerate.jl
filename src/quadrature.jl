@@ -17,6 +17,21 @@ using .LibAccelerate:
     QUADRATURE_INTEGRATE_QAG,
     QUADRATURE_INTEGRATE_QAGS
 
+# Top-level (non-closure) callback for Accelerate's batched integrand evaluation. We recover
+# the Julia integrand from the C `fun_arg` user-pointer rather than closing over it, because
+# closure `@cfunction` is unsupported on macOS/aarch64 before Julia 1.12; this trampoline
+# works on all supported platforms. `arg` points to a `Ref{Any}` boxing the integrand.
+function _quadrature_trampoline(arg::Ptr{Cvoid}, n::Csize_t,
+                                x::Ptr{Cdouble}, y::Ptr{Cdouble})
+    f = unsafe_pointer_to_objref(arg)[]
+    xs  = unsafe_wrap(Array, x, (Int(n),))
+    out = unsafe_wrap(Array, y, (Int(n),))
+    @inbounds for i in 1:Int(n)
+        out[i] = f(xs[i])
+    end
+    return nothing
+end
+
 """
     integrate(f, a, b; integrator=:qags, abstol=1e-8, reltol=1e-8,
               max_intervals=200, qag_points=0)
@@ -52,27 +67,21 @@ function integrate(f, a::Real, b::Real;
            integrator === :qags ? QUADRATURE_INTEGRATE_QAGS :
            throw(ArgumentError("unknown integrator $(repr(integrator)); use :qng, :qag, or :qags"))
 
-    # Accelerate's callback fills y[i] = f(x[i]) for a batch of points. We close
-    # over `f` directly, so the `arg` user-pointer is unused and we pass C_NULL.
-    fill! = (_arg, n, x, y) -> begin
-        xs  = unsafe_wrap(Array, x, (Int(n),))
-        out = unsafe_wrap(Array, y, (Int(n),))
-        @inbounds for i in 1:Int(n)
-            out[i] = f(xs[i])
-        end
-        return nothing
-    end
-    cb = @cfunction($fill!, Cvoid, (Ptr{Cvoid}, Csize_t, Ptr{Cdouble}, Ptr{Cdouble}))
-
-    fun = Ref(quadrature_integrate_function(
-        Base.unsafe_convert(Ptr{Cvoid}, cb), C_NULL))
+    # Pass the integrand to the top-level trampoline via the C user-pointer. `fbox` boxes `f`
+    # in a mutable Ref so we can take its address (pointer_from_objref needs a mutable object,
+    # and works for any callable incl. singletons like `sin`); GC.@preserve keeps it alive
+    # across the ccall.
+    cb = @cfunction(_quadrature_trampoline, Cvoid,
+                    (Ptr{Cvoid}, Csize_t, Ptr{Cdouble}, Ptr{Cdouble}))
+    fbox = Ref{Any}(f)
+    fun = Ref(quadrature_integrate_function(cb, pointer_from_objref(fbox)))
     opts = Ref(quadrature_integrate_options(
         intg, Float64(abstol), Float64(reltol),
         Csize_t(qag_points), Csize_t(max_intervals)))
     status = Ref(QUADRATURE_SUCCESS)
     abserr = Ref{Cdouble}(0.0)
 
-    value = GC.@preserve cb fun opts status abserr begin
+    value = GC.@preserve fbox fun opts status abserr begin
         quadrature_integrate(fun, Float64(a), Float64(b), opts,
                              status, abserr, Csize_t(0), C_NULL)
     end
