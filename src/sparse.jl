@@ -857,10 +857,11 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
             attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
         end
     end
-    if attributes in (ATT_TRI_LOWER, ATT_TRI_UPPER) &&
-                    all(diag(sparseM) .== one(eltype(sparseM)))
-        attributes |= ATT_UNIT_TRIANGULAR
-    end
+    # NOTE: we deliberately do NOT auto-tag unit-triangular matrices. libSparse
+    # treats ATT_UNIT_TRIANGULAR as an *implicit* unit diagonal, but we keep the
+    # stored diagonal in the CSC data, so tagging it would double-count the
+    # diagonal in both multiply and solve. The plain ATT_TRIANGULAR path is
+    # correct for stored diagonals.
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
@@ -897,18 +898,37 @@ _maybe_conjugate(attr::att_type, ::Type{<:Complex}) =
     (ATT_TRANSPOSE | ATT_CONJUGATE_TRANSPOSE)
 _maybe_conjugate(::att_type, ::Type{<:Real}) = false
 
+# Look up a (raw_i, raw_j) entry directly in the stored CSC data, returning
+# `nothing` if there is no stored value at that position.
+function _csc_lookup(M::AASparseMatrix{T}, raw_i::Int, raw_j::Int) where T<:vTypes
+    (startCol, endCol) = (M._colptr[raw_j], M._colptr[raw_j+1]-1) .+ 1
+    rowsInCol = @view M._rowval[startCol:endCol]
+    ind = searchsortedfirst(rowsInCol, raw_i-1)
+    if ind <= length(rowsInCol) && rowsInCol[ind] == raw_i-1
+        return M._nzval[startCol+ind-1]
+    end
+    return nothing
+end
+
 function Base.getindex(M::AASparseMatrix{T}, i::Int, j::Int) where T<:vTypes
     ((size(M)[1] >= i >= 1) && (size(M)[2] >= j >= 1)) || throw(BoundsError(M, (i, j)))
     # (i,j) is the *logical* index; map back to the raw CSC layout.
     attrs = M.matrix.structure.attributes
     transposed = (attrs & ATT_TRANSPOSE) != 0
     raw_i, raw_j = transposed ? (j, i) : (i, j)
-    (startCol, endCol) = (M._colptr[raw_j], M._colptr[raw_j+1]-1) .+ 1
-    rowsInCol = @view M._rowval[startCol:endCol]
-    ind = searchsortedfirst(rowsInCol, raw_i-1)
-    if ind <= length(rowsInCol) && rowsInCol[ind] == raw_i-1
-        val = M._nzval[startCol+ind-1]
+    val = _csc_lookup(M, raw_i, raw_j)
+    if val !== nothing
         return _maybe_conjugate(attrs, T) ? conj(val) : val
+    end
+    # Symmetric/Hermitian matrices store only one triangle, so an element in the
+    # empty triangle must be read from its mirror (j,i), conjugating for
+    # Hermitian-complex.
+    if issymmetric(M) || ishermitian(M)
+        mirrored = _csc_lookup(M, raw_j, raw_i)
+        if mirrored !== nothing
+            herm = (attrs & ATT_KIND_MASK_COMPLEX) == ATT_HERMITIAN
+            return herm ? conj(mirrored) : mirrored
+        end
     end
     return zero(eltype(M))
 end
@@ -1102,6 +1122,7 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     factor!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
 end
 
@@ -1121,6 +1142,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vT
         )
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return xb # written in imitation of KLU.jl, which also returns
 end
 
@@ -1138,5 +1160,6 @@ function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
         * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, b, x)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
 end

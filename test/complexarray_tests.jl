@@ -91,6 +91,13 @@ for T in (Float32, Float64)
         # zrdotpr: complex-real dot
         Br::Vector{T} = randn(T, N)
         @test AppleAccelerate.zrdotpr(A, Br) ≈ sum(A .* Br)
+
+        # Regression: complex `dot` must be conjugated to match LinearAlgebra.dot
+        # (sum(conj(X) .* Y)), and `dotu` exposes the un-conjugated product.
+        @test AppleAccelerate.dot(A, B) ≈ LinearAlgebra.dot(A, B) ≈ sum(conj.(A) .* B)
+        @test AppleAccelerate.dotu(A, B) ≈ sum(A .* B)
+        # The two differ for genuinely complex inputs.
+        @test !(AppleAccelerate.dot(A, B) ≈ AppleAccelerate.dotu(A, B))
     end
 end
 

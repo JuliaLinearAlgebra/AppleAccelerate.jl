@@ -57,6 +57,14 @@ end
         @test AppleAccelerate.get_num_threads() == 1
         @test AppleAccelerate.set_num_threads(1) == 1
     end
+    # Regression: set_num_threads(n ≤ 0) used to fall through both branches,
+    # leaving retval == -1 and tripping the BLASSetThreading @assert. It must
+    # reject non-positive thread counts up front. Guarded like the cases above
+    # so it only runs where the threading API is available (macOS ≥ 15).
+    if AppleAccelerate.get_macos_version() >= v"15"
+        @test_throws ArgumentError AppleAccelerate.set_num_threads(0)
+        @test_throws ArgumentError AppleAccelerate.set_num_threads(-1)
+    end
 end
 
 linalg_stdlib_test_path = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")

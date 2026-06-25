@@ -403,6 +403,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+                (length(X) == length(Y) == length(result)) ||
+                    throw(DimensionMismatch("result, X and Y must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(Y, 1, X, 1, result, 1, length(result))
                 return result
             end
@@ -609,6 +611,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+                (length(X) == length(Y) == length(result)) ||
+                    throw(DimensionMismatch("result, X and Y must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,Y,1,result,1,length(X))
                 return result
             end
@@ -668,6 +672,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+                (length(A) == length(B) == length(C) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B and C must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
                 return result
             end
@@ -680,6 +686,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function venvlp!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+            (length(A) == length(B) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A, B and C must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_venvlp", suff)))(A,1,B,1,C,1,result,1,length(A))
             return result
         end
@@ -694,6 +702,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+                (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B, C and D must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
                 return result
             end
@@ -706,6 +716,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vpythg!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+            (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                throw(DimensionMismatch("result, A, B, C and D must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vpythg", suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
             return result
         end
@@ -720,6 +732,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
+                (length(A) == length(B) == length(result)) ||
+                    throw(DimensionMismatch("result, A and B must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,Ref(c),result,1,length(A))
                 return result
             end
@@ -732,6 +746,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vsma", suff)))(A,1,Ref(b),C,1,result,1,length(A))
             return result
         end
@@ -754,6 +770,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vaddsub!(add_result::Vector{$T}, sub_result::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+            (length(A) == length(B) == length(add_result) == length(sub_result)) ||
+                throw(DimensionMismatch("add_result, sub_result, A and B must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vaddsub", suff)))(A,1,B,1,add_result,1,sub_result,1,length(A))
             return (add_result, sub_result)
         end
@@ -787,6 +805,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+                (length(A) == length(B) == length(C) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B and C must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
                 return result
             end
@@ -803,6 +823,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+                (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B, C and D must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
                 return result
             end
@@ -816,6 +838,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vmsa: D[n] = A[n]*B[n] + c  (2-vector + scalar → 1-vector)
     @eval begin
         function vmsa!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
+            (length(A) == length(B) == length(result)) ||
+                throw(DimensionMismatch("result, A and B must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vmsa", suff)))(A,1,B,1,Ref(c),result,1,length(A))
             return result
         end
@@ -828,6 +852,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vsmsb: D[n] = A[n]*b - C[n]  (vector*scalar - vector)
     @eval begin
         function vsmsb!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vsmsb", suff)))(A,1,Ref(b),C,1,result,1,length(A))
             return result
         end
@@ -840,6 +866,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vsmsma: E[n] = A[n]*b + C[n]*d  (vector*scalar + vector*scalar)
     @eval begin
         function vsmsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vsmsma", suff)))(A,1,Ref(b),C,1,Ref(d),result,1,length(A))
             return result
         end
@@ -865,11 +893,15 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function dot(X::Vector{$T}, Y::Vector{$T})
+            length(X) == length(Y) ||
+                throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
             LibAccelerate.$(Symbol(string("vDSP_dotpr", suff)))(X,1,Y,1,val,length(X))
             return val[]
         end
         function distancesq(X::Vector{$T}, Y::Vector{$T})
+            length(X) == length(Y) ||
+                throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
             LibAccelerate.$(Symbol(string("vDSP_distancesq", suff)))(X,1,Y,1,val,length(X))
             return val[]
@@ -1062,10 +1094,14 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vavlin!(C::Vector{$T}, A::Vector{$T}, weight::$T)
+            length(A) == length(C) ||
+                throw(DimensionMismatch("C and A must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vavlin", suff)))(A,1,Ref(weight),C,1,length(A))
             return C
         end
-        function vavlin(A::Vector{$T}, C::Vector{$T}, weight::$T)
+        # Operand order matches the mutating `vavlin!(C, A, weight)`: C is the
+        # running accumulator, A is the new sample vector.
+        function vavlin(C::Vector{$T}, A::Vector{$T}, weight::$T)
             result = copy(C)
             vavlin!(result, A, weight)
         end
@@ -1140,6 +1176,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vintb!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, t::$T)
+            (length(A) == length(B) == length(result)) ||
+                throw(DimensionMismatch("result, A and B must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vintb", suff)))(A,1,B,1,Ref(t),result,1,length(A))
             return result
         end

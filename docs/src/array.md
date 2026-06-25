@@ -579,7 +579,8 @@ AppleAccelerate also wraps [vDSP](https://developer.apple.com/documentation/acce
 | `vmul(X, Y)` / `vmul!(result, X, Y)` | Element-wise multiply: `X .* Y` |
 | `vdiv(X, Y)` / `vdiv!(result, X, Y)` | Element-wise divide: `X ./ Y` |
 | `vsmul(X, c)` / `vsmul!(result, X, c)` | Scalar multiply (complex scalar) |
-| `dot(X, Y)` | Unconjugated dot product: `sum(X .* Y)` |
+| `dot(X, Y)` | Conjugated dot product matching `LinearAlgebra.dot`: `sum(conj(X) .* Y)` |
+| `dotu(X, Y)` | Unconjugated (bilinear) dot product: `sum(X .* Y)` |
 | [`zvadd`](@ref AppleAccelerate.zvadd) | Complex addition: `A + B` |
 | [`zvsub`](@ref AppleAccelerate.zvsub) | Complex subtraction: `A - B` |
 | [`zvcmul`](@ref AppleAccelerate.zvcmul) | Conjugate multiply: `conj(A) * B` |
