@@ -875,7 +875,14 @@ for ((T, kind), sym) in _REFACTOR_SYM
         workspace = Libc.malloc(wsize)
         workspace != C_NULL || throw(OutOfMemoryError())
         try
-            @ccall LIBSPARSE.$sym(matrix::SparseMatrix{$T},
+            # The plain-C `_SparseRefactor*` symbols take the matrix BY POINTER
+            # (`SparseMatrix_Double *`), unlike the C++ `SparseFactor` entry point
+            # which takes it by value. Passing the struct by value misaligns the
+            # x86_64 SysV argument registers (it lands on the stack), which crashed
+            # libSparse with SIGILL on Intel macOS while happening to work on arm64
+            # (large structs are passed indirectly there). Pass via `Ref` so ccall
+            # hands over a GC-rooted pointer matching the generated ABI.
+            @ccall LIBSPARSE.$sym(matrix::Ref{SparseMatrix{$T}},
                                   fact::Ptr{SparseOpaqueFactorization{$T}},
                                   nfopts::Ptr{SparseNumericFactorOptions},
                                   workspace::Ptr{Cvoid})::Cvoid
