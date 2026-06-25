@@ -1,7 +1,12 @@
-if AppleAccelerate.get_macos_version() < v"13.4"
+# BLAS/LAPACK forwarding requires macOS >= 13.4. On older systems (or if the
+# version can't be determined) we skip *just* the forwarding-dependent tests and
+# return control to runtests.jl so later test files (quadrature, bnns, nnlib)
+# still run. NOTE: this file is `include`d, so a bare top-level `return` is a
+# syntax error here — we guard with `if/else` instead of `exit`/`return`.
+let v = AppleAccelerate.get_macos_version()
+if v === nothing || v < v"13.4"
     @info("AppleAccelerate.jl needs macOS >= 13.4 for BLAS forwarding. Not testing forwarding capabilities.")
-    exit(0)
-end
+else
 
 # Set up a debugging fallback function that prints out a stacktrace if the LinearAlgebra
 # tests end up calling a function that we don't have forwarded.
@@ -88,3 +93,6 @@ end
 end
 
 end # @testset "Dense Linear Algebra"
+
+end # if forwarding supported (macOS >= 13.4)
+end # let v
