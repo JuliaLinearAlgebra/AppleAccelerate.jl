@@ -70,6 +70,22 @@ jobs:
           exit 0
       - name: Binding coverage (informational)
         run: julia --project=. gen/coverage.jl || true
+  smoke:
+    name: Bare-load smoke (no test extras)
+    runs-on: macOS-latest
+    # Load the package with ONLY its own dependencies (no test/ extras) to catch an
+    # accidental hard-dependency on a weakdep: `using AppleAccelerate` must precompile
+    # and load cleanly against the package's own Project.toml deps alone.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Instantiate package deps only
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Load AppleAccelerate
+        run: julia --project=. -e 'using AppleAccelerate; @info "AppleAccelerate loaded cleanly"'
   docs:
     name: Documentation
     runs-on: macOS-latest

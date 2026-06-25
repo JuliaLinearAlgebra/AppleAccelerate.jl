@@ -21,9 +21,8 @@
 
 using .LibAccelerate:
     BNNSNDArrayDescriptor, BNNSDataType, BNNSDataLayout,
-    BNNSDataTypeFloat32, BNNSDataTypeFloat16, BNNSDataTypeInt32,
-    BNNSDataLayoutVector, BNNSDataLayoutRowMajorMatrix, BNNSDataLayoutColumnMajorMatrix,
-    BNNSDataLayout2DLastMajor, BNNSDataLayout3DLastMajor,
+    BNNSDataTypeFloat32, BNNSDataTypeInt32,
+    BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix,
     BNNSActivation, BNNSActivationFunction,
     BNNSActivationFunctionIdentity, BNNSActivationFunctionRectifiedLinear,
     BNNSActivationFunctionSigmoid, BNNSActivationFunctionTanh,
@@ -179,7 +178,7 @@ end
 # --- Pointwise activation ----------------------------------------------------
 
 """
-    bnns_activation(f::Symbol, X::Array{Float32}; alpha=0.0f0, beta=0.0f0) -> Array{Float32}
+    bnns_activation(f::Symbol, X::AbstractArray{Float32}; alpha=0.0f0, beta=0.0f0) -> AbstractArray{Float32}
 
 Apply a pointwise activation function `f` to every element of `X` using the BNNS
 activation-layer filter API, returning a new array. Supported `f`:
@@ -210,7 +209,7 @@ const _BNNS_ACT = Dict(
 )
 
 """
-    bnns_activation!(f::Symbol, Y, X; alpha=0.0f0, beta=0.0f0) -> Y
+    bnns_activation!(f::Symbol, Y::AbstractArray{Float32}, X::AbstractArray{Float32}; alpha=0.0f0, beta=0.0f0) -> Y
 
 In-place pointwise activation: `Y .= f.(X)`. See [`bnns_activation`](@ref) for the
 list of supported `f`. `X` and `Y` must have the same shape. Returns `Y`.

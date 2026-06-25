@@ -1,4 +1,9 @@
-if AppleAccelerate.get_macos_version() < v"13.4"
+# BLAS/LAPACK forwarding requires macOS >= 13.4. This file is the LAST one
+# included by runtests.jl, so on older systems (or when the version can't be
+# determined) we can cleanly `exit(0)` here without skipping any other test files
+# — the non-forwarding suites (quadrature, bnns, nnlib) have already run.
+let v = AppleAccelerate.get_macos_version()
+if v === nothing || v < v"13.4"
     @info("AppleAccelerate.jl needs macOS >= 13.4 for BLAS forwarding. Not testing forwarding capabilities.")
     exit(0)
 end
@@ -96,3 +101,5 @@ end
 end
 
 end # @testset "Dense Linear Algebra"
+
+end # let v
