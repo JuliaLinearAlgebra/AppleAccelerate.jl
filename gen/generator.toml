@@ -1,0 +1,31 @@
+[general]
+# The raw bindings live in their own submodule so the idiomatic layer
+# (array.jl, dsp.jl, sparse.jl, …) can call `LibAccelerate.quadrature_integrate`
+# instead of embedding ccall strings.
+module_name = "LibAccelerate"
+library_name = "libacc"
+output_file_path = "../src/lib/LibAccelerate.jl"
+
+# Spliced in verbatim at the top of the generated module. We use it to define
+# `libacc` — Accelerate is a *system framework* loaded by absolute path, not a
+# JLL artifact, so there is nothing to `using`.
+prologue_file_path = "./prologue.jl"
+
+# Apple's enums map cleanly onto Julia's native @enum; no CEnum dependency.
+use_julia_native_enum_type = true
+print_using_CEnum = false
+
+# Function-like helper macros from Sparse/Solve.h that Clang.jl mistranslates into broken
+# `const` expressions. They are internal C preprocessor helpers, not API.
+output_ignorelist = [
+    "sparse_mul_overflow",
+    "_SPARSE_REAL_VARIANT",
+    "_SPARSE_REAL_SIZE",
+]
+
+# Keep generated structs immutable — they are plain C value types we build and
+# pass by reference (Ref/pointer), never mutate field-by-field from Julia.
+auto_mutability = false
+
+[codegen]
+use_ccall_macro = true

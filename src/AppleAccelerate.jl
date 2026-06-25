@@ -179,10 +179,16 @@ function __init__()
 end
 
 @static if Sys.isapple()
+    # Raw, auto-generated ABI layer (Clang.jl). Do not edit by hand — regenerate
+    # with `julia --project=gen gen/generate.jl`. The idiomatic wrappers below
+    # call into this submodule instead of embedding ccall strings.
+    include("lib/LibAccelerate.jl")
+
     include("array.jl")
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")
+    include("quadrature.jl")
 end
 
 end # module
