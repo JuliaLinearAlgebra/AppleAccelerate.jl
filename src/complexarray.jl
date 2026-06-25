@@ -1,20 +1,26 @@
 ## complexarray.jl — Complex-valued vDSP operations using split-complex format ##
 
+# RAW-LAYER MIGRATION NOTE: the split-complex wrappers in this file now call the
+# generated `LibAccelerate` submodule. The split-complex operands are passed as
+# `Ref{DSPSplitComplex}` / `Ref{DSPDoubleSplitComplex}`, which `@ccall` (inside the
+# generated wrappers) auto-converts to the `Ptr{DSPSplitComplex}` they expect.
+#
+# Previously this file defined its OWN `DSPSplitComplex` / `DSPDoubleSplitComplex`
+# structs that were distinct from LibAccelerate's, which is why #154 left these as raw
+# `ccall`s. We now ALIAS the names directly to `LibAccelerate.DSPSplitComplex` /
+# `LibAccelerate.DSPDoubleSplitComplex` (identical C layout: `{ Ptr realp; Ptr imagp }`),
+# so a `Ref` to one of them converts cleanly to the generated wrappers' pointer args.
+# The vector convenience constructors below are added as methods on the aliased types.
+
 # ============================================================
 # Split-complex structs (used here and by dsp.jl for FFT)
+# These alias the generated LibAccelerate structs so the generated `vDSP_z*` / FFT
+# wrappers accept `Ref`s to them with no conversion friction.
 # ============================================================
-struct DSPDoubleSplitComplex
-    realp::Ptr{Float64}
-    imagp::Ptr{Float64}
-end
+const DSPDoubleSplitComplex = LibAccelerate.DSPDoubleSplitComplex
+const DSPSplitComplex = LibAccelerate.DSPSplitComplex
 
 DSPDoubleSplitComplex(realp::Vector{Float64}, imagp::Vector{Float64}) = DSPDoubleSplitComplex(pointer(realp), pointer(imagp))
-
-struct DSPSplitComplex
-    realp::Ptr{Float32}
-    imagp::Ptr{Float32}
-end
-
 DSPSplitComplex(realp::Vector{Float32}, imagp::Vector{Float32}) = DSPSplitComplex(pointer(realp), pointer(imagp))
 
 # ------------------------------------------------------------
@@ -52,9 +58,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvneg", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvneg", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -72,9 +77,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvconj", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvconj", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -92,9 +96,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvmov", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvmov", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -131,9 +134,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 xsplit = _split_view($DSPSplit, pointer(X))
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvmul", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, Cint),
-                      xsplit, _CSTRIDE, ysplit, _CSTRIDE, osplit, _CSTRIDE, n, Cint(1))
+                LibAccelerate.$(Symbol(string("vDSP_zvmul", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n, Cint(1))
             end
             return result
         end
@@ -153,9 +155,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 xsplit = _split_view($DSPSplit, pointer(X))
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvdiv", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      ysplit, _CSTRIDE, xsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvdiv", suff)))(
+                      Ref(ysplit), _CSTRIDE, Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -176,9 +177,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 xsplit = _split_view($DSPSplit, pointer(X))
                 csplit = _split_view($DSPSplit, pointer(c2))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvzsml", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, UInt64),
-                      xsplit, _CSTRIDE, csplit, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvzsml", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(csplit), Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -202,9 +202,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
-                ccall(($(string("vDSP_zvabs", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, _CSTRIDE, result, 1, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvabs", suff)))(
+                      Ref(xsplit), _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -221,9 +220,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
-                ccall(($(string("vDSP_zvphas", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, _CSTRIDE, result, 1, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvphas", suff)))(
+                      Ref(xsplit), _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -240,9 +238,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
-                ccall(($(string("vDSP_zvmags", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, _CSTRIDE, result, 1, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvmags", suff)))(
+                      Ref(xsplit), _CSTRIDE, result, 1, n)
             end
             return result
         end
@@ -259,9 +256,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             GC.@preserve X B result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
-                ccall(($(string("vDSP_zvmgsa", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      xsplit, _CSTRIDE, B, 1, result, 1, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvmgsa", suff)))(
+                      Ref(xsplit), _CSTRIDE, B, 1, result, 1, n)
             end
             return result
         end
@@ -302,6 +298,14 @@ Wraps [`vDSP_zvmgsa`](https://developer.apple.com/documentation/accelerate/vdsp_
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
     @eval begin
+        @doc """
+            dot(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
+
+        Conjugated complex dot product `sum(conj(X) .* Y)`, matching
+        `LinearAlgebra.dot`. Wraps the conjugating routine
+        [`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr).
+        For the un-conjugated product `sum(X .* Y)` use [`dotu`](@ref).
+        """
         function dot(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dot: X and Y must have equal lengths"))
             n = length(X)
@@ -310,9 +314,31 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 xsplit = _split_view($DSPSplit, pointer(X))
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(out))
-                ccall(($(string("vDSP_zdotpr", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, UInt64),
-                      xsplit, _CSTRIDE, ysplit, _CSTRIDE, osplit, n)
+                # vDSP_zidotpr conjugates its FIRST argument: result = sum(conj(X) .* Y).
+                LibAccelerate.$(Symbol(string("vDSP_zidotpr", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), n)
+            end
+            return complex(out[1], out[2])
+        end
+
+        @doc """
+            dotu(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
+
+        Un-conjugated complex dot product `sum(X .* Y)` (the "bilinear" dot,
+        without conjugating `X`). Wraps
+        [`vDSP_zdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zdotpr).
+        For the conjugated product matching `LinearAlgebra.dot` use [`dot`](@ref).
+        """
+        function dotu(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+            length(X) == length(Y) || throw(DimensionMismatch("dotu: X and Y must have equal lengths"))
+            n = length(X)
+            out = $T[0, 0]                 # interleaved [re, im] scalar result
+            GC.@preserve X Y out begin
+                xsplit = _split_view($DSPSplit, pointer(X))
+                ysplit = _split_view($DSPSplit, pointer(Y))
+                osplit = _split_view($DSPSplit, pointer(out))
+                LibAccelerate.$(Symbol(string("vDSP_zdotpr", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -331,9 +357,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             n = length(X)
             interleaved_out = Vector{$T}(undef, 2 * n)
             GC.@preserve X interleaved_out begin
-                ccall(($(string("vDSP_polar", suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      pointer(X), 2, interleaved_out, 2, n)
+                LibAccelerate.$(Symbol(string("vDSP_polar", suff)))(
+                      Ptr{$T}(pointer(X)), 2, interleaved_out, 2, n)
             end
             magnitudes = interleaved_out[1:2:end]
             angles = interleaved_out[2:2:end]
@@ -352,9 +377,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             interleaved_in[2:2:end] .= angles
             result = Vector{Complex{$T}}(undef, n)
             GC.@preserve interleaved_in result begin
-                ccall(($(string("vDSP_rect", suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      interleaved_in, 2, pointer(result), 2, n)
+                LibAccelerate.$(Symbol(string("vDSP_rect", suff)))(
+                      interleaved_in, 2, Ptr{$T}(pointer(result)), 2, n)
             end
             return result
         end
@@ -393,9 +417,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 asplit = _split_view($DSPSplit, pointer(A))
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvadd", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvadd", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -414,9 +437,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 asplit = _split_view($DSPSplit, pointer(A))
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvsub", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvsub", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -435,9 +457,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 asplit = _split_view($DSPSplit, pointer(A))
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvcmul", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvcmul", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -457,9 +478,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zrvmul", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zrvmul", suff)))(
+                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -477,9 +497,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zrvdiv", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zrvdiv", suff)))(
+                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -497,9 +516,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zrvadd", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zrvadd", suff)))(
+                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -517,9 +535,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zrvsub", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, B, 1, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zrvsub", suff)))(
+                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -541,9 +558,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvcma", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvcma", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -563,9 +579,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvma", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvma", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -586,9 +601,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(b2))
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvsma", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      asplit, _CSTRIDE, bsplit, csplit, _CSTRIDE, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvsma", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -610,9 +624,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 asplit = _split_view($DSPSplit, pointer(A))
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(out))
-                ccall(($(string("vDSP_zidotpr", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, UInt64),
-                      asplit, _CSTRIDE, bsplit, _CSTRIDE, osplit, n)
+                LibAccelerate.$(Symbol(string("vDSP_zidotpr", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -627,9 +640,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve A B out begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(out))
-                ccall(($(string("vDSP_zrdotpr", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{$T}, Int64, Ref{$DSPSplit}, UInt64),
-                      asplit, _CSTRIDE, B, 1, osplit, n)
+                LibAccelerate.$(Symbol(string("vDSP_zrdotpr", suff)))(
+                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -645,9 +657,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             GC.@preserve result c2 begin
                 csplit = _split_view($DSPSplit, pointer(c2))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zvfill", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Ref{$DSPSplit}, Int64, UInt64),
-                      csplit, osplit, _CSTRIDE, n)
+                LibAccelerate.$(Symbol(string("vDSP_zvfill", suff)))(
+                      Ref(csplit), Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -668,9 +679,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 xsplit = _split_view($DSPSplit, pointer(xpad))
                 ksplit = _split_view($DSPSplit, pointer(K))
                 osplit = _split_view($DSPSplit, pointer(result))
-                ccall(($(string("vDSP_zconv", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64),
-                      xsplit, _CSTRIDE, ksplit, _CSTRIDE, osplit, _CSTRIDE, rn, kn)
+                LibAccelerate.$(Symbol(string("vDSP_zconv", suff)))(
+                      Ref(xsplit), _CSTRIDE, Ref(ksplit), _CSTRIDE, Ref(osplit), _CSTRIDE, rn, kn)
             end
             return result
         end
@@ -695,9 +705,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(C))
                 # Same trick as mmul: swap for col-major → row-major
-                ccall(($(string("vDSP_zmmul", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, Ref{$DSPSplit}, Int64, UInt64, UInt64, UInt64),
-                      bsplit, _CSTRIDE, asplit, _CSTRIDE, osplit, _CSTRIDE, UInt64(n), UInt64(m), UInt64(p))
+                LibAccelerate.$(Symbol(string("vDSP_zmmul", suff)))(
+                      Ref(bsplit), _CSTRIDE, Ref(asplit), _CSTRIDE, Ref(osplit), _CSTRIDE, UInt64(n), UInt64(m), UInt64(p))
             end
             return C
         end
@@ -736,22 +745,20 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             n = length(X)
             o_re = Vector{$T}(undef, n)
             o_im = Vector{$T}(undef, n)
-            GC.@preserve o_re o_im begin
+            GC.@preserve X o_re o_im begin
                 osplit = $DSPSplit(o_re, o_im)
-                ccall(($(string("vDSP_ctoz", suff)), libacc), Cvoid,
-                      (Ptr{Complex{$T}}, Int64, Ref{$DSPSplit}, Int64, UInt64),
-                      X, 2, osplit, 1, n)
+                LibAccelerate.$(Symbol(string("vDSP_ctoz", suff)))(
+                      pointer(X), 2, Ref(osplit), 1, n)
             end
             return (o_re, o_im)
         end
         function ztoc(re::Vector{$T}, im::Vector{$T})
             n = length(re)
             result = Vector{Complex{$T}}(undef, n)
-            GC.@preserve re im begin
+            GC.@preserve re im result begin
                 isplit = $DSPSplit(re, im)
-                ccall(($(string("vDSP_ztoc", suff)), libacc), Cvoid,
-                      (Ref{$DSPSplit}, Int64, Ptr{Complex{$T}}, Int64, UInt64),
-                      isplit, 1, result, 2, n)
+                LibAccelerate.$(Symbol(string("vDSP_ztoc", suff)))(
+                      Ref(isplit), 1, pointer(result), 2, n)
             end
             return result
         end

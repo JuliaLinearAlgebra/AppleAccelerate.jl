@@ -170,6 +170,7 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     factor!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
 end
 
@@ -189,6 +190,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vT
         )
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return xb # written in imitation of KLU.jl, which also returns
 end
 
@@ -211,6 +213,7 @@ function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
         * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, b, x)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
 end
 

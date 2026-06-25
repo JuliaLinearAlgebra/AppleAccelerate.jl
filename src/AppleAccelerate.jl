@@ -97,6 +97,7 @@ if `n > 1`, use multi-threaded mode. Returns the resulting thread count (from
 warns and returns `1`.
 """
 function set_num_threads(n::Integer)
+    n < 1 && throw(ArgumentError("number of threads must be ≥ 1"))
     ver = get_macos_version()
     if ver === nothing || ver < v"15"
         @warn "The Accelerate threading API requires macOS 15 or later; ignoring" maxlog=1
@@ -170,10 +171,12 @@ end
     include("lib/LibAccelerate.jl")
 
     include("array.jl")
+    include("vmath.jl")
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")
     include("quadrature.jl")
+    include("bnns.jl")
 end
 
 end # module

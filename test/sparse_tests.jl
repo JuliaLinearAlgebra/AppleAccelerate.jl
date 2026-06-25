@@ -594,4 +594,43 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
         b = rand(100)
         @test f \ b ≈ jlM \ b
     end
+
+    # Regression: unit-triangular auto-tagging used to OR in ATT_UNIT_TRIANGULAR
+    # while leaving the diagonal stored, so libSparse double-counted the diagonal
+    # (implicit unit diagonal + stored diagonal) in both multiply and solve.
+    @testset "unit-diagonal triangular not double-counted" begin
+        for T in (Float32, Float64)
+            # Lower-triangular with an all-ones diagonal.
+            A = sparse(T[1 0 0; 5 1 0; 2 3 1])
+            aa = AASparseMatrix(A)
+            x = T[2, 3, 4]
+            @test aa * x ≈ A * x
+            # Specifically the case from the bug report.
+            A2 = sparse(T[1 0; 5 1])
+            aa2 = AASparseMatrix(A2)
+            @test aa2 * T[2, 3] ≈ A2 * T[2, 3] ≈ T[2, 13]
+            # Solve must also be correct (not corrupted by an implicit diagonal).
+            f = AAFactorization(aa)
+            @test solve(f, A * x) ≈ x
+        end
+    end
+
+    # Regression: getindex used to read raw CSC and ignore the symmetric/Hermitian
+    # attribute, returning 0 for the un-stored triangle.
+    @testset "getindex mirrors symmetric/Hermitian un-stored triangle" begin
+        # Real symmetric.
+        S = sparse([1.0 2.0 0.0; 2.0 3.0 4.0; 0.0 4.0 5.0])
+        @test issymmetric(S)
+        aaS = AASparseMatrix(S)
+        @test Array(aaS) == Array(S)
+        @test aaS[1, 2] == 2.0
+        @test aaS[2, 3] == 4.0
+
+        # Complex Hermitian: upper triangle is conj of lower.
+        H = sparse(ComplexF64[2 (1+2im) 0; (1-2im) 3 (0-1im); 0 (0+1im) 4])
+        @test ishermitian(H)
+        aaH = AASparseMatrix(H)
+        @test Array(aaH) == Array(H)
+        @test aaH[1, 2] == conj(H[2, 1]) == (1 + 2im)
+    end
 end

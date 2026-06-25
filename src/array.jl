@@ -29,8 +29,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
 
             # In-place mutating variant
             function ($f!)(out::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ref{Cint}),out,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -54,8 +53,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,X,Y,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Y, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -71,8 +69,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,Y,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, Y, X, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -90,8 +87,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ref{Cint}),out,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -109,8 +105,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, Y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out,X,Y,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Y, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -126,8 +121,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X, y)
             end
             function ($f!)(out::Array{$T}, X::Array{$T}, y::$T)
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ref{$T},Ptr{$T},Ref{Cint}),out,y,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, Ref(y), X, Ref{Cint}(length(X)))
                 out
             end
         end
@@ -143,8 +137,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out1, out2, X)
             end
             function ($f!)(out1::Array{$T}, out2::Array{$T}, X::Array{$T})
-                ccall(($(string("vv",f,suff)),libacc),Cvoid,
-                      (Ptr{$T},Ptr{$T},Ptr{$T},Ref{Cint}),out1,out2,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",f,suff)))(out1, out2, X, Ref{Cint}(length(X)))
                 out1, out2
             end
         end
@@ -159,6 +152,11 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
+                # NOT migrated to LibAccelerate.vvcosisin: the generated wrapper types its
+                # output pointer as `Ptr{__double_complex_t}`, and the Clang.jl typedef
+                # currently resolves `__double_complex_t` to `ComplexF32` (not ComplexF64),
+                # so a `Vector{ComplexF64}` would not convert. Use the direct ccall with the
+                # correct element type until the generator emits the right complex typedef.
                 ccall(($(string("vv",fa,suff)),libacc),Cvoid,
                       (Ptr{Complex{$T}},Ptr{$T},Ref{Cint}),out,X,length(X))
                 out
@@ -288,9 +286,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         @eval begin
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64,  Ref{$T}, UInt64),
-                      X, 1, val, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, length(X))
                 return val[]
             end
         end
@@ -301,9 +297,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             function ($f)(X::Vector{$T})
                 index = Ref{UInt}(0)
                 val = Ref{$T}(0.0)
-                ccall(($(string("vDSP_", fa, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64,  Ref{$T}, Ref{UInt}, UInt64),
-                      X, 1, val, index, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, index, length(X))
                 return (val[], Int(index[])+1)
             end
         end
@@ -409,9 +403,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-                ccall(($(string("vDSP_", f, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T},  Int64, Ptr{$T}, Int64,  UInt64),
-                      Y, 1, X, 1, result, 1, length(result))
+                (length(X) == length(Y) == length(result)) ||
+                    throw(DimensionMismatch("result, X and Y must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(Y, 1, X, 1, result, 1, length(result))
                 return result
             end
         end
@@ -461,9 +455,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
             function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
-                ccall(($(string("vDSP_", f, suff), libacc)),  Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
-                      X, 1, Ref(c), result, 1, length(result))
+                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(X, 1, Ref(c), result, 1, length(result))
                 return result
             end
         end
@@ -493,9 +485,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
         function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
-            ccall(($(string("vDSP_vsadd", suff), libacc)),  Cvoid,
-                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
-                    X, 1, Ref(-c), result, 1, length(result))
+            LibAccelerate.$(Symbol(string("vDSP_vsadd", suff)))(X, 1, Ref(-c), result, 1, length(result))
             return result
         end
     end
@@ -526,9 +516,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         """ ->
         function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
             # c - X == X * (-1) + c, computed in one pass via vDSP_vsmsa (D = A*B + C)
-            ccall(($(string("vDSP_vsmsa", suff), libacc)),  Cvoid,
-                    (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64,  UInt64),
-                    X, 1, Ref(-one($T)), Ref(c), result, 1, length(result))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(X, 1, Ref(-one($T)), Ref(c), result, 1, length(result))
             return result
         end
     end
@@ -580,9 +568,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, X::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      X, 1, result, 1, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,result,1,length(X))
                 return result
             end
             function ($f)(X::Vector{$T})
@@ -595,9 +581,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vreverse: in-place only
     @eval begin
         function vreverse!(X::Vector{$T})
-            ccall(($(string("vDSP_vrvrs", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, UInt64),
-                  X, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vrvrs", suff)))(X,1,length(X))
             return X
         end
         function vreverse(X::Vector{$T})
@@ -627,9 +611,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      X, 1, Y, 1, result, 1, length(X))
+                (length(X) == length(Y) == length(result)) ||
+                    throw(DimensionMismatch("result, X and Y must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,Y,1,result,1,length(X))
                 return result
             end
             function ($f)(X::Vector{$T}, Y::Vector{$T})
@@ -641,9 +625,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vtmerg!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-            ccall(($(string("vDSP_vtmerg", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  X, 1, Y, 1, result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vtmerg", suff)))(X,1,Y,1,result,1,length(X))
             return result
         end
         function vtmerg(X::Vector{$T}, Y::Vector{$T})
@@ -667,9 +649,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function svdiv!(result::Vector{$T}, X::Vector{$T}, c::$T)
-            ccall(($(string("vDSP_svdiv", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  Ref(c), X, 1, result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_svdiv", suff)))(Ref(c),X,1,result,1,length(X))
             return result
         end
         function svdiv(X::Vector{$T}, c::$T)
@@ -692,9 +672,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, B, 1, C, 1, result, 1, length(A))
+                (length(A) == length(B) == length(C) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B and C must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
                 return result
             end
             function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
@@ -706,9 +686,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function venvlp!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
-            ccall(($(string("vDSP_venvlp", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, C, 1, result, 1, length(A))
+            (length(A) == length(B) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A, B and C must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_venvlp", suff)))(A,1,B,1,C,1,result,1,length(A))
             return result
         end
         function venvlp(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
@@ -722,9 +702,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, B, 1, C, 1, D, 1, result, 1, length(A))
+                (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B, C and D must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
                 return result
             end
             function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
@@ -736,9 +716,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vpythg!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
-            ccall(($(string("vDSP_vpythg", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, C, 1, D, 1, result, 1, length(A))
+            (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                throw(DimensionMismatch("result, A, B, C and D must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vpythg", suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
             return result
         end
         function vpythg(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
@@ -752,9 +732,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                      A, 1, B, 1, Ref(c), result, 1, length(A))
+                (length(A) == length(B) == length(result)) ||
+                    throw(DimensionMismatch("result, A and B must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,Ref(c),result,1,length(A))
                 return result
             end
             function ($f)(A::Vector{$T}, B::Vector{$T}, c::$T)
@@ -766,9 +746,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
-            ccall(($(string("vDSP_vsma", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), C, 1, result, 1, length(A))
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vsma", suff)))(A,1,Ref(b),C,1,result,1,length(A))
             return result
         end
         function vsma(A::Vector{$T}, b::$T, C::Vector{$T})
@@ -779,9 +759,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vsmsa!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
-            ccall(($(string("vDSP_vsmsa", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), Ref(c), result, 1, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
             return result
         end
         function vsmsa(A::Vector{$T}, b::$T, c::$T)
@@ -792,9 +770,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vaddsub!(add_result::Vector{$T}, sub_result::Vector{$T}, A::Vector{$T}, B::Vector{$T})
-            ccall(($(string("vDSP_vaddsub", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, add_result, 1, sub_result, 1, length(A))
+            (length(A) == length(B) == length(add_result) == length(sub_result)) ||
+                throw(DimensionMismatch("add_result, sub_result, A and B must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vaddsub", suff)))(A,1,B,1,add_result,1,sub_result,1,length(A))
             return (add_result, sub_result)
         end
         function vaddsub(A::Vector{$T}, B::Vector{$T})
@@ -827,9 +805,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, B, 1, C, 1, result, 1, length(A))
+                (length(A) == length(B) == length(C) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B and C must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
                 return result
             end
             function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
@@ -845,9 +823,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, B, 1, C, 1, D, 1, result, 1, length(A))
+                (length(A) == length(B) == length(C) == length(D) == length(result)) ||
+                    throw(DimensionMismatch("result, A, B, C and D must have the same length"))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
                 return result
             end
             function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
@@ -860,9 +838,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vmsa: D[n] = A[n]*B[n] + c  (2-vector + scalar → 1-vector)
     @eval begin
         function vmsa!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
-            ccall(($(string("vDSP_vmsa", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, Ref(c), result, 1, length(A))
+            (length(A) == length(B) == length(result)) ||
+                throw(DimensionMismatch("result, A and B must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vmsa", suff)))(A,1,B,1,Ref(c),result,1,length(A))
             return result
         end
         function vmsa(A::Vector{$T}, B::Vector{$T}, c::$T)
@@ -874,9 +852,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vsmsb: D[n] = A[n]*b - C[n]  (vector*scalar - vector)
     @eval begin
         function vsmsb!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
-            ccall(($(string("vDSP_vsmsb", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), C, 1, result, 1, length(A))
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsb", suff)))(A,1,Ref(b),C,1,result,1,length(A))
             return result
         end
         function vsmsb(A::Vector{$T}, b::$T, C::Vector{$T})
@@ -888,9 +866,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # vsmsma: E[n] = A[n]*b + C[n]*d  (vector*scalar + vector*scalar)
     @eval begin
         function vsmsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
-            ccall(($(string("vDSP_vsmsma", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), C, 1, Ref(d), result, 1, length(A))
+            (length(A) == length(C) == length(result)) ||
+                throw(DimensionMismatch("result, A and C must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsma", suff)))(A,1,Ref(b),C,1,Ref(d),result,1,length(A))
             return result
         end
         function vsmsma(A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
@@ -915,17 +893,17 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function dot(X::Vector{$T}, Y::Vector{$T})
+            length(X) == length(Y) ||
+                throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
-            ccall(($(string("vDSP_dotpr", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, UInt64),
-                  X, 1, Y, 1, val, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_dotpr", suff)))(X,1,Y,1,val,length(X))
             return val[]
         end
         function distancesq(X::Vector{$T}, Y::Vector{$T})
+            length(X) == length(Y) ||
+                throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
-            ccall(($(string("vDSP_distancesq", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, UInt64),
-                  X, 1, Y, 1, val, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_distancesq", suff)))(X,1,Y,1,val,length(X))
             return val[]
         end
     end
@@ -941,9 +919,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function rmsqv(X::Vector{$T})
             val = Ref{$T}(0)
-            ccall(($(string("vDSP_rmsqv", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, UInt64),
-                  X, 1, val, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_rmsqv", suff)))(X,1,val,length(X))
             return val[]
         end
     end
@@ -953,9 +929,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         function sve_svesq(X::Vector{$T})
             s = Ref{$T}(0)
             ssq = Ref{$T}(0)
-            ccall(($(string("vDSP_sve_svesq", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, UInt64),
-                  X, 1, s, ssq, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_sve_svesq", suff)))(X,1,s,ssq,length(X))
             return (s[], ssq[])
         end
     end
@@ -965,9 +939,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         @eval begin
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0)
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, UInt64),
-                      X, 1, val, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,val,length(X))
                 return val[]
             end
         end
@@ -979,9 +951,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             function ($f)(X::Vector{$T})
                 val = Ref{$T}(0)
                 idx = Ref{UInt}(0)
-                ccall(($(string("vDSP_", fa, suff)), libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$T}, Ptr{UInt}, UInt64),
-                      X, 1, val, idx, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,val,idx,length(X))
                 return (val[], Int(idx[]) + 1)
             end
         end
@@ -1002,9 +972,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
-            ccall(($(string("vDSP_vclip", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(low), Ref(high), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
             return result
         end
         function vclip(X::Vector{$T}, low::$T, high::$T)
@@ -1012,9 +980,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vclip!(result, X, low, high)
         end
         function viclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
-            ccall(($(string("vDSP_viclip", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(low), Ref(high), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_viclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
             return result
         end
         function viclip(X::Vector{$T}, low::$T, high::$T)
@@ -1022,9 +988,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             viclip!(result, X, low, high)
         end
         function vthr!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
-            ccall(($(string("vDSP_vthr", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(threshold), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vthr", suff)))(X,1,Ref(threshold),result,1,length(X))
             return result
         end
         function vthr(X::Vector{$T}, threshold::$T)
@@ -1032,9 +996,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vthr!(result, X, threshold)
         end
         function vthres!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
-            ccall(($(string("vDSP_vthres", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(threshold), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vthres", suff)))(X,1,Ref(threshold),result,1,length(X))
             return result
         end
         function vthres(X::Vector{$T}, threshold::$T)
@@ -1042,9 +1004,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vthres!(result, X, threshold)
         end
         function vcmprs!(result::Vector{$T}, X::Vector{$T}, gate::Vector{$T})
-            ccall(($(string("vDSP_vcmprs", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  X, 1, gate, 1, result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vcmprs", suff)))(X,1,gate,1,result,1,length(X))
             return result
         end
         function vcmprs(X::Vector{$T}, gate::Vector{$T})
@@ -1072,9 +1032,7 @@ Convert single-precision to double-precision. Wraps [`vDSP_vspdp`](https://devel
 """
 function vdouble(X::Vector{Float32})
     result = Vector{Float64}(undef, length(X))
-    ccall(("vDSP_vspdp", libacc), Cvoid,
-          (Ptr{Float32}, Int64, Ptr{Float64}, Int64, UInt64),
-          X, 1, result, 1, length(X))
+    LibAccelerate.vDSP_vspdp(X,1,result,1,length(X))
     return result
 end
 
@@ -1085,9 +1043,7 @@ Convert double-precision to single-precision. Wraps [`vDSP_vdpsp`](https://devel
 """
 function vsingle(X::Vector{Float64})
     result = Vector{Float32}(undef, length(X))
-    ccall(("vDSP_vdpsp", libacc), Cvoid,
-          (Ptr{Float64}, Int64, Ptr{Float32}, Int64, UInt64),
-          X, 1, result, 1, length(X))
+    LibAccelerate.vDSP_vdpsp(X,1,result,1,length(X))
     return result
 end
 
@@ -1099,16 +1055,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vramp(start::$T, step::$T, n::Integer)
             result = Vector{$T}(undef, n)
-            ccall(($(string("vDSP_vramp", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  Ref(start), Ref(step), result, 1, n)
+            LibAccelerate.$(Symbol(string("vDSP_vramp", suff)))(Ref(start),Ref(step),result,1,n)
             return result
         end
         function vrampmul!(result::Vector{$T}, X::Vector{$T}, start::$T, step::$T)
             s = Ref{$T}(start)
-            ccall(($(string("vDSP_vrampmul", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, s, Ref(step), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul", suff)))(X,1,s,Ref(step),result,1,length(X))
             return result
         end
         function vrampmul(X::Vector{$T}, start::$T, step::$T)
@@ -1126,9 +1078,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         function vrampmul2!(O0::Vector{$T}, O1::Vector{$T}, I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
             n = length(I0)
             s = Ref{$T}(start)
-            ccall(($(string("vDSP_vrampmul2", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  I0, I1, 1, s, Ref(step), O0, O1, 1, n)
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul2", suff)))(I0,I1,1,s,Ref(step),O0,O1,1,n)
             return (O0, O1)
         end
         function vrampmul2(I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
@@ -1144,12 +1094,14 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vavlin!(C::Vector{$T}, A::Vector{$T}, weight::$T)
-            ccall(($(string("vDSP_vavlin", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(weight), C, 1, length(A))
+            length(A) == length(C) ||
+                throw(DimensionMismatch("C and A must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vavlin", suff)))(A,1,Ref(weight),C,1,length(A))
             return C
         end
-        function vavlin(A::Vector{$T}, C::Vector{$T}, weight::$T)
+        # Operand order matches the mutating `vavlin!(C, A, weight)`: C is the
+        # running accumulator, A is the new sample vector.
+        function vavlin(C::Vector{$T}, A::Vector{$T}, weight::$T)
             result = copy(C)
             vavlin!(result, A, weight)
         end
@@ -1165,9 +1117,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vrsum!(result::Vector{$T}, X::Vector{$T}, scale::$T)
-            ccall(($(string("vDSP_vrsum", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(scale), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vrsum", suff)))(X,1,Ref(scale),result,1,length(X))
             return result
         end
         function vrsum(X::Vector{$T}, scale::$T)
@@ -1175,9 +1125,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vrsum!(result, X, scale)
         end
         function vsimps!(result::Vector{$T}, X::Vector{$T}, step::$T)
-            ccall(($(string("vDSP_vsimps", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(step), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vsimps", suff)))(X,1,Ref(step),result,1,length(X))
             return result
         end
         function vsimps(X::Vector{$T}, step::$T)
@@ -1185,9 +1133,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vsimps!(result, X, step)
         end
         function vtrapz!(result::Vector{$T}, X::Vector{$T}, step::$T)
-            ccall(($(string("vDSP_vtrapz", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  X, 1, Ref(step), result, 1, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vtrapz", suff)))(X,1,Ref(step),result,1,length(X))
             return result
         end
         function vtrapz(X::Vector{$T}, step::$T)
@@ -1196,9 +1142,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
         function vswsum!(result::Vector{$T}, X::Vector{$T}, window::Integer)
             n_out = length(X) - window + 1
-            ccall(($(string("vDSP_vswsum", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  X, 1, result, 1, n_out, window)
+            LibAccelerate.$(Symbol(string("vDSP_vswsum", suff)))(X,1,result,1,n_out,window)
             return result
         end
         function vswsum(X::Vector{$T}, window::Integer)
@@ -1208,9 +1152,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
         function vswmax!(result::Vector{$T}, X::Vector{$T}, window::Integer)
             n_out = length(X) - window + 1
-            ccall(($(string("vDSP_vswmax", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  X, 1, result, 1, n_out, window)
+            LibAccelerate.$(Symbol(string("vDSP_vswmax", suff)))(X,1,result,1,n_out,window)
             return result
         end
         function vswmax(X::Vector{$T}, window::Integer)
@@ -1234,9 +1176,9 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vintb!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, t::$T)
-            ccall(($(string("vDSP_vintb", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, Ref(t), result, 1, length(A))
+            (length(A) == length(B) == length(result)) ||
+                throw(DimensionMismatch("result, A and B must have the same length"))
+            LibAccelerate.$(Symbol(string("vDSP_vintb", suff)))(A,1,B,1,Ref(t),result,1,length(A))
             return result
         end
         function vintb(A::Vector{$T}, B::Vector{$T}, t::$T)
@@ -1244,9 +1186,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vintb!(result, A, B, t)
         end
         function vlint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
-            ccall(($(string("vDSP_vlint", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  table, indices, 1, result, 1, length(indices), length(table))
+            LibAccelerate.$(Symbol(string("vDSP_vlint", suff)))(table,indices,1,result,1,length(indices),length(table))
             return result
         end
         function vlint(table::Vector{$T}, indices::Vector{$T})
@@ -1254,9 +1194,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vlint!(result, table, indices)
         end
         function vqint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
-            ccall(($(string("vDSP_vqint", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  table, indices, 1, result, 1, length(indices), length(table))
+            LibAccelerate.$(Symbol(string("vDSP_vqint", suff)))(table,indices,1,result,1,length(indices),length(table))
             return result
         end
         function vqint(table::Vector{$T}, indices::Vector{$T})
@@ -1277,9 +1215,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vpoly!(result::Vector{$T}, coeffs::Vector{$T}, X::Vector{$T})
-            ccall(($(string("vDSP_vpoly", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  coeffs, 1, X, 1, result, 1, length(X), length(coeffs) - 1)
+            LibAccelerate.$(Symbol(string("vDSP_vpoly", suff)))(coeffs,1,X,1,result,1,length(X),length(coeffs) - 1)
             return result
         end
         function vpoly(coeffs::Vector{$T}, X::Vector{$T})
@@ -1305,9 +1241,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         function vnormalize!(result::Vector{$T}, X::Vector{$T})
             mean_out = Ref{$T}(0.0)
             stddev_out = Ref{$T}(0.0)
-            ccall(($(string("vDSP_normalize", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, UInt64),
-                  X, 1, result, 1, mean_out, stddev_out, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_normalize", suff)))(X,1,result,1,mean_out,stddev_out,length(X))
             return (result, mean_out[], stddev_out[])
         end
         function vnormalize(X::Vector{$T})
@@ -1337,9 +1271,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             end
             indices = Vector{UInt64}(undef, max_crossings)
             count = Ref{UInt64}(0)
-            ccall(($(string("vDSP_nzcros", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, UInt64, Ptr{UInt64}, Ptr{UInt64}, UInt64),
-                  X, 1, max_crossings, indices, count, length(X))
+            LibAccelerate.$(Symbol(string("vDSP_nzcros", suff)))(X,1,max_crossings,indices,count,length(X))
             n = Int(count[])
             return (indices[1:n], n)
         end
@@ -1362,9 +1294,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vdbcon!(result::Vector{$T}, X::Vector{$T}, ref::$T, power::Bool=true)
             flag = power ? UInt32(0) : UInt32(1)
-            ccall(($(string("vDSP_vdbcon", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64, UInt32),
-                  X, 1, Ref(ref), result, 1, length(X), flag)
+            LibAccelerate.$(Symbol(string("vDSP_vdbcon", suff)))(X,1,Ref(ref),result,1,length(X),flag)
             return result
         end
         function vdbcon(X::Vector{$T}, ref::$T, power::Bool=true)
@@ -1392,21 +1322,15 @@ Wraps [`vDSP_vdbcon`](https://developer.apple.com/documentation/accelerate/vdsp_
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vclr!(C::Vector{$T})
-            ccall(($(string("vDSP_vclr", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, UInt64),
-                  C, 1, length(C))
+            LibAccelerate.$(Symbol(string("vDSP_vclr", suff)))(C,1,length(C))
             return C
         end
         function vfill!(C::Vector{$T}, a::$T)
-            ccall(($(string("vDSP_vfill", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  Ref(a), C, 1, length(C))
+            LibAccelerate.$(Symbol(string("vDSP_vfill", suff)))(Ref(a),C,1,length(C))
             return C
         end
         function vswap!(A::Vector{$T}, B::Vector{$T})
-            ccall(($(string("vDSP_vswap", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, 1, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vswap", suff)))(A,1,B,1,length(A))
             return (A, B)
         end
     end
@@ -1420,9 +1344,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vgathr!(C::Vector{$T}, A::Vector{$T}, B::Vector{UInt})
-            ccall(($(string("vDSP_vgathr", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{UInt}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, B, 1, C, 1, length(B))
+            LibAccelerate.$(Symbol(string("vDSP_vgathr", suff)))(A,B,1,C,1,length(B))
             return C
         end
         function vgathr(A::Vector{$T}, B::Vector{UInt})
@@ -1430,9 +1352,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vgathr!(C, A, B)
         end
         function vindex!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
-            ccall(($(string("vDSP_vindex", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64),
-                  A, B, 1, C, 1, length(B))
+            LibAccelerate.$(Symbol(string("vDSP_vindex", suff)))(A,B,1,C,1,length(B))
             return C
         end
         function vindex(A::Vector{$T}, B::Vector{$T})
@@ -1449,9 +1369,7 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vgen!(C::Vector{$T}, a::$T, b::$T)
-            ccall(($(string("vDSP_vgen", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  Ref(a), Ref(b), C, 1, length(C))
+            LibAccelerate.$(Symbol(string("vDSP_vgen", suff)))(Ref(a),Ref(b),C,1,length(C))
             return C
         end
         function vgen(a::$T, b::$T, n::Integer)
@@ -1459,9 +1377,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vgen!(C, a, b)
         end
         function vgenp!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T}, n::Integer)
-            ccall(($(string("vDSP_vgenp", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  A, 1, B, 1, C, 1, n, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vgenp", suff)))(A,1,B,1,C,1,n,length(A))
             return C
         end
         function vgenp(A::Vector{$T}, B::Vector{$T}, n::Integer)
@@ -1480,9 +1396,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         function vclipc!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
             nlow = Ref{UInt64}(0)
             nhigh = Ref{UInt64}(0)
-            ccall(($(string("vDSP_vclipc", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64, Ptr{UInt64}, Ptr{UInt64}),
-                  X, 1, Ref(low), Ref(high), result, 1, length(X), nlow, nhigh)
+            LibAccelerate.$(Symbol(string("vDSP_vclipc", suff)))(X,1,Ref(low),Ref(high),result,1,length(X),nlow,nhigh)
             return (result, Int(nlow[]), Int(nhigh[]))
         end
         function vclipc(X::Vector{$T}, low::$T, high::$T)
@@ -1490,9 +1404,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vclipc!(result, X, low, high)
         end
         function vlim!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
-            ccall(($(string("vDSP_vlim", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), Ref(c), result, 1, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vlim", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
             return result
         end
         function vlim(A::Vector{$T}, b::$T, c::$T)
@@ -1500,9 +1412,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vlim!(result, A, b, c)
         end
         function vthrsc!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
-            ccall(($(string("vDSP_vthrsc", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(b), Ref(c), result, 1, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vthrsc", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
             return result
         end
         function vthrsc(A::Vector{$T}, b::$T, c::$T)
@@ -1521,16 +1431,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vsort!(X::Vector{$T}, ascending::Bool=true)
             order = ascending ? Cint(1) : Cint(-1)
-            ccall(($(string("vDSP_vsort", suff)), libacc), Cvoid,
-                  (Ptr{$T}, UInt64, Cint),
-                  X, length(X), order)
+            LibAccelerate.$(Symbol(string("vDSP_vsort", suff)))(X,length(X),order)
             return X
         end
         function vsorti!(indices::Vector{UInt}, X::Vector{$T}, ascending::Bool=true)
             order = ascending ? Cint(1) : Cint(-1)
-            ccall(($(string("vDSP_vsorti", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{UInt}, Ptr{Cvoid}, UInt64, Cint),
-                  X, indices, C_NULL, length(X), order)
+            LibAccelerate.$(Symbol(string("vDSP_vsorti", suff)))(X,indices,C_NULL,length(X),order)
             return indices
         end
         function vsorti(X::Vector{$T}, ascending::Bool=true)
@@ -1562,9 +1468,7 @@ non-identity buffer yields a silently wrong permutation. Use the allocating
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vtabi!(D::Vector{$T}, A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
-            ccall(($(string("vDSP_vtabi", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Ptr{$T}, UInt64, Ptr{$T}, Int64, UInt64),
-                  A, 1, Ref(s1), Ref(s2), C, length(C), D, 1, length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vtabi", suff)))(A,1,Ref(s1),Ref(s2),C,length(C),D,1,length(A))
             return D
         end
         function vtabi(A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
@@ -1578,9 +1482,7 @@ end
 
 # --- Integer operations (Int32) ---
 function vaddi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
-    ccall(("vDSP_vaddi", libacc), Cvoid,
-          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
-          A, 1, B, 1, C, 1, length(A))
+    LibAccelerate.vDSP_vaddi(A,1,B,1,C,1,length(A))
     return C
 end
 function vaddi(A::Vector{Int32}, B::Vector{Int32})
@@ -1589,9 +1491,7 @@ function vaddi(A::Vector{Int32}, B::Vector{Int32})
 end
 
 function vabsi!(C::Vector{Int32}, A::Vector{Int32})
-    ccall(("vDSP_vabsi", libacc), Cvoid,
-          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
-          A, 1, C, 1, length(A))
+    LibAccelerate.vDSP_vabsi(A,1,C,1,length(A))
     return C
 end
 function vabsi(A::Vector{Int32})
@@ -1600,16 +1500,12 @@ function vabsi(A::Vector{Int32})
 end
 
 function vfilli!(C::Vector{Int32}, a::Int32)
-    ccall(("vDSP_vfilli", libacc), Cvoid,
-          (Ptr{Int32}, Ptr{Int32}, Int64, UInt64),
-          Ref(a), C, 1, length(C))
+    LibAccelerate.vDSP_vfilli(Ref(a),C,1,length(C))
     return C
 end
 
 function veqvi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
-    ccall(("vDSP_veqvi", libacc), Cvoid,
-          (Ptr{Int32}, Int64, Ptr{Int32}, Int64, Ptr{Int32}, Int64, UInt64),
-          A, 1, B, 1, C, 1, length(A))
+    LibAccelerate.vDSP_veqvi(A,1,B,1,C,1,length(A))
     return C
 end
 function veqvi(A::Vector{Int32}, B::Vector{Int32})
@@ -1636,9 +1532,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             p2, n = size(B)
             p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
             size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n"))
-            ccall(($(string("vDSP_mmul", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64, UInt64),
-                  B, 1, A, 1, C, 1, UInt64(n), UInt64(m), UInt64(p))
+            LibAccelerate.$(Symbol(string("vDSP_mmul", suff)))(B,1,A,1,C,1,UInt64(n),UInt64(m),UInt64(p))
             return C
         end
         function mmul(A::Matrix{$T}, B::Matrix{$T})
@@ -1657,9 +1551,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             #   __M = columns in A (rows in C), __N = rows in A (columns in C)
             # Julia col-major m×n viewed as row-major: n rows × m cols
             # We want C to be row-major m rows × n cols, so __M = m, __N = n
-            ccall(($(string("vDSP_mtrans", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Int64, UInt64, UInt64),
-                  A, 1, C, 1, UInt64(m), UInt64(n))
+            LibAccelerate.$(Symbol(string("vDSP_mtrans", suff)))(A,1,C,1,UInt64(m),UInt64(n))
             return C
         end
         function mtrans(A::Matrix{$T})
@@ -1674,9 +1566,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             m, n = size(A)
             ta = UInt64(m)  # column stride of source (= number of rows in col-major)
             tc = UInt64(size(C, 1))  # column stride of destination
-            ccall(($(string("vDSP_mmov", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Ptr{$T}, UInt64, UInt64, UInt64, UInt64),
-                  A, C, UInt64(m), UInt64(n), ta, tc)
+            LibAccelerate.$(Symbol(string("vDSP_mmov", suff)))(A,C,UInt64(m),UInt64(n),ta,tc)
             return C
         end
         function mmov(A::Matrix{$T})
@@ -1702,9 +1592,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfix", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$T})
@@ -1723,9 +1611,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixu", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$T})
@@ -1744,9 +1630,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixr", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$T})
@@ -1765,9 +1649,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixru", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$T}, Int64, Ptr{$intT}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$T})
@@ -1786,9 +1668,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vflt", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$T}, A::Vector{$intT})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$intT}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$intT}, ::Type{$T})
@@ -1807,9 +1687,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfltu", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$T}, A::Vector{$intT})
-                ccall(($vdsp_name, libacc), Cvoid,
-                      (Ptr{$intT}, Int64, Ptr{$T}, Int64, UInt64),
-                      A, 1, C, 1, length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
             function ($fname)(A::Vector{$intT}, ::Type{$T})
@@ -1834,9 +1712,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             # (nc, nr) row-major image. Swap the dimensions so the convolution
             # operates on the intended matrix (and the result reads back
             # correctly as a column-major (nr, nc) matrix).
-            ccall(($(string("vDSP_f3x3", suff)), libacc), Cvoid,
-                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
-                  A, UInt64(nc), UInt64(nr), F, C)
+            LibAccelerate.$(Symbol(string("vDSP_f3x3", suff)))(A,UInt64(nc),UInt64(nr),F,C)
             return C
         end
         function f3x3(A::Matrix{$T}, F::Matrix{$T})
@@ -1848,9 +1724,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             size(F) == (5, 5) || throw(DimensionMismatch("Filter must be 5×5"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
             # See note in `f3x3!`: swap dims for row-major vs column-major.
-            ccall(($(string("vDSP_f5x5", suff)), libacc), Cvoid,
-                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}),
-                  A, UInt64(nc), UInt64(nr), F, C)
+            LibAccelerate.$(Symbol(string("vDSP_f5x5", suff)))(A,UInt64(nc),UInt64(nr),F,C)
             return C
         end
         function f5x5(A::Matrix{$T}, F::Matrix{$T})
@@ -1863,9 +1737,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
             # See note in `f3x3!`: vDSP reads row-major while Julia is
             # column-major, so swap both the image and filter dimensions.
-            ccall(($(string("vDSP_imgfir", suff)), libacc), Cvoid,
-                  (Ptr{$T}, UInt64, UInt64, Ptr{$T}, Ptr{$T}, UInt64, UInt64),
-                  A, UInt64(nc), UInt64(nr), F, C, UInt64(fc), UInt64(fr))
+            LibAccelerate.$(Symbol(string("vDSP_imgfir", suff)))(A,UInt64(nc),UInt64(nr),F,C,UInt64(fc),UInt64(fr))
             return C
         end
         function imgfir(A::Matrix{$T}, F::Matrix{$T})

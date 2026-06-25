@@ -8,11 +8,13 @@ Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 [weakdeps]
 AbstractFFTs = "621f4979-c628-5d54-868e-fcf4e3e8185c"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [extensions]
 AppleAccelerateAbstractFFTsExt = ["AbstractFFTs", "LinearAlgebra"]
 AppleAccelerateLinearAlgebraExt = "LinearAlgebra"
+AppleAccelerateNNlibExt = "NNlib"
 AppleAccelerateSparseArraysExt = "SparseArrays"
 AppleAccelerateLinearAlgebraSparseArraysExt = ["LinearAlgebra", "SparseArrays"]
 
@@ -23,6 +25,7 @@ DSP = "0.8.4"
 FFTW = "1.10"
 Libdl = "1"
 LinearAlgebra = "1"
+NNlib = "0.9"
 Random = "1"
 SparseArrays = "1"
 Statistics = "1"
@@ -35,10 +38,11 @@ Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["AbstractFFTs", "Aqua", "DSP", "FFTW", "LinearAlgebra", "Random", "SparseArrays", "Statistics", "Test"]
+test = ["AbstractFFTs", "Aqua", "DSP", "FFTW", "LinearAlgebra", "NNlib", "Random", "SparseArrays", "Statistics", "Test"]

@@ -640,8 +640,10 @@ for T in (Float32, Float64)
         X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
         Y::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
 
-        # dot: unconjugated dot product — sum(X .* Y)
-        @test AppleAccelerate.dot(X, Y) ≈ sum(X .* Y)
+        # dot: conjugated dot product matching LinearAlgebra.dot — sum(conj(X) .* Y)
+        @test AppleAccelerate.dot(X, Y) ≈ LinearAlgebra.dot(X, Y) ≈ sum(conj.(X) .* Y)
+        # dotu: unconjugated (bilinear) dot product — sum(X .* Y)
+        @test AppleAccelerate.dotu(X, Y) ≈ sum(X .* Y)
     end
 end
 
@@ -697,7 +699,8 @@ for T in (Float32, Float64)
         C = randn(T, n)
         weight = T(3.0)
 
-        result = AppleAccelerate.vavlin(A, C, weight)
+        # Operand order matches the mutating variant: vavlin(C, A, weight).
+        result = AppleAccelerate.vavlin(C, A, weight)
         expected = (C .* weight .+ A) ./ (weight + 1)
         @test result ≈ expected
 
@@ -1264,6 +1267,27 @@ for T in (Float32, Float64)
         x1 = T[3]
         @test AppleAccelerate.svsub(x1, T(5)) ≈ T[2]
         @test AppleAccelerate.vadd(x1, x1) ≈ T[6]
+    end
+end
+
+# Regression: mutating multi-vector ops used to size the loop from one argument
+# and pass the others as bare pointers, so mismatched lengths read out of bounds
+# with no error. They must now throw DimensionMismatch.
+for T in (Float32, Float64)
+    @testset "length validation throws DimensionMismatch::$T" begin
+        a5 = randn(T, 5); b5 = randn(T, 5); c5 = randn(T, 5); d5 = randn(T, 5)
+        out5 = similar(a5)
+        a3 = randn(T, 3)
+        # Element-wise op (vadd!): mismatched input.
+        @test_throws DimensionMismatch AppleAccelerate.vadd!(out5, a5, a3)
+        # Element-wise op: mismatched output.
+        @test_throws DimensionMismatch AppleAccelerate.vadd!(similar(a3), a5, b5)
+        # Compound op (vma!): result = A*B + C.
+        @test_throws DimensionMismatch AppleAccelerate.vma!(out5, a5, b5, a3)
+        # 4-vector compound op (vmma!).
+        @test_throws DimensionMismatch AppleAccelerate.vmma!(out5, a5, b5, c5, a3)
+        # Reduction (dot).
+        @test_throws DimensionMismatch AppleAccelerate.dot(a5, a3)
     end
 end
 

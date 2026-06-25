@@ -37,10 +37,11 @@ function AppleAccelerate.AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
             attributes = LA.istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
         end
     end
-    if attributes in (ATT_TRI_LOWER, ATT_TRI_UPPER) &&
-                    all(LA.diag(sparseM) .== one(eltype(sparseM)))
-        attributes |= ATT_UNIT_TRIANGULAR
-    end
+    # NOTE: we deliberately do NOT auto-tag unit-triangular matrices. libSparse
+    # treats ATT_UNIT_TRIANGULAR as an *implicit* unit diagonal, but we keep the
+    # stored diagonal in the CSC data, so tagging it would double-count the
+    # diagonal in both multiply and solve. The plain ATT_TRIANGULAR path is
+    # correct for stored diagonals.
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
