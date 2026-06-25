@@ -190,6 +190,7 @@ end
     include("dsp.jl")
     include("sparse.jl")
     include("quadrature.jl")
+    include("bnns.jl")
 end
 
 end # module
