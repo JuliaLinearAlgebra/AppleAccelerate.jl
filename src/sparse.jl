@@ -1,6 +1,17 @@
 ## sparse.jl ##
+#
+# Core sparse support. This file must NOT reference `LinearAlgebra` or
+# `SparseArrays` — those are weak dependencies. It provides:
+#   * the raw libSparse ABI (enums, structs, ccall wrappers via @generateDemangled)
+#   * `AASparseMatrix` (subtypes Base.AbstractMatrix) + the raw-array constructor
+#   * sparse × dense multiply / `muladd!`
+#   * the low-level numeric refactor kernels
+#
+# The `AAFactorization`/`factor!`/`solve`/`refactor!`/`factorize` subsystem and
+# the `SparseMatrixCSC` <-> `AASparseMatrix` conversions live in package
+# extensions (see ext/). Generic-function stubs for the ext-defined operations
+# are declared at the bottom of this file so the names resolve from core.
 
-using SparseArrays
 using Libdl
 
 # To find most recent header:
@@ -847,25 +858,10 @@ function AASparseMatrix(n::Int, m::Int,
     return AASparseMatrix(m, col, row, data)
 end
 
-function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
-                        attributes::att_type = ATT_ORDINARY) where T<:vTypes
-    if attributes == ATT_ORDINARY
-        if ishermitian(sparseM)
-            kind = T <: Complex ? ATT_HERMITIAN : ATT_SYMMETRIC
-            return AASparseMatrix(tril(sparseM), kind | ATT_LOWER_TRIANGLE)
-        elseif istril(sparseM) || istriu(sparseM)
-            attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
-        end
-    end
-    if attributes in (ATT_TRI_LOWER, ATT_TRI_UPPER) &&
-                    all(diag(sparseM) .== one(eltype(sparseM)))
-        attributes |= ATT_UNIT_TRIANGULAR
-    end
-    c = Clong.(sparseM.colptr .+ -1)
-    r = Cint.(sparseM.rowval .+ -1)
-    vals = copy(sparseM.nzval)
-    return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
-end
+# NOTE: the `AASparseMatrix(::SparseMatrixCSC{T,Int64})` constructor (and the
+# `SparseMatrixCSC(::AASparseMatrix)` round-trip) live in the SparseArrays
+# package extension (ext/AppleAccelerateSparseArraysExt.jl), since they require
+# the `SparseMatrixCSC` type. `using SparseArrays` enables them.
 
 # Apple stores the underlying CSC dimensions and uses the transpose attribute
 # bit to "implicitly transpose" the matrix on subsequent ops. Julia callers
@@ -878,17 +874,22 @@ function Base.size(M::AASparseMatrix)
         (ncol, nrow) : (nrow, ncol)
 end
 
-LinearAlgebra.issymmetric(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes &
-                                                attr_mask(T)) == ATT_SYMMETRIC
-LinearAlgebra.ishermitian(M::AASparseMatrix{<:Complex}) = (M.matrix.structure.attributes &
-                                                ATT_KIND_MASK_COMPLEX) == ATT_HERMITIAN
-LinearAlgebra.ishermitian(M::AASparseMatrix{<:Real}) = issymmetric(M)
-istri(M::AASparseMatrix{T}) where T = (M.matrix.structure.attributes
-                                    & attr_mask(T)) == ATT_TRIANGULAR
-LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
-LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (M.matrix.structure.attributes &
-                                        ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
+# Package-private predicates reading the attribute bits. Core must not call
+# `LinearAlgebra.issymmetric`/`ishermitian`/`istriu`/`istril`, so these provide
+# the same information without a LinearAlgebra dependency. The LinearAlgebra
+# package extension defines `LinearAlgebra.issymmetric`/`ishermitian`/`istriu`/
+# `istril` on `AASparseMatrix` by delegating to these helpers.
+_is_symmetric_attr(M::AASparseMatrix{T}) where T =
+    (M.matrix.structure.attributes & attr_mask(T)) == ATT_SYMMETRIC
+_is_hermitian_attr(M::AASparseMatrix{<:Complex}) =
+    (M.matrix.structure.attributes & ATT_KIND_MASK_COMPLEX) == ATT_HERMITIAN
+_is_hermitian_attr(M::AASparseMatrix{<:Real}) = _is_symmetric_attr(M)
+istri(M::AASparseMatrix{T}) where T =
+    (M.matrix.structure.attributes & attr_mask(T)) == ATT_TRIANGULAR
+_is_triu_attr(M::AASparseMatrix) = istri(M) &&
+    (M.matrix.structure.attributes & ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
+_is_tril_attr(M::AASparseMatrix) = istri(M) &&
+    (M.matrix.structure.attributes & ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
 
 # Both bits encode adjoint; ct alone is the "no meaning" state that
 # libSparse treats as identity (reachable via adjoint(adjoint(M))).
@@ -979,20 +980,40 @@ function muladd!(alpha::T, A::AASparseMatrix{T},
     SparseMultiplyAdd(alpha, A.matrix, x, y)
 end
 
-# ============================================================
-# AAFactorization
-# ============================================================
 
+# ============================================================
+# AAFactorization (type lives in core; operations live in the LinearAlgebra ext)
+# ============================================================
+#
+# The factorize/solve subsystem extends `LinearAlgebra` (`LinearAlgebra.ldiv!`,
+# `LinearAlgebra.factorize`, `LinearAlgebra.SingularException`, the `\` fallback,
+# …), so those *operations* live in the LinearAlgebra package extension
+# (ext/AppleAccelerateLinearAlgebraExt.jl), with `factor!`/`solve`/`solve!`/
+# `refactor!` declared as core stubs below.
+#
+# The `AAFactorization` *type* itself, however, must be a real binding in this
+# (core) module: package extensions cannot define methods/constructors on a
+# binding that does not yet exist at their precompile time, and the dual
+# LinearAlgebra+SparseArrays extension needs to add a `SparseMatrixCSC`
+# constructor for it. We therefore define the struct here. It does NOT subtype
+# `LinearAlgebra.Factorization` (core has no LinearAlgebra dependency); the
+# LinearAlgebra extension supplies the `Factorization`-style API instead,
+# including a `Base.:\(::AAFactorization, b)` method that would otherwise come
+# from the `Factorization` supertype.
 @doc """Factorization object.
 
-Create via `f = AAFactorization(A::SparseMatrixCSC{T, Int64})`. Calls to `solve`,
+Create via `f = AAFactorization(A::SparseMatrixCSC{T, Int64})` (requires
+`using SparseArrays`) or `AAFactorization(A::AASparseMatrix)`. Calls to `solve`,
 `ldiv`, and their in-place versions require explicitly passing in the
 factorization object as the first argument. On construction, the struct stores a
-placeholder yet-to-be-factored object: the factorization is computed upon the first call
-to `solve`, or by explicitly calling `factor!`. If the matrix is symmetric, it defaults to
-a Cholesky factorization; otherwise, it defaults to QR.
+placeholder yet-to-be-factored object: the factorization is computed upon the
+first call to `solve`, or by explicitly calling `factor!`. If the matrix is
+symmetric, it defaults to a Cholesky factorization; otherwise, it defaults to QR.
+
+`factor!`/`solve`/`solve!`/`refactor!`/`ldiv!`/`\\` and `factorize` require
+`using LinearAlgebra` (they are provided by a package extension).
 """
-mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
+mutable struct AAFactorization{T<:vTypes}
     matrixObj::AASparseMatrix{T}
     _factorization::SparseOpaqueFactorization{T}
 end
@@ -1010,133 +1031,43 @@ function AAFactorization(A::AASparseMatrix{T}) where T<:vTypes
     return finalizer(cleanup, obj)
 end
 
-LinearAlgebra.factorize(A::AASparseMatrix{T}) where T<:vTypes = AAFactorization(A)
+# ============================================================
+# Stubs for the factorize/solve subsystem (implemented in extensions)
+# ============================================================
+#
+# Declared as generic-function stubs so the names resolve from `AppleAccelerate`
+# (and `import AppleAccelerate: factor!, solve, …` works); methods are added by
+# the LinearAlgebra extension once `LinearAlgebra` is loaded.
 
-# julia's LinearAlgebra module doesn't provide similar constructors.
-AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
-                                        AAFactorization(AASparseMatrix(M))
-
-# easiest way to make this follow the defaults and naming conventions of LinearAlgebra?
 """
     factor!(f::AAFactorization, [type::SparseFactorization_t])
 
-Explicitly compute the factorization. If `type` is not specified, the default
-is chosen from the matrix's kind attribute:
-
-  - Hermitian (real symmetric or complex Hermitian) → Cholesky
-  - square, non-Hermitian → LU (macOS 15.5+; falls back to QR on older systems)
-  - rectangular → QR
-
-Called automatically by [`solve`](@ref) if the factorization has not yet been
-computed.
-
-!!! note "Complex symmetric (not Hermitian)"
-    When the user leaves the factorization type unspecified and passes
-    a complex symmetric (but not Hermitian) matrix, we default to LU factorization.
-    
-    On older versions of MacOS, Apple's `SparseFactorizationLDLT` errors on complex
-    symmetric (non-Hermitian) matrices, reporting "Cannot
-    perform Hermitian matrix factorization of non-Hermitian matrix."
-    On newer versions, it accepts the call and performs a true `LDLᵀ` (not `LDLᴴ`).
-    This behavior isn't documented by Apple; the exact version threshold is
-    unknown.
+Explicitly compute the factorization. Defined by the LinearAlgebra package
+extension; requires `using LinearAlgebra`.
 """
-function factor!(aa_fact::AAFactorization{T},
-            kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
-    if aa_fact._factorization.status == SparseYetToBeFactored
-        if kind == SparseFactorizationTBD
-            # Cholesky for Hermitian (incl. real symmetric); LU for square
-            # non-Hermitian (macOS 15.5+); QR otherwise.
-            nrow, ncol = size(aa_fact.matrixObj)
-            lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
-            kind = ishermitian(aa_fact.matrixObj) ? SparseFactorizationCholesky :
-                   (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
-                                                    SparseFactorizationQR
-        end
-        fact = SparseFactor(kind, aa_fact.matrixObj.matrix)
-        if fact.status == SparseStatusOk
-            aa_fact._factorization = fact
-        else
-            # The factorization failed (e.g. singular matrix). Free whatever
-            # SparseFactor allocated for the failed attempt, but leave the
-            # original yet-to-be-factored placeholder in place so (a) the
-            # finalizer never calls SparseCleanup on a non-Ok object and
-            # (b) a subsequent factor! retries instead of silently reusing a
-            # broken factorization.
-            SparseCleanup(fact)
-            _libsparse_throw(fact.status, "factor")
-        end
-    end
-end
-
-# Translate a libSparse status code into a typed Julia exception. SparseStatusOk
-# is a no-op so callers can write `_libsparse_throw(result.status, ...)` after
-# every libSparse call without branching.
-function _libsparse_throw(status::SparseStatus_t, op::AbstractString)
-    status == SparseStatusOk && return
-    status == SparseMatrixIsSingular &&
-        throw(LinearAlgebra.SingularException(0))
-    status == SparseParameterError &&
-        throw(ArgumentError("libSparse $(op) failed: parameter error " *
-            "(possibly: matrix lacks the properties required by this factorization, " *
-            "or factorization is unavailable on this macOS version)"))
-    status == SparseStatusFailed &&
-        error("libSparse $(op) failed (check that the matrix has the correct " *
-              "properties for this factorization)")
-    status == SparseInternalError &&
-        error("libSparse $(op) failed: internal error")
-    error("libSparse $(op) failed: status=$(status)")
-end
+function factor! end
 
 """
     solve(f::AAFactorization, b::StridedVecOrMat)
 
-Solve the linear system `Ax = b` using Apple's Sparse Solvers, returning the solution `x`.
-The factorization is computed lazily on the first call if not already factored.
-Equivalent to `f \\ b`.
+Solve `Ax = b` with Apple's Sparse Solvers, returning `x`. Defined by the
+LinearAlgebra package extension; requires `using LinearAlgebra`.
 """
-function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTypes
-    size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
-        "Matrix and right-hand side size mismatch: got "
-        * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
-    factor!(aa_fact)
-    x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
-    SparseSolve(aa_fact._factorization, b, x)
-    return x
-end
+function solve end
 
 """
     solve!(f::AAFactorization, xb::StridedVecOrMat)
 
-Solve the linear system `Ax = b` in-place, overwriting `xb` with the solution.
-On input `xb` contains the right-hand side `b`; on output it contains the solution `x`.
-Equivalent to `ldiv!(f, xb)`.
+In-place solve overwriting `xb` with the solution. Defined by the LinearAlgebra
+package extension; requires `using LinearAlgebra`.
 """
-function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes
-    ((xb isa StridedMatrix) &&
-        (size(aa_fact.matrixObj)[1] != size(aa_fact.matrixObj)[2])) &&
-        throw(ArgumentError("Can't in-place " *
-                "solve: x and b are different sizes and Julia cannot resize a matrix."
-            )
-        )
-    factor!(aa_fact)
-    SparseSolve(aa_fact._factorization, xb)
-    return xb # written in imitation of KLU.jl, which also returns
-end
+function solve! end
 
-LinearAlgebra.ldiv!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes =
-        solve!(aa_fact, xb)
+"""
+    refactor!(f::AAFactorization, A)
 
-function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
-                            aa_fact::AAFactorization{T},
-                            b::StridedVecOrMat{T}) where T<:vTypes
-    size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
-        "Matrix and right-hand side size mismatch: got "
-        * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
-    size(aa_fact.matrixObj)[2] != size(x, 1) && throw(DimensionMismatch(
-        "Matrix and output size mismatch: got "
-        * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
-    factor!(aa_fact)
-    SparseSolve(aa_fact._factorization, b, x)
-    return x
-end
+Recompute the numeric factorization stored in `f` from the values of `A`,
+reusing the existing symbolic factorization. Defined by the LinearAlgebra
+package extension; requires `using LinearAlgebra`.
+"""
+function refactor! end

@@ -148,17 +148,21 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
         @testset "_libsparse_throw status mapping" begin
             # Code coverage reasons: no easy was to trigger the SparseInternalError.
             AA = AppleAccelerate
-            @test AA._libsparse_throw(AA.SparseStatusOk, "x") === nothing
-            @test_throws SingularException AA._libsparse_throw(
+            # `_libsparse_throw` lives in the LinearAlgebra extension (it throws
+            # LinearAlgebra.SingularException), so reach it via the extension.
+            LAExt = Base.get_extension(AppleAccelerate, :AppleAccelerateLinearAlgebraExt)
+            @test LAExt !== nothing
+            @test LAExt._libsparse_throw(AA.SparseStatusOk, "x") === nothing
+            @test_throws SingularException LAExt._libsparse_throw(
                 AA.SparseMatrixIsSingular, "factor")
-            @test_throws ArgumentError AA._libsparse_throw(
+            @test_throws ArgumentError LAExt._libsparse_throw(
                 AA.SparseParameterError, "factor")
-            @test_throws ErrorException AA._libsparse_throw(
+            @test_throws ErrorException LAExt._libsparse_throw(
                 AA.SparseStatusFailed, "factor")
-            @test_throws ErrorException AA._libsparse_throw(
+            @test_throws ErrorException LAExt._libsparse_throw(
                 AA.SparseInternalError, "factor")
             # Unknown / unmapped status falls through to the generic branch.
-            @test_throws ErrorException AA._libsparse_throw(
+            @test_throws ErrorException LAExt._libsparse_throw(
                 AA.SparseYetToBeFactored, "factor")
         end
 

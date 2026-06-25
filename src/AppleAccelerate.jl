@@ -1,5 +1,5 @@
 module AppleAccelerate
-using Libdl, LinearAlgebra
+using Libdl
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
@@ -13,24 +13,18 @@ const _macos_version = Ref{Union{Nothing,VersionNumber}}(nothing)
     BLAS_THREADING_SINGLE_THREADED
 end
 
-function forward_accelerate(interface::Symbol;
-                            new_lapack::Bool = interface == :ilp64,
-                            clear::Bool = false,
-                            verbose::Bool = false)
-    kwargs = Dict{Symbol,String}()
-    if new_lapack
-        if interface == :ilp64
-            kwargs[:suffix_hint] = "\x1a\$NEWLAPACK\$ILP64"
-        else
-            kwargs[:suffix_hint] = "\x1a\$NEWLAPACK"
-        end
-    else
-        if interface == :ilp64
-            throw(ArgumentError("ILP64 accelerate requires new_lapack"))
-        end
-    end
-    BLAS.lbt_forward(libacc; clear, verbose, kwargs...)
-end
+# BLAS/LAPACK forwarding to Accelerate is provided by the LinearAlgebra package
+# extension (`ext/AppleAccelerateLinearAlgebraExt.jl`), since it depends on
+# `LinearAlgebra.BLAS.lbt_forward`. These are declared here as generic-function
+# stubs so the names resolve from core (e.g. for `__init__`/docs), with methods
+# added by the extension once `LinearAlgebra` is loaded.
+"""
+    forward_accelerate(interface::Symbol; new_lapack, clear, verbose)
+
+Forward BLAS/LAPACK symbols to Accelerate via libblastrampoline.
+Defined by the LinearAlgebra package extension; requires `using LinearAlgebra`.
+"""
+function forward_accelerate end
 
 """
     load_accelerate(; clear = false, verbose = false, load_ilp64 = true)
@@ -39,26 +33,11 @@ Load Accelerate, replacing the current LBT forwarding tables if `clear` is `true
 is `false` by default to allow for OpenBLAS to act as a fallback for operations missing
 from Accelerate, such as `gemmt`. Attempts to load the ILP64 symbols if `load_ilp64` is
 `true`, and errors out if unable.
+
+Defined by the LinearAlgebra package extension; requires `using LinearAlgebra`.
+With only `using AppleAccelerate`, BLAS/LAPACK forwarding does NOT happen.
 """
-function load_accelerate(; clear::Bool = false,
-                           verbose::Bool = false,
-                           load_ilp64::Bool = true)
-    libacc_hdl = dlopen_e(libacc)
-    if libacc_hdl == C_NULL
-        return
-    end
-
-    # Check to see if we can load ILP64 symbols
-    if load_ilp64 && dlsym_e(libacc_hdl, "dgemm\$NEWLAPACK\$ILP64") == C_NULL
-        error("Unable to load ILP64 interface from '$(libacc)'; you are running macOS $(get_macos_version()), you need v13.4+")
-    end
-
-    # First, load :lp64 symbols, optionally clearing the current LBT forwarding tables
-    forward_accelerate(:lp64; new_lapack=true, clear, verbose)
-    if load_ilp64
-        forward_accelerate(:ilp64; new_lapack=true, verbose)
-    end
-end
+function load_accelerate end
 
 """
     _read_macos_version()
@@ -110,7 +89,7 @@ function get_macos_version()
 end
 
 """
-    set_num_threads(n::Integer) -> BlasInt
+    set_num_threads(n::Integer) -> Int
 
 Set the number of threads used by Accelerate BLAS. If `n == 1`, use single-threaded mode;
 if `n > 1`, use multi-threaded mode. Returns the resulting thread count (from
@@ -121,7 +100,7 @@ function set_num_threads(n::Integer)
     ver = get_macos_version()
     if ver === nothing || ver < v"15"
         @warn "The Accelerate threading API requires macOS 15 or later; ignoring" maxlog=1
-        return LinearAlgebra.BlasInt(1)
+        return Int(1)
     end
 
     retval::Cint = -1
@@ -135,24 +114,26 @@ function set_num_threads(n::Integer)
 end
 
 """
-    get_num_threads() -> BlasInt
+    get_num_threads() -> Int
 
 Return the number of threads used by Accelerate BLAS. Returns `1` for single-threaded mode,
 or the actual thread count for multi-threaded mode. On macOS < 15 where the threading API
 is unavailable, warns and returns `1`.
 """
-function get_num_threads()::LinearAlgebra.BlasInt
+function get_num_threads()::Int
     ver = get_macos_version()
     if ver === nothing || ver < v"15"
         @warn "The Accelerate threading API requires macOS 15 or later" maxlog=1
-        return LinearAlgebra.BlasInt(1)
+        return Int(1)
     end
 
     retval::Threading = ccall((:BLASGetThreading, libacc), Threading, ())
     if retval == BLAS_THREADING_SINGLE_THREADED
-        return LinearAlgebra.BlasInt(1)
+        return Int(1)
     elseif retval == BLAS_THREADING_MULTI_THREADED
-        return ccall((:APPLE_NTHREADS, libacc), LinearAlgebra.BlasInt, ())
+        # APPLE_NTHREADS returns a C `int` (BlasInt would also work, but core
+        # must not depend on LinearAlgebra); read it as Cint and widen to Int.
+        return Int(ccall((:APPLE_NTHREADS, libacc), Cint, ()))
     else
         error("AppleAccelerate: BLASGetThreading returned unexpected value: $(retval)")
     end
@@ -163,12 +144,16 @@ function __init__()
     _macos_version[] = _read_macos_version()
     ver = _macos_version[]
     # dsptrf has a bug in the initial release of the $NEWLAPACK symbols in 13.3.
-    # Thus use macOS 13.4 for ILP64, a correct LAPACK, and threading APIs
+    # Thus use macOS 13.4 for ILP64, a correct LAPACK, and threading APIs.
+    #
+    # NOTE: BLAS/LAPACK forwarding is NO LONGER performed here. `using
+    # AppleAccelerate` alone does not touch LBT. Forwarding happens in the
+    # LinearAlgebra package extension's `__init__` (triggered by
+    # `using LinearAlgebra`), which re-applies the same macOS 13.4+ guard.
     if ver === nothing || ver < v"13.4"
-        @info "AppleAccelerate.jl needs macOS 13.4 or later for BLAS/LAPACK forwarding"
-        return
+        @info "AppleAccelerate.jl needs macOS 13.4 or later for BLAS/LAPACK forwarding " *
+              "(load LinearAlgebra to enable it)"
     end
-    load_accelerate(; clear = false, load_ilp64=true)
     # libSparse lives at a hard-coded path (LIBSPARSE in sparse.jl). Probe it once
     # here so a future macOS layout change surfaces a clear diagnostic instead of
     # an opaque dlopen error at the first sparse ccall.
