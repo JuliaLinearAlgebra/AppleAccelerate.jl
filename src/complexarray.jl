@@ -1,5 +1,14 @@
 ## complexarray.jl — Complex-valued vDSP operations using split-complex format ##
 
+# NOTE ON THE RAW LAYER: the wrappers in this file are intentionally NOT migrated to
+# call the generated `LibAccelerate` submodule. They pass the split-complex operands
+# as `Ref{DSPSplitComplex}` / `Ref{DSPDoubleSplitComplex}` using the structs defined
+# below, whereas the generated `LibAccelerate.vDSP_z*` wrappers expect a
+# `Ptr{LibAccelerate.DSPSplitComplex}` built from LibAccelerate's own (nominally
+# distinct) struct type. A `Ref` to the local struct does not convert to a pointer to
+# the LibAccelerate struct, so a clean drop-in migration is not possible here without
+# reconstructing LibAccelerate's split-complex values. These remain direct `ccall`s.
+
 # ============================================================
 # Split-complex structs (used here and by dsp.jl for FFT)
 # ============================================================

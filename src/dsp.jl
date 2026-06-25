@@ -1,4 +1,16 @@
 ## dsp.jl ##
+#
+# RAW-LAYER MIGRATION NOTE: the real-valued vDSP wrappers here (conv, biquad /
+# biquadm, deq22, desamp, wiener, the *_window generators, and DCT/DFT execute /
+# destroy) now call the generated `LibAccelerate` submodule instead of embedding
+# `ccall` strings. Two groups are intentionally left as direct `ccall`s:
+#   1. Setup creators that return an opaque `Ptr{Cvoid}` (e.g. vDSP_*_CreateSetup,
+#      vDSP_create_fftsetup, vDSP_DFT_zop_CreateSetup): they have a non-`Cvoid`
+#      return and are kept as-is to avoid churn around the opaque handle types.
+#   2. Split-complex spectral / FFT routines (zaspec, zcoher, ztrans, zcspec and
+#      the fft_zop/zip/zrop family): these pass `Ref{DSPSplitComplex}` built from
+#      the local struct, which does not convert to the `Ptr{LibAccelerate struct}`
+#      the generated wrappers expect (same reason as complexarray.jl).
 
 mutable struct DFTSetup{T}
     setup::Ptr{Cvoid}
@@ -49,9 +61,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
                 error("'result' must have at least length(X) + length(K) - 1 elements")
             end
             xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
-            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
-                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
-                  xpadded, 1, pointer(K, ksize), -1, result, 1,  rsize, ksize)
+            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
             return result
         end
     end
@@ -96,9 +106,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
                 error("'result' must have at least length(X) + length(Y) - 1 elements")
             end
             xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
-            ccall(($(string("vDSP_conv", suff), libacc)),  Cvoid,
-                  (Ptr{$T}, Int64,  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64, UInt64),
-                  xpadded, 1, Y, 1, result, 1,  rsize, ysize)
+            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
             return result
         end
     end
@@ -228,9 +236,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
                 error("numelem = $numelem exceeds the input length $(length(X))")
             end
             result::Vector{$T} = similar(X)
-            ccall(($(string("vDSP_biquad", suff), libacc)),  Cvoid,
-                  (Ptr{Cvoid},  Ptr{$T},  Ptr{$T},  Int64,  Ptr{$T},  Int64, UInt64),
-                  biquad.setup, delays, X,  1, result,  1,  numelem)
+            LibAccelerate.$(Symbol(string("vDSP_biquad", suff)))(biquad.setup,delays,X,1,result,1,numelem)
             return result
         end
     end
@@ -244,9 +250,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
         Returns: Cvoid
         """
         function biquaddestroy(biquad::Biquad{$T})
-            ccall(($(string("vDSP_biquad_DestroySetup", Dsuff), libacc)),  Cvoid,
-                  (Ptr{Cvoid}, ),
-                  biquad.setup)
+            LibAccelerate.$(Symbol(string("vDSP_biquad_DestroySetup", Dsuff)))(biquad.setup)
         end
     end
 end
@@ -343,17 +347,13 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
                     xptrs[i] = pointer(X[i])
                     yptrs[i] = pointer(Y[i])
                 end
-                ccall(($(string("vDSP_biquadm", suff)), libacc), Cvoid,
-                      (Ptr{Cvoid}, Ptr{Ptr{$T}}, Int64, Ptr{Ptr{$T}}, Int64, UInt64),
-                      setup.setup, xptrs, 1, yptrs, 1, numelem)
+                LibAccelerate.$(Symbol(string("vDSP_biquadm", suff)))(setup.setup,xptrs,1,yptrs,1,numelem)
             end
             return Y
         end
 
         function biquadm_destroy(setup::BiquadMulti{$T})
-            ccall(($(string("vDSP_biquadm_DestroySetup", Dsuff)), libacc), Cvoid,
-                  (Ptr{Cvoid},),
-                  setup.setup)
+            LibAccelerate.$(Symbol(string("vDSP_biquadm_DestroySetup", Dsuff)))(setup.setup)
         end
     end
 end
@@ -562,9 +562,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             length(A) >= 3 || error("A must have at least 3 elements (2 state + 1 sample)")
             length(C) == length(A) || error("C must have the same length as A")
             N = UInt64(length(A) - 2)
-            ccall(($(string("vDSP_deq22", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, Int64, UInt64),
-                  A, 1, B, C, 1, N)
+            LibAccelerate.$(Symbol(string("vDSP_deq22", suff)))(A,1,B,C,1,N)
             return C
         end
 
@@ -600,9 +598,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             P = UInt64(length(F))
             Nout = UInt64(div(length(A) - P, DF) + 1)
             length(C) >= Nout || error("C must have at least $(Nout) elements")
-            ccall(($(string("vDSP_desamp", suff)), libacc), Cvoid,
-                  (Ptr{$T}, Int64, Ptr{$T}, Ptr{$T}, UInt64, UInt64),
-                  A, DF, F, C, Nout, P)
+            LibAccelerate.$(Symbol(string("vDSP_desamp", suff)))(A,DF,F,C,Nout,P)
             return C
         end
 
@@ -639,9 +635,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             length(F) >= L || error("F must have at least L elements")
             length(P) >= L || error("P (workspace) must have at least L elements")
             err = Ref{Cint}(0)
-            ccall(($(string("vDSP_wiener", suff)), libacc), Cvoid,
-                  (UInt64, Ptr{$T}, Ptr{$T}, Ptr{$T}, Ptr{$T}, Cint, Ptr{Cint}),
-                  L, A, C, F, P, Cint(flag), err)
+            LibAccelerate.$(Symbol(string("vDSP_wiener", suff)))(L,A,C,F,P,Cint(flag),err)
             return (F, Int(err[]))
         end
 
@@ -705,9 +699,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function blackman!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_blkman_window", suff), libacc)), Cvoid,
-                  (Ptr{$T}, UInt64,  Int64),
-                  result, length, flag)
+            LibAccelerate.$(Symbol(string("vDSP_blkman_window", suff)))(result,length,flag)
             return result
         end
     end
@@ -722,9 +714,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hamming!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_hamm_window", suff), libacc)), Cvoid,
-                  (Ptr{$T}, UInt64,  Int64),
-                  result, length, flag)
+            LibAccelerate.$(Symbol(string("vDSP_hamm_window", suff)))(result,length,flag)
             return result
         end
     end
@@ -743,9 +733,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     """
     @eval begin
         function hanning!(result::Vector{$T},  length::Int, flag::Int=0)
-            ccall(($(string("vDSP_hann_window", suff), libacc)), Cvoid,
-                  (Ptr{$T}, UInt64,  Int64),
-                  result, length, flag)
+            LibAccelerate.$(Symbol(string("vDSP_hann_window", suff)))(result,length,flag)
             return result
         end
     end
@@ -785,9 +773,7 @@ Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/
 """
 function dct(X::Vector{Float32}, setup::DFTSetup)
     result = similar(X)
-    ccall(("vDSP_DCT_Execute", libacc),  Cvoid,
-          (Ptr{Cvoid},  Ptr{Float32},  Ptr{Float32}),
-          setup.setup,  X, result)
+    LibAccelerate.vDSP_DCT_Execute(setup.setup,X,result)
     return result
 end
 
@@ -805,15 +791,11 @@ Destroy a DCT/DFT setup object, freeing its resources.
 Wraps [`vDSP_DFT_DestroySetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_destroysetup).
 """
 function plan_destroy(setup::DFTSetup{Float32})
-    ccall(("vDSP_DFT_DestroySetup", libacc), Cvoid,
-          (Ptr{Cvoid},),
-          setup.setup)
+    LibAccelerate.vDSP_DFT_DestroySetup(setup.setup)
 end
 
 function plan_destroy(setup::DFTSetup{Float64})
-    ccall(("vDSP_DFT_DestroySetupD", libacc), Cvoid,
-          (Ptr{Cvoid},),
-          setup.setup)
+    LibAccelerate.vDSP_DFT_DestroySetupD(setup.setup)
 end
 
 
@@ -857,9 +839,7 @@ function dft(Ir::Vector{Float32}, Ii::Vector{Float32}, setup::DFTSetup{Float32})
     n = length(Ir)
     Or = Vector{Float32}(undef, n)
     Oi = Vector{Float32}(undef, n)
-    ccall(("vDSP_DFT_Execute", libacc), Cvoid,
-          (Ptr{Cvoid}, Ptr{Float32}, Ptr{Float32}, Ptr{Float32}, Ptr{Float32}),
-          setup.setup, Ir, Ii, Or, Oi)
+    LibAccelerate.vDSP_DFT_Execute(setup.setup,Ir,Ii,Or,Oi)
     return (Or, Oi)
 end
 
@@ -867,9 +847,7 @@ function dft(Ir::Vector{Float64}, Ii::Vector{Float64}, setup::DFTSetup{Float64})
     n = length(Ir)
     Or = Vector{Float64}(undef, n)
     Oi = Vector{Float64}(undef, n)
-    ccall(("vDSP_DFT_ExecuteD", libacc), Cvoid,
-          (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}),
-          setup.setup, Ir, Ii, Or, Oi)
+    LibAccelerate.vDSP_DFT_ExecuteD(setup.setup,Ir,Ii,Or,Oi)
     return (Or, Oi)
 end
 
@@ -971,11 +949,11 @@ function plan_fft(x::Matrix{Complex{T}}) where T <: Union{Float32, Float64}
 end
 
 function destroy_fftsetup(setup::FFTSetup{Float64})
-    ccall(("vDSP_destroy_fftsetupD", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
+    LibAccelerate.vDSP_destroy_fftsetupD(setup.plan)
 end
 
 function destroy_fftsetup(setup::FFTSetup{Float32})
-    ccall(("vDSP_destroy_fftsetup", libacc), Cvoid, (Ptr{Cvoid},), setup.plan)
+    LibAccelerate.vDSP_destroy_fftsetup(setup.plan)
 end
 
 # --- Internal 1D FFT (direction-based) ---
