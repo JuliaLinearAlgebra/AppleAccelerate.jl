@@ -1,3 +1,14 @@
+# Exclude generated / non-library code so the project coverage % reflects the
+# hand-written idiomatic API:
+#   - src/lib/LibAccelerate.jl is the Clang.jl auto-generated raw ABI layer
+#     (~1000 @ccall wrappers). Only the subset the idiomatic layer calls is
+#     exercised; it's validated by the dlsym-probe + typedef tests and indirectly
+#     through the idiomatic tests, not unit-tested wrapper-by-wrapper.
+#   - gen/ holds the binding-generator scripts, not shipped as library code.
+ignore:
+  - "src/lib/LibAccelerate.jl"
+  - "gen"
+
 coverage:
   status:
     project:
