@@ -2,7 +2,7 @@ using AppleAccelerate
 using SparseArrays
 using LinearAlgebra
 
-import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve, solve!
+import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refactor!, solve, solve!
 
 @testset "Sparse Linear Algebra" begin
     @testset "attribute bitfields" begin
