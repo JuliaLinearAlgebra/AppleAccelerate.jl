@@ -22,6 +22,10 @@ const VECLIB = joinpath(SDK,
 # Subframework → header files whose declarations belong to it. Order matters: the first group
 # whose headers declare a symbol claims it (disambiguates the vU*/vS* overlap between
 # vBasicOps and vBigNum by header membership).
+# CAVEAT (informational only): vForce.h transitively includes vfp.h / vBasicOps.h, so symbols
+# actually belonging to vfp/vBasicOps can be seen first under the "vForce" group and get
+# mis-attributed there — making vfp/vBasicOps under-count (sometimes show 0). This affects
+# only the per-subframework breakdown below, not the total wrapped count.
 header_groups() = [
     "vForce"     => [joinpath(VECLIB, "vForce.h")],
     "vBigNum"    => [joinpath(VECLIB, "vBigNum.h")],

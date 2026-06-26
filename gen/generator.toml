@@ -21,6 +21,12 @@ output_ignorelist = [
     "sparse_mul_overflow",
     "_SPARSE_REAL_VARIANT",
     "_SPARSE_REAL_SIZE",
+    # CoreFoundation's `CF_ENUM(...)` availability macro, misparsed by Clang.jl as a
+    # function and emitted as `@ccall libacc.CF_ENUM(...)` — there is no such symbol.
+    # `vDSP_ENUM` is `#define vDSP_ENUM CF_ENUM`, emitted as `const vDSP_ENUM = CF_ENUM`,
+    # which dangles once CF_ENUM is gone; neither is a usable binding.
+    "CF_ENUM",
+    "vDSP_ENUM",
 ]
 
 # Keep generated structs immutable — they are plain C value types we build and
