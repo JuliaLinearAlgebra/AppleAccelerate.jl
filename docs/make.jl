@@ -15,7 +15,6 @@ makedocs(;
         "Numerical Integration" => "quadrature.md",
         "Benchmarks" => "benchmarks.md",
         "Architecture & Package Extensions" => "extensions.md",
-        "Binding Coverage" => "coverage.md",
     ],
     format = Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",

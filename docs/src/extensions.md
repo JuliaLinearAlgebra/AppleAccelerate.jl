@@ -31,9 +31,6 @@ using AppleAccelerate
 AppleAccelerate.LibAccelerate.some_unwrapped_symbol(args...)
 ```
 
-The [Binding Coverage](@ref) page reports, per subframework, how much of the raw
-layer currently has an idiomatic wrapper.
-
 ## Package extensions
 
 Two optional integrations are implemented as Julia
