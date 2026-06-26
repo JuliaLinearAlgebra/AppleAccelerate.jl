@@ -1291,4 +1291,120 @@ for T in (Float32, Float64)
     end
 end
 
+# ============================================================
+# Reference reconciliation: cross-validate every operation
+# against its Base / Statistics / LinearAlgebra equivalent,
+# including mutating (!) variants and ops not otherwise
+# numerically reconciled above. (Coverage is already 100%;
+# this testset hardens the confidence goal.)
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Reference reconciliation::$T" begin
+        X::Vector{T} = randn(N)
+        Y::Vector{T} = randn(N)
+        Z::Vector{T} = similar(X)
+        Xpos::Vector{T} = abs.(randn(N)) .+ T(0.5)
+        Ypos::Vector{T} = abs.(randn(N)) .+ T(0.5)
+
+        # --- 1-arg elementwise mutating variants vs Base ---
+        for (af, bf, src) in (
+                (AppleAccelerate.sin,  sin,  X), (AppleAccelerate.cos, cos, X),
+                (AppleAccelerate.tan,  tan,  X), (AppleAccelerate.exp, exp, X),
+                (AppleAccelerate.expm1, expm1, X), (AppleAccelerate.log, log, Xpos),
+                (AppleAccelerate.log1p, log1p, Xpos), (AppleAccelerate.sqrt, sqrt, Xpos),
+                (AppleAccelerate.cbrt, cbrt, X), (AppleAccelerate.abs, abs, X),
+                (AppleAccelerate.atan, atan, X), (AppleAccelerate.floor, floor, X),
+                (AppleAccelerate.ceil, ceil, X), (AppleAccelerate.round, round, X),
+                (AppleAccelerate.trunc, trunc, X))
+            af!  = getfield(AppleAccelerate, Symbol(string(nameof(af), "!")))
+            @test af(src) ≈ bf.(src)
+            af!(Z, src)
+            @test Z ≈ bf.(src)
+        end
+
+        # asin/acos need |x|<=1
+        W = T(2) .* rand(T, N) .- T(1)
+        @test AppleAccelerate.asin(W) ≈ asin.(W)
+        AppleAccelerate.asin!(Z, W); @test Z ≈ asin.(W)
+        @test AppleAccelerate.acos(W) ≈ acos.(W)
+        AppleAccelerate.acos!(Z, W); @test Z ≈ acos.(W)
+
+        # --- 2-arg elementwise mutating variants vs Base ---
+        @test AppleAccelerate.copysign(Xpos, Y) ≈ copysign.(Xpos, Y)
+        AppleAccelerate.copysign!(Z, Xpos, Y); @test Z ≈ copysign.(Xpos, Y)
+        @test AppleAccelerate.rem(X, Ypos) ≈ rem.(X, Ypos)
+        AppleAccelerate.rem!(Z, X, Ypos); @test Z ≈ rem.(X, Ypos)
+        @test AppleAccelerate.atan(X, Y) ≈ atan.(X, Y)
+        AppleAccelerate.atan!(Z, X, Y); @test Z ≈ atan.(X, Y)
+        @test AppleAccelerate.div_float(X, Ypos) ≈ X ./ Ypos
+        AppleAccelerate.div_float!(Z, X, Ypos); @test Z ≈ X ./ Ypos
+
+        # --- pow allocating + mutating vs Base .^ ---
+        @test AppleAccelerate.pow(Xpos, Y) ≈ Xpos .^ Y
+        AppleAccelerate.pow!(Z, Xpos, Y); @test Z ≈ Xpos .^ Y
+
+        # --- reductions vs Base/Statistics/LinearAlgebra ---
+        @test AppleAccelerate.maximum(X) ≈ maximum(X)
+        @test AppleAccelerate.minimum(X) ≈ minimum(X)
+        @test AppleAccelerate.sum(X)     ≈ sum(X)
+        @test AppleAccelerate.mean(X)    ≈ mean(X)
+        @test AppleAccelerate.findmax(X) == findmax(X)
+        @test AppleAccelerate.findmin(X) == findmin(X)
+        @test AppleAccelerate.dot(X, Y)  ≈ LinearAlgebra.dot(X, Y)
+        @test AppleAccelerate.rmsqv(X)   ≈ sqrt(mean(abs2, X))
+
+        # vnormalize stddev/mean vs Statistics (population, corrected=false)
+        (norm, m, s) = AppleAccelerate.vnormalize(X)
+        @test m ≈ mean(X) atol=T(1e-4)
+        @test s ≈ std(X, corrected=false) atol=T(1e-3)
+
+        # --- vector-scalar mutating variants vs Base ---
+        c::T = randn()
+        AppleAccelerate.vsadd!(Z, X, c); @test Z ≈ X .+ c
+        AppleAccelerate.vssub!(Z, X, c); @test Z ≈ X .- c
+        AppleAccelerate.svsub!(Z, X, c); @test Z ≈ c .- X
+        AppleAccelerate.vsmul!(Z, X, c); @test Z ≈ X .* c
+        cnz::T = c == 0 ? one(T) : c
+        AppleAccelerate.vsdiv!(Z, X, cnz); @test Z ≈ X ./ cnz
+
+        # --- threshold/limit/table ops vs explicit reference ---
+        @test AppleAccelerate.vthrsc(X, T(0), T(1)) ≈ T[x >= 0 ? T(1) : T(-1) for x in X]
+        # vtabi identity lookup reproduces the table
+        tab = T.(collect(0:10:40))
+        idxA = T.(collect(0:4))
+        @test AppleAccelerate.vtabi(idxA, T(1), T(0), tab) ≈ tab
+        # vgenp piecewise-linear matches manual linear interpolation
+        bpos = T[0, 2, 4]; bval = T[0, 10, 30]
+        gp = AppleAccelerate.vgenp(bval, bpos, 5)
+        gpref = T[0, 5, 10, 20, 30]
+        @test gp ≈ gpref
+    end
+end
+
+# Validation / error paths reachable from public API
+for T in (Float32, Float64)
+    @testset "Validation paths::$T" begin
+        a3 = randn(T, 3); b5 = randn(T, 5)
+        # 2-arg elementwise allocating shape check
+        @test_throws DimensionMismatch AppleAccelerate.copysign(a3, b5)
+        @test_throws DimensionMismatch AppleAccelerate.atan(a3, b5)
+        @test_throws DimensionMismatch AppleAccelerate.pow(a3, b5)
+        @test_throws DimensionMismatch AppleAccelerate.remainder(a3, b5)
+        # reductions
+        @test_throws DimensionMismatch AppleAccelerate.distancesq(a3, b5)
+        # two-vector vDSP op
+        @test_throws DimensionMismatch AppleAccelerate.vmax!(similar(a3), a3, b5)
+        # compound ops with scalar
+        c = T(1)
+        @test_throws DimensionMismatch AppleAccelerate.vasm!(similar(a3), a3, b5, c)
+        @test_throws DimensionMismatch AppleAccelerate.vmsa!(similar(a3), a3, b5, c)
+        @test_throws DimensionMismatch AppleAccelerate.vsma!(similar(a3), a3, c, b5)
+        @test_throws DimensionMismatch AppleAccelerate.vintb!(similar(a3), a3, b5, c)
+        # matrix shape checks
+        @test_throws DimensionMismatch AppleAccelerate.mmul(randn(T, 3, 2), randn(T, 3, 2))
+        @test_throws DimensionMismatch AppleAccelerate.f3x3(randn(T, 5, 5), randn(T, 2, 2))
+        @test_throws DimensionMismatch AppleAccelerate.f5x5(randn(T, 7, 7), randn(T, 3, 3))
+    end
+end
+
 end # @testset "Array Operations"
