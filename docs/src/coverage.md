@@ -13,13 +13,13 @@ counts those referenced by name in the idiomatic layer.
 
 | Subframework | Wrapped | Total | Coverage |
 |--------------|--------:|------:|---------:|
-| vForce | 4 | 84 | 5% |
+| vForce | 8 | 84 | 10% |
 | vBigNum | 0 | 69 | 0% |
 | vectorOps | 8 | 9 | 89% |
-| vDSP | 164 | 461 | 36% |
-| Sparse | 8 | 144 | 6% |
-| BNNS | 0 | 139 | 0% |
+| vDSP | 164 | 460 | 36% |
+| Sparse | 14 | 107 | 13% |
+| BNNS | 5 | 136 | 4% |
 | Quadrature | 1 | 1 | 100% |
 | other | 0 | 1 | 0% |
-| **Total** | **185** | **908** | **20%** |
+| **Total** | **200** | **867** | **23%** |
 

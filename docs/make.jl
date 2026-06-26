@@ -11,7 +11,10 @@ makedocs(;
         "Sparse Linear Algebra" => "sparse.md",
         "FFT & Transforms" => "fft.md",
         "Filtering & Spectral" => "filtering.md",
+        "Neural Network Primitives (BNNS)" => "bnns.md",
+        "Numerical Integration" => "quadrature.md",
         "Benchmarks" => "benchmarks.md",
+        "Architecture & Package Extensions" => "extensions.md",
         "Binding Coverage" => "coverage.md",
     ],
     format = Documenter.HTML(;
