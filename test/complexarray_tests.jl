@@ -160,4 +160,203 @@ for T in (Float32, Float64)
     end
 end
 
+# ============================================================
+# Unary complex ops: vneg, vconj, vcopy
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Complex Unary::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+
+        # vneg: -X
+        @test AppleAccelerate.vneg(X) ≈ -X
+        Rc = similar(X)
+        @test AppleAccelerate.vneg!(Rc, X) === Rc
+        @test Rc ≈ .-X
+
+        # vconj: conj(X)
+        @test AppleAccelerate.vconj(X) ≈ conj.(X)
+        @test AppleAccelerate.vconj!(Rc, X) === Rc
+        @test Rc ≈ conj.(X)
+
+        # vcopy: exact copy (bit-identical, not just approx)
+        Xc = AppleAccelerate.vcopy(X)
+        @test Xc == X
+        @test Xc !== X
+
+        # DimensionMismatch paths
+        bad = similar(X, N - 1)
+        @test_throws DimensionMismatch AppleAccelerate.vneg!(bad, X)
+        @test_throws DimensionMismatch AppleAccelerate.vconj!(bad, X)
+    end
+end
+
+# ============================================================
+# Binary complex ops: vmul, vdiv, vsmul
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Complex Binary::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Y::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        # ensure nonzero divisor magnitudes
+        Ynz::Vector{Complex{T}} = Y .+ Complex{T}(2, 2)
+
+        # vmul: elementwise X .* Y
+        @test AppleAccelerate.vmul(X, Y) ≈ X .* Y
+        Rc = similar(X)
+        @test AppleAccelerate.vmul!(Rc, X, Y) === Rc
+        @test Rc ≈ X .* Y
+
+        # vdiv: elementwise X ./ Y
+        @test AppleAccelerate.vdiv(X, Ynz) ≈ X ./ Ynz
+        @test AppleAccelerate.vdiv!(Rc, X, Ynz) === Rc
+        @test Rc ≈ X ./ Ynz
+
+        # vsmul: X .* scalar
+        c = complex(T(1.7), T(-0.9))
+        @test AppleAccelerate.vsmul(X, c) ≈ X .* c
+        @test AppleAccelerate.vsmul!(Rc, X, c) === Rc
+        @test Rc ≈ X .* c
+
+        # DimensionMismatch paths
+        bad = similar(X, N - 1)
+        @test_throws DimensionMismatch AppleAccelerate.vmul!(bad, X, Y)
+        @test_throws DimensionMismatch AppleAccelerate.vdiv!(bad, X, Y)
+        @test_throws DimensionMismatch AppleAccelerate.vsmul!(bad, X, c)
+    end
+end
+
+# ============================================================
+# Complex → Real ops: vabs, vphase, vmags, vmagsa
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Complex To Real::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+
+        # vabs: abs (modulus)
+        @test AppleAccelerate.vabs(X) ≈ abs.(X)
+        Rr = Vector{T}(undef, N)
+        @test AppleAccelerate.vabs!(Rr, X) === Rr
+        @test Rr ≈ abs.(X)
+
+        # vphase: angle
+        @test AppleAccelerate.vphase(X) ≈ angle.(X)
+        @test AppleAccelerate.vphase!(Rr, X) === Rr
+        @test Rr ≈ angle.(X)
+
+        # vmags: abs2
+        @test AppleAccelerate.vmags(X) ≈ abs2.(X)
+        @test AppleAccelerate.vmags!(Rr, X) === Rr
+        @test Rr ≈ abs2.(X)
+
+        # vmagsa: abs2(X) + B
+        B::Vector{T} = randn(T, N)
+        @test AppleAccelerate.vmagsa(X, B) ≈ abs2.(X) .+ B
+        @test AppleAccelerate.vmagsa!(Rr, X, B) === Rr
+        @test Rr ≈ abs2.(X) .+ B
+
+        # DimensionMismatch paths
+        badr = Vector{T}(undef, N - 1)
+        @test_throws DimensionMismatch AppleAccelerate.vabs!(badr, X)
+        @test_throws DimensionMismatch AppleAccelerate.vphase!(badr, X)
+        @test_throws DimensionMismatch AppleAccelerate.vmags!(badr, X)
+        @test_throws DimensionMismatch AppleAccelerate.vmagsa!(badr, X, randn(T, N))
+        @test_throws DimensionMismatch AppleAccelerate.vmagsa!(Rr, X, randn(T, N - 1))
+    end
+end
+
+# ============================================================
+# dot / dotu DimensionMismatch and degenerate-equality cases
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Complex dot edge cases::$T" begin
+        A::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        B::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        @test_throws DimensionMismatch AppleAccelerate.dot(A, B[1:end-1])
+        @test_throws DimensionMismatch AppleAccelerate.dotu(A, B[1:end-1])
+        @test_throws DimensionMismatch AppleAccelerate.zidotpr(A, B[1:end-1])
+        @test_throws DimensionMismatch AppleAccelerate.zrdotpr(A, randn(T, N - 1))
+
+        # For real-only vectors, dot and dotu coincide (conjugation is a no-op).
+        Ar::Vector{Complex{T}} = complex.(randn(T, N))
+        Br::Vector{Complex{T}} = complex.(randn(T, N))
+        @test AppleAccelerate.dot(Ar, Br) ≈ AppleAccelerate.dotu(Ar, Br)
+    end
+end
+
+# ============================================================
+# polar / rect coordinate conversion and round-trip
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Polar/Rect::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        mags, angs = AppleAccelerate.polar(X)
+        @test mags ≈ abs.(X)
+        @test angs ≈ angle.(X)
+
+        # rect: (mag, angle) → complex, vs mag .* cis(angle)
+        R = AppleAccelerate.rect(mags, angs)
+        @test R ≈ mags .* cis.(angs)
+
+        # round-trip polar -> rect recovers X
+        @test AppleAccelerate.rect(mags, angs) ≈ X
+
+        @test_throws DimensionMismatch AppleAccelerate.rect(mags, angs[1:end-1])
+    end
+end
+
+# ============================================================
+# ctoz / ztoc split-complex format conversion + round-trip
+# (exercises the GC-safe split-view constructors)
+# ============================================================
+for T in (Float32, Float64)
+    @testset "ctoz/ztoc::$T" begin
+        X::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        re, im = AppleAccelerate.ctoz(X)
+        @test re == real.(X)
+        @test im == imag.(X)
+
+        # ztoc reassembles interleaved complex from split-complex
+        Xr = AppleAccelerate.ztoc(re, im)
+        @test Xr == X
+
+        # full round-trip
+        re2, im2 = AppleAccelerate.ctoz(AppleAccelerate.ztoc(re, im))
+        @test re2 == re
+        @test im2 == im
+    end
+end
+
+# ============================================================
+# zvfill!/zmmul DimensionMismatch, zvcmul/zrvmul/etc mismatch paths
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Batch5 mismatch paths::$T" begin
+        A::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        B::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        C::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Br::Vector{T} = randn(T, N)
+        bad = similar(A, N - 1)
+        badr = similar(Br, N - 1)
+
+        @test_throws DimensionMismatch AppleAccelerate.zvcmul!(bad, A, B)
+        @test_throws DimensionMismatch AppleAccelerate.zrvmul!(bad, A, Br)
+        @test_throws DimensionMismatch AppleAccelerate.zrvdiv!(bad, A, Br)
+        @test_throws DimensionMismatch AppleAccelerate.zrvadd!(bad, A, Br)
+        @test_throws DimensionMismatch AppleAccelerate.zrvsub!(bad, A, Br)
+        @test_throws DimensionMismatch AppleAccelerate.zrvmul!(similar(A), A, badr)
+        @test_throws DimensionMismatch AppleAccelerate.zvcma!(bad, A, B, C)
+        @test_throws DimensionMismatch AppleAccelerate.zvma!(bad, A, B, C)
+        @test_throws DimensionMismatch AppleAccelerate.zvsma!(bad, A, complex(T(1), T(1)), C)
+
+        # zmmul dimension mismatches
+        M = complex.(randn(T, 3, 4), randn(T, 3, 4))
+        Nn = complex.(randn(T, 5, 2), randn(T, 5, 2))  # 4 ≠ 5
+        @test_throws DimensionMismatch AppleAccelerate.zmmul(M, Nn)
+        Mok = complex.(randn(T, 3, 4), randn(T, 3, 4))
+        Bok = complex.(randn(T, 4, 2), randn(T, 4, 2))
+        Cbad = Matrix{Complex{T}}(undef, 3, 3)  # wrong shape
+        @test_throws DimensionMismatch AppleAccelerate.zmmul!(Cbad, Mok, Bok)
+    end
+end
+
 end # @testset
