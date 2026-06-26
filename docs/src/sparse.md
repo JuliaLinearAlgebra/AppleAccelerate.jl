@@ -94,6 +94,75 @@ nothing # hide
 | `factor!(f, type)` | Compute factorization with specific type |
 | `factorize(A::AASparseMatrix)` | Create an `AAFactorization` from a sparse matrix |
 
+## Factorization conveniences
+
+For matrices wrapped as an `AASparseMatrix`, the usual `LinearAlgebra`
+factorization spellings build an `AAFactorization` of the requested kind:
+
+```@example sparse
+import AppleAccelerate: AASparseMatrix
+
+A = AASparseMatrix(sprandn(100, 100, 0.1) + 20I)
+
+F = lu(A)        # AAFactorization (LU; requires macOS 15.5+)
+G = qr(A)        # QR (also works for rectangular / least-squares)
+nothing # hide
+```
+
+`cholesky(A)` and `ldlt(A)` are available for symmetric/Hermitian matrices.
+
+!!! note "No type piracy"
+    These methods dispatch on `AppleAccelerate`'s own `AASparseMatrix`, **not** on
+    `SparseMatrixCSC`, so they do not override Julia's built-in
+    `lu(::SparseMatrixCSC)` / `cholesky` / `qr` / `ldlt` (UMFPACK/CHOLMOD/SPQR). You
+    opt in to the Accelerate solvers by wrapping your matrix in `AASparseMatrix`
+    first, e.g. `lu(AASparseMatrix(A))`.
+
+## Reusing a factorization: `refactor!`
+
+When a matrix changes its **values but not its sparsity pattern** — the common case
+in Newton iterations, implicit time stepping, and parameter sweeps —
+[`refactor!`](@ref AppleAccelerate.refactor!) recomputes the numeric factorization
+in place while **reusing the existing symbolic factorization** (the fill-reducing
+ordering and sparsity analysis). This is substantially cheaper than building a fresh
+`AAFactorization`.
+
+```@example sparse
+import AppleAccelerate: AAFactorization, refactor!, solve
+
+P = sprandn(100, 100, 0.05) + 20I
+F = AAFactorization(P)
+solve(F, randn(100))             # forces the first (full) factorization
+
+# Same sparsity pattern, new values:
+P2 = copy(P); P2.nzval .*= 1.5
+refactor!(F, P2)                 # reuses the symbolic factorization
+x = solve(F, randn(100))
+nothing # hide
+```
+
+`F` must already hold a completed factorization (call `factor!`/`solve` once first),
+and `A` must have the same number of stored nonzeros as the original matrix.
+
+For LU/Cholesky/LDLᵀ factorizations you can equivalently use the `LinearAlgebra`-style
+spellings that mirror how `SparseArrays` exposes symbolic reuse — `lu!(F, A)`,
+`cholesky!(F, A)`, `ldlt!(F, A)`. Each requires `F` to already hold a factorization
+of the matching kind and delegates to `refactor!`. QR reuse has no stdlib spelling,
+so use `refactor!` directly for it.
+
+## Round-tripping to `SparseMatrixCSC`
+
+An `AASparseMatrix` can be materialized back to a standard Julia `SparseMatrixCSC`.
+The transpose/adjoint/symmetric/Hermitian/triangular attribute bits are honored, so
+the result equals the logical matrix the wrapper represents:
+
+```@example sparse
+A = AASparseMatrix(sprandn(50, 50, 0.1))
+B = SparseMatrixCSC(A)
+@assert B ≈ SparseMatrixCSC(A)   # round-trips the logical matrix
+nothing # hide
+```
+
 ```@docs
 AppleAccelerate.AASparseMatrix
 AppleAccelerate.AAFactorization
@@ -101,4 +170,5 @@ AppleAccelerate.muladd!
 AppleAccelerate.factor!
 AppleAccelerate.solve
 AppleAccelerate.solve!
+AppleAccelerate.refactor!
 ```
