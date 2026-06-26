@@ -68,8 +68,6 @@ jobs:
             git diff --stat -- src/lib/LibAccelerate.jl
           fi
           exit 0
-      - name: Binding coverage (informational)
-        run: julia --project=. gen/coverage.jl || true
   smoke:
     name: Bare-load smoke (no test extras)
     runs-on: macOS-latest

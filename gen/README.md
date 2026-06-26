@@ -54,16 +54,6 @@ coverage by appending headers to that list.
   artifact include path (we capture ~93% of vDSP, all the pointer/length array
   ops). These SIMD-typed overloads are not part of the idiomatic surface anyway.
 
-## Coverage report
-
-[`coverage.jl`](./coverage.jl) reports, per subframework, how many generated
-functions have a hand-written idiomatic wrapper:
-
-```sh
-julia --project=. gen/coverage.jl           # print the table
-julia --project=. gen/coverage.jl --write   # also refresh docs/src/coverage.md
-```
-
 ## Files
 
 | File | Purpose |
@@ -72,5 +62,4 @@ julia --project=. gen/coverage.jl --write   # also refresh docs/src/coverage.md
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
 | `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
 | `shims/bnns_graph_shim.h` | Neutralizes availability attributes that break Clang.jl |
-| `coverage.jl` | Report-only binding-coverage table |
 | `Project.toml` | Pins Clang.jl for the generator environment |
