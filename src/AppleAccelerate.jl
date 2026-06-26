@@ -190,6 +190,9 @@ end
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")
+    # refactor! is AppleAccelerate's own function (in-place numeric refactorization
+    # reusing a symbolic factorization). Export it alongside the public sparse API.
+    export refactor!
     include("quadrature.jl")
     include("bnns.jl")
 end

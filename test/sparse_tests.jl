@@ -629,4 +629,131 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, solve
         @test Array(aaH) == Array(H)
         @test aaH[1, 2] == conj(H[2, 1]) == (1 + 2im)
     end
+
+    @testset "refactor!" begin
+        @testset "real $T" for T in (Float32, Float64)
+            # Diagonally dominant so QR/LU refactor is well-conditioned.
+            A1 = sprandn(T, 40, 40, 0.2) + T(10) * I
+            f = AAFactorization(AASparseMatrix(A1))
+            factor!(f)  # compute symbolic + numeric once
+            # Same pattern, different values (scaling preserves the stored pattern).
+            A2 = copy(A1)
+            A2.nzval .*= T(1.5)
+            b = rand(T, 40)
+            refactor!(f, AASparseMatrix(A2))
+            xref = solve(f, b)
+            # Must match a fresh factorization of A2.
+            xfresh = solve(AAFactorization(AASparseMatrix(A2)), b)
+            @test isapprox(xref, xfresh; rtol = sqrt(eps(T)))
+            @test isapprox(Matrix(A2) * xref, b; rtol = 10 * sqrt(eps(T)))
+        end
+
+        @testset "via SparseMatrixCSC" begin
+            A1 = sprandn(30, 30, 0.2) + 10I
+            f = AAFactorization(AASparseMatrix(A1))
+            solve(f, rand(30))  # forces factorization
+            A2 = copy(A1); A2.nzval .*= 1.25
+            b = rand(30)
+            refactor!(f, A2)  # CSC overload
+            @test isapprox(solve(f, b), Matrix(A2) \ b; rtol = 1e-8)
+        end
+
+        @testset "errors before factorization" begin
+            A = sprandn(5, 5, 0.4) + 10I
+            f = AAFactorization(AASparseMatrix(A))
+            # not yet factored
+            @test_throws ArgumentError refactor!(f, AASparseMatrix(A))
+            factor!(f)
+            # dimension mismatch
+            @test_throws DimensionMismatch refactor!(f, AASparseMatrix(sprandn(6, 6, 0.4) + 10I))
+            # different nnz (sparsity pattern)
+            B = copy(A); B[1, 1] == 0 && (B[1, 1] = 1.0)
+            different = copy(A)
+            # add a stored zero somewhere not already present
+            idx = findfirst(==(0.0), Matrix(A))
+            if idx !== nothing
+                different[idx] = 1.0
+                @test_throws ArgumentError refactor!(f, AASparseMatrix(different))
+            end
+        end
+    end
+
+    @testset "SparseMatrixCSC(::AASparseMatrix) round-trip" begin
+        @testset "ordinary $T" for T in (Float64, ComplexF64)
+            M = T <: Complex ? sprandn(T, 7, 7, 0.4) : sprandn(7, 7, 0.4)
+            aa = AASparseMatrix(M)
+            @test SparseMatrixCSC(aa) == M
+        end
+
+        @testset "transpose / adjoint" begin
+            M = sprandn(ComplexF64, 6, 6, 0.4)
+            aa = AASparseMatrix(M)
+            @test SparseMatrixCSC(transpose(aa)) == sparse(transpose(M))
+            @test SparseMatrixCSC(adjoint(aa)) == sparse(adjoint(M))
+        end
+
+        @testset "symmetric" begin
+            S = sparse(Symmetric(sprandn(8, 8, 0.3)))
+            @test issymmetric(S)
+            @test SparseMatrixCSC(AASparseMatrix(S)) == S
+        end
+
+        @testset "Hermitian" begin
+            B = sprandn(ComplexF64, 8, 8, 0.3)
+            H = sparse(Hermitian(B + 8I))
+            @test ishermitian(H)
+            @test SparseMatrixCSC(AASparseMatrix(H)) == H
+        end
+
+        @testset "triangular $T" for T in (Float64, ComplexF64)
+            B = T <: Complex ? sprandn(T, 6, 6, 0.5) : sprandn(6, 6, 0.5)
+            L = sparse(tril(B))
+            U = sparse(triu(B))
+            @test SparseMatrixCSC(AASparseMatrix(L)) == L
+            @test SparseMatrixCSC(AASparseMatrix(U)) == U
+        end
+    end
+
+    @testset "factorization entry points on AASparseMatrix" begin
+        @testset "qr (real $T)" for T in (Float32, Float64)
+            M = sprandn(T, 20, 20, 0.3) + T(5) * I
+            b = rand(T, 20)
+            f = qr(AASparseMatrix(M))
+            @test f isa AAFactorization
+            @test isapprox(solve(f, b), Matrix(M) \ b; rtol = 10 * sqrt(eps(T)))
+            # generic \ via Factorization supertype also works
+            @test isapprox(f \ b, Matrix(M) \ b; rtol = 10 * sqrt(eps(T)))
+        end
+
+        @testset "cholesky (SPD)" begin
+            B = sprandn(15, 15, 0.3)
+            A = sparse(B * B' + 15I)  # symmetric positive definite
+            b = rand(15)
+            f = cholesky(AASparseMatrix(A))
+            @test isapprox(solve(f, b), Matrix(A) \ b; rtol = 1e-7)
+        end
+
+        @testset "ldlt (symmetric)" begin
+            B = sprandn(12, 12, 0.3)
+            A = sparse(B + B' + 12I)  # symmetric
+            b = rand(12)
+            f = ldlt(AASparseMatrix(A))
+            @test isapprox(solve(f, b), Matrix(A) \ b; rtol = 1e-7)
+        end
+
+        if something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5"
+            @testset "lu (square, macOS 15.5+)" begin
+                M = sprandn(18, 18, 0.3) + 10I
+                b = rand(18)
+                f = lu(AASparseMatrix(M))
+                @test isapprox(solve(f, b), Matrix(M) \ b; rtol = 1e-7)
+            end
+        end
+
+        @testset "does not pirate Julia's sparse lu" begin
+            # Loading AppleAccelerate must not override Julia's UMFPACK lu for CSC.
+            m = which(LinearAlgebra.lu, Tuple{SparseMatrixCSC{Float64,Int}})
+            @test parentmodule(m) !== AppleAccelerate
+        end
+    end
 end
