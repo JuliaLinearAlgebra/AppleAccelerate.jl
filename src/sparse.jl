@@ -1257,6 +1257,12 @@ This is substantially cheaper than building a fresh [`AAFactorization`](@ref)
 whenever a matrix changes values but not structure — the common case in Newton
 iterations, implicit time stepping, and parameter sweeps.
 
+For LU/Cholesky/LDLᵀ factorizations you can equivalently use the
+`LinearAlgebra`-style spellings `lu!(f, A)`, `cholesky!(f, A)`, and `ldlt!(f, A)`
+(matching `SparseArrays`' symbolic-reuse API); they require `f` to already hold a
+factorization of the matching kind and delegate here. QR reuse has no stdlib
+spelling, so use `refactor!` directly for it.
+
 `f` must already hold a completed factorization (call [`factor!`](@ref) or
 [`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown.
 The factorization object `f` is mutated in place and returned. After
@@ -1301,6 +1307,37 @@ end
 
 refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}) where T<:vTypes =
     refactor!(aa_fact, AASparseMatrix(A))
+
+# LinearAlgebra-style spellings of `refactor!`, matching how SparseArrays exposes
+# symbolic-factorization reuse (`lu!(F, A)` for UMFPACK, `cholesky!(F, A)` /
+# `ldlt!(F, A)` for CHOLMOD). They dispatch on our own `AAFactorization`, so they
+# are not type piracy and do not touch Julia's `SparseMatrixCSC` factorizations.
+# Each requires `F` to already hold a factorization of the matching kind, then
+# delegates to `refactor!`. (QR reuse has no stdlib spelling — use `refactor!`.)
+_is_lu_kind(t::SparseFactorization_t) = _refactor_family(t) == :LU
+_is_cholesky_kind(t::SparseFactorization_t) = t == SparseFactorizationCholesky
+_is_ldlt_kind(t::SparseFactorization_t) =
+    t in (SparseFactorizationLDLT, SparseFactorizationLDLTUnpivoted,
+          SparseFactorizationLDLTSBK, SparseFactorizationLDLTTPP)
+
+function _assert_refactor_kind(aa_fact::AAFactorization, pred, name::AbstractString)
+    f = aa_fact._factorization
+    # If F isn't factored yet, let refactor! raise the clearer "call factor! first".
+    f.status == SparseStatusOk || return
+    pred(f.symbolicFactorization.type) || throw(ArgumentError(
+        "$name requires F to hold the matching factorization kind; it holds " *
+        "$(f.symbolicFactorization.type). Build F with that factorization first."))
+    return
+end
+
+for (fn, pred) in ((:lu!, :_is_lu_kind),
+                   (:cholesky!, :_is_cholesky_kind),
+                   (:ldlt!, :_is_ldlt_kind))
+    for AT in (:(AASparseMatrix{T}), :(SparseMatrixCSC{T, Int64}))
+        @eval LinearAlgebra.$fn(aa_fact::AAFactorization{T}, A::$AT) where T<:vTypes =
+            (_assert_refactor_kind(aa_fact, $pred, $(string(fn))); refactor!(aa_fact, A))
+    end
+end
 
 # ============================================================
 # AASparseMatrix -> SparseMatrixCSC round-trip

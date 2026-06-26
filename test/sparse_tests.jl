@@ -676,6 +676,30 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
                 @test_throws ArgumentError refactor!(f, AASparseMatrix(different))
             end
         end
+
+        @testset "lu!/cholesky!/ldlt! spellings" begin
+            b = rand(20)
+            # LU: nonsymmetric square -> factor! defaults to LU.
+            A1 = sprandn(20, 20, 0.3) + 10I
+            f = lu(AASparseMatrix(A1))
+            A2 = copy(A1); A2.nzval .*= 1.3
+            lu!(f, AASparseMatrix(A2))
+            @test isapprox(solve(f, b), Matrix(A2) \ b; rtol = 1e-8)
+            @test_throws ArgumentError cholesky!(f, AASparseMatrix(A2))  # wrong kind
+
+            # Cholesky / LDLᵀ on a symmetric positive-definite matrix.
+            M = sprandn(20, 20, 0.3); S = SparseMatrixCSC(M * M' + 20I)
+            S2 = copy(S); S2.nzval .*= 1.1
+            fc = cholesky(AASparseMatrix(S))
+            cholesky!(fc, S2)                       # CSC overload
+            @test isapprox(solve(fc, b), Matrix(S2) \ b; rtol = 1e-7)
+            @test_throws ArgumentError lu!(fc, S2)  # wrong kind
+
+            fl = AAFactorization(AASparseMatrix(S))
+            factor!(fl, AppleAccelerate.SparseFactorizationLDLT)
+            ldlt!(fl, AASparseMatrix(S2))
+            @test isapprox(solve(fl, b), Matrix(S2) \ b; rtol = 1e-7)
+        end
     end
 
     @testset "SparseMatrixCSC(::AASparseMatrix) round-trip" begin
