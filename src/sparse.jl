@@ -1091,9 +1091,11 @@ for ((T, kind), sym) in _REFACTOR_SYM
                                      ::Val{$(QuoteNode(kind))})
         symb = fact[].symbolicFactorization
         wsize = _refactor_workspace_size(symb, $T)
-        workspace = Libc.malloc(wsize)
-        workspace != C_NULL || throw(OutOfMemoryError())
-        try
+        # Transient scratch for the refactor call (libSparse does not retain it).
+        # A GC-managed buffer rooted across the ccall via `GC.@preserve`; Julia
+        # array data is 16-byte aligned, matching the solver's expectation.
+        workspace = Vector{UInt8}(undef, wsize)
+        GC.@preserve workspace begin
             # The plain-C `_SparseRefactor*` symbols take the matrix BY POINTER
             # (`SparseMatrix_Double *`), unlike the C++ `SparseFactor` entry point
             # which takes it by value. Passing the struct by value misaligns the
@@ -1104,9 +1106,7 @@ for ((T, kind), sym) in _REFACTOR_SYM
             @ccall LIBSPARSE.$sym(matrix::Ref{SparseMatrix{$T}},
                                   fact::Ptr{SparseOpaqueFactorization{$T}},
                                   nfopts::Ptr{SparseNumericFactorOptions},
-                                  workspace::Ptr{Cvoid})::Cvoid
-        finally
-            Libc.free(workspace)
+                                  pointer(workspace)::Ptr{Cvoid})::Cvoid
         end
         return fact[]
     end
