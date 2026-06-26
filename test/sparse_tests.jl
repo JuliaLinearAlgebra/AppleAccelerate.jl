@@ -371,6 +371,23 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test_throws DimensionMismatch LinearAlgebra.ldiv!(wrong_x, f, good_b)
         end
 
+        @testset "ldiv!(x, f, b) writes solution" begin
+            # Exercises the successful body of the 3-arg ldiv!(x, f, b), checked
+            # against the dense solve. Vector and matrix RHS, square system.
+            N = 6
+            A = sprandn(N, N, 0.5) + N * I
+            f = AAFactorization(A)
+            x0 = rand(N); b = A * x0
+            x = similar(x0)
+            ret = LinearAlgebra.ldiv!(x, f, b)
+            @test ret === x
+            @test isapprox(x, Matrix(A) \ b; rtol = 1e-8)
+
+            X0 = rand(N, 3); B = A * X0
+            X = similar(X0)
+            @test isapprox(LinearAlgebra.ldiv!(X, f, B), Matrix(A) \ B; rtol = 1e-8)
+        end
+
         @testset "ArgumentError for in-place solve" begin
             N = 4
             M = 5
