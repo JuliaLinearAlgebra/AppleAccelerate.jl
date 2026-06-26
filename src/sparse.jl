@@ -1051,6 +1051,12 @@ const _REFACTOR_SYM = Dict(
     (Cdouble,    :Symmetric) => :_SparseRefactorSymmetric_Double,
     (ComplexF32, :Symmetric) => :_SparseRefactorSymmetric_Complex_Float,
     (ComplexF64, :Symmetric) => :_SparseRefactorSymmetric_Complex_Double,
+    # Complex-Hermitian Cholesky/LDLT refactor: libSparse's *Symmetric_Complex*
+    # kernels reject Hermitian factorizations ("only applies to SparseSymmetric
+    # matrices"), so a separate Hermitian family is required. (Real Hermitian ==
+    # symmetric, so real types stay in the :Symmetric family above.)
+    (ComplexF32, :Hermitian) => :_SparseRefactorHermitian_Complex_Float,
+    (ComplexF64, :Hermitian) => :_SparseRefactorHermitian_Complex_Double,
     (Cfloat,     :QR)        => :_SparseRefactorQR_Float,
     (Cdouble,    :QR)        => :_SparseRefactorQR_Double,
     (ComplexF32, :QR)        => :_SparseRefactorQR_Complex_Float,
@@ -1289,7 +1295,12 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:v
         "pattern): factored matrix has $(length(old._nzval)), new matrix has " *
         "$(length(A._nzval))"))
 
-    family = _refactor_family(aa_fact._factorization.symbolicFactorization.type)
+    # The symbolic factorization's `attributes` field is zeroed, so the
+    # Hermitian-vs-symmetric distinction (needed only for complex Cholesky/LDLT
+    # refactor, which has dedicated Hermitian kernels) must come from the NEW
+    # matrix `A`. Real Hermitian == symmetric, so real types stay :Symmetric.
+    family = (T <: Complex && ishermitian(A)) ? :Hermitian :
+             _refactor_family(aa_fact._factorization.symbolicFactorization.type)
     nfopts = Ref(SparseNumericFactorOptions(T))
     factref = Ref(aa_fact._factorization)
     GC.@preserve A begin

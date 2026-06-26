@@ -672,8 +672,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             xn = length(X)
             kn = length(K)
             rn = length(result)
-            # Pad X with (kn-1) leading and kn trailing zeros, matching the real conv path.
-            xpad = zeros(Complex{$T}, xn + 2kn - 1)
+            rn >= xn + kn - 1 ||
+                error("'result' must have at least length(X) + length(K) - 1 elements")
+            # vDSP reads rn + kn - 1 input elements, so size the zero-padding from
+            # rn (not the natural result length) to keep reads in-bounds for an
+            # oversized `result` buffer: (kn-1) leading + X + trailing zeros, for a
+            # total padded length of rn + 2kn - 1.
+            xpad = zeros(Complex{$T}, rn + 2kn - 1)
             copyto!(xpad, kn, X, 1, xn)
             GC.@preserve xpad K result begin
                 xsplit = _split_view($DSPSplit, pointer(xpad))

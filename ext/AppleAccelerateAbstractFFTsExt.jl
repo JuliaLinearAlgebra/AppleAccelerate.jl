@@ -33,6 +33,16 @@ function _check_vdsp_fft(x::AbstractMatrix)
     return nothing
 end
 
+# Guard plan reuse: a plan built for size N must only run on a matching input.
+# Without this, applying a plan to a different-size array silently produces a
+# wrong-size (garbage) result instead of erroring.
+function _check_plan_input(p, x)
+    size(x) == p.sz || throw(DimensionMismatch(
+        "FFT plan was created for input size $(p.sz), but got input of size $(size(x))"))
+    _check_vdsp_fft(x)
+    return nothing
+end
+
 # Error with a clear message when vDSP can't handle the input.
 function _vdsp_unsupported(x)
     if ndims(x) > 2
@@ -132,17 +142,17 @@ end
 # --- Out-of-place execution ---
 
 function Base.:*(p::VDSPFFTPlan{T,1}, x::AbstractVector) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     AppleAccelerate.fft(convert(Vector{Complex{T}}, x), p.setup)
 end
 
 function Base.:*(p::VDSPBFFTPlan{T,1}, x::AbstractVector) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     AppleAccelerate.bfft(convert(Vector{Complex{T}}, x), p.setup)
 end
 
 function Base.:*(p::VDSPFFTPlan{T,2}, x::AbstractMatrix) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     xc = convert(Matrix{Complex{T}}, x)
     dims = _region_set(p.region)
     if 1 in dims && 2 in dims
@@ -156,7 +166,7 @@ function Base.:*(p::VDSPFFTPlan{T,2}, x::AbstractMatrix) where {T}
 end
 
 function Base.:*(p::VDSPBFFTPlan{T,2}, x::AbstractMatrix) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     xc = convert(Matrix{Complex{T}}, x)
     dims = _region_set(p.region)
     if 1 in dims && 2 in dims
@@ -172,22 +182,22 @@ end
 # --- Out-of-place mul! ---
 
 function LinearAlgebra.mul!(y::AbstractVector{Complex{T}}, p::VDSPFFTPlan{T,1}, x::AbstractVector{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, AppleAccelerate.fft(convert(Vector{Complex{T}}, x), p.setup))
 end
 
 function LinearAlgebra.mul!(y::AbstractVector{Complex{T}}, p::VDSPBFFTPlan{T,1}, x::AbstractVector{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, AppleAccelerate.bfft(convert(Vector{Complex{T}}, x), p.setup))
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, p * x)
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPBFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, p * x)
 end
 
@@ -274,17 +284,17 @@ end
 # --- In-place execution ---
 
 function Base.:*(p::VDSPInplaceFFTPlan{T,1}, x::AbstractVector) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     AppleAccelerate.fft!(convert(Vector{Complex{T}}, x), p.setup)
 end
 
 function Base.:*(p::VDSPInplaceBFFTPlan{T,1}, x::AbstractVector) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     AppleAccelerate.bfft!(convert(Vector{Complex{T}}, x), p.setup)
 end
 
 function Base.:*(p::VDSPInplaceFFTPlan{T,2}, x::AbstractMatrix) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     xc = convert(Matrix{Complex{T}}, x)
     dims = _region_set(p.region)
     if 1 in dims && 2 in dims
@@ -297,7 +307,7 @@ function Base.:*(p::VDSPInplaceFFTPlan{T,2}, x::AbstractMatrix) where {T}
 end
 
 function Base.:*(p::VDSPInplaceBFFTPlan{T,2}, x::AbstractMatrix) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     xc = convert(Matrix{Complex{T}}, x)
     dims = _region_set(p.region)
     if 1 in dims && 2 in dims
@@ -312,25 +322,25 @@ end
 # --- In-place mul! ---
 
 function LinearAlgebra.mul!(y::AbstractVector{Complex{T}}, p::VDSPInplaceFFTPlan{T,1}, x::AbstractVector{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, x)
     AppleAccelerate.fft!(convert(Vector{Complex{T}}, y), p.setup)
 end
 
 function LinearAlgebra.mul!(y::AbstractVector{Complex{T}}, p::VDSPInplaceBFFTPlan{T,1}, x::AbstractVector{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, x)
     AppleAccelerate.bfft!(convert(Vector{Complex{T}}, y), p.setup)
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPInplaceFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, x)
     p * y
 end
 
 function LinearAlgebra.mul!(y::AbstractMatrix{Complex{T}}, p::VDSPInplaceBFFTPlan{T,2}, x::AbstractMatrix{Complex{T}}) where {T}
-    _check_vdsp_fft(x)
+    _check_plan_input(p, x)
     copyto!(y, x)
     p * y
 end

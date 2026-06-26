@@ -1,11 +1,20 @@
 @testset "Signal Processing" begin
 
-@testset "DCT::Float32" begin
-    r=rand(Float32,2^16)
-    d1=DSP.dct(r)
-    plan_accel = AppleAccelerate.plan_dct(length(r), 2)
-    d2=AppleAccelerate.dct(r, plan_accel)
-    @test norm(d1[2]/d2[2]*d2[2:end]-d1[2:end])≤1000eps(Float32)
+@testset "DCT" begin
+    # vDSP's DCT-II is unnormalized relative to DSP's orthonormal DCT-II by a
+    # *fixed* (data-independent) factor: out[1] = sqrt(N)*ortho[1] and
+    # out[k] = sqrt(N/2)*ortho[k] for k > 1. Compare against that fixed scaling
+    # directly (not a data-derived ratio, which would mask scale-factor errors).
+    @testset "$T" for T in (Float32, Float64)
+        n = 2^12
+        r = rand(T, n)
+        d_ortho = DSP.dct(Float64.(r))               # orthonormal reference
+        scale = fill(sqrt(n / 2), n); scale[1] = sqrt(n)
+        ref = Float64.(d_ortho) .* scale
+        # AppleAccelerate.dct only takes Float32; cast the input for both paths.
+        got = AppleAccelerate.dct(Float32.(r))
+        @test Float64.(got) ≈ ref rtol = (T == Float32 ? 1e-3 : 1e-4)
+    end
 end
 
 @testset "fft::Float64" begin
@@ -349,6 +358,23 @@ end
         @test_throws ArgumentError plan_fft!(randn(ComplexF64, 4, 4, 4))
     end
 
+    @testset "wrong-size input to a plan throws" begin
+        # A plan built for size N must reject a differently-sized input rather
+        # than silently returning a wrong-size result.
+        p = plan_fft(randn(ComplexF64, 64))
+        @test_throws DimensionMismatch p * randn(ComplexF64, 16)
+        y = Vector{ComplexF64}(undef, 16)
+        @test_throws DimensionMismatch mul!(y, p, randn(ComplexF64, 16))
+
+        # In-place plan: same guard.
+        pin = plan_fft!(randn(ComplexF64, 64))
+        @test_throws DimensionMismatch pin * randn(ComplexF64, 16)
+
+        # 2D plan rejects wrong matrix size.
+        p2 = plan_fft(randn(ComplexF64, 16, 16))
+        @test_throws DimensionMismatch p2 * randn(ComplexF64, 8, 8)
+    end
+
     @testset "In-place fft!" begin
         x = randn(ComplexF64, 256)
         p = plan_fft!(x)
@@ -382,6 +408,27 @@ for T in (Float32,  Float64)
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fa(X) ≈ fb(X, copy(X))
+        end
+
+        # Regression: an oversized `result` buffer must not cause vDSP to read
+        # past the zero-padded input (the padding is sized from length(result)).
+        @testset "oversized result buffer (no OOB)::$T" begin
+            K = randn(T, 5)
+            natural = AppleAccelerate.conv(X, K)         # length N + 5 - 1
+            extra = 7
+            big = fill(T(NaN), length(natural) + extra)  # deliberately too long
+            AppleAccelerate.conv!(big, X, K)
+            # Valid region must match the natural-length convolution; the result
+            # is well-defined for all length(result) elements (the extra tail
+            # reads from the in-bounds zero padding, so it must not be NaN).
+            @test big[1:length(natural)] ≈ natural
+            @test !any(isnan, big)
+
+            # xcorr! with an oversized buffer likewise stays in-bounds.
+            bigx = fill(T(NaN), length(natural) + extra)
+            AppleAccelerate.xcorr!(bigx, X, Y[1:5])
+            @test bigx[1:length(natural)] ≈ AppleAccelerate.xcorr(X, Y[1:5])
+            @test !any(isnan, bigx)
         end
     end
 end
@@ -430,6 +477,19 @@ end
     @test Y[2] ≈ 6 .* x
     # numelem larger than the channel length must be rejected, not read OOB
     @test_throws ErrorException AppleAccelerate.biquadm([copy(x), copy(x)], 9, setup)
+end
+
+@testset "Multi-channel Biquad layout::Float64" begin
+    # Float64 counterpart of the multichannel test above.
+    x64 = Float64.(collect(1:8))
+    c64 = [1.0,0,0,0,0,  2.0,0,0,0,0,
+           1.0,0,0,0,0,  3.0,0,0,0,0]
+    setup64 = AppleAccelerate.biquadm_create(c64, 2, 2, Float64)
+    Y64 = AppleAccelerate.biquadm([copy(x64), copy(x64)], 8, setup64)
+    @test Y64[1] ≈ x64
+    @test Y64[2] ≈ 6 .* x64
+    # numelem larger than the channel length must be rejected, not read OOB
+    @test_throws ErrorException AppleAccelerate.biquadm([copy(x64), copy(x64)], 9, setup64)
 end
 
 @testset "deq22 (recursive filter)" begin
@@ -689,6 +749,23 @@ end
             AppleAccelerate.zcspec!(C2, A, B)
             AppleAccelerate.zcspec!(C2, A, B)
             @test C2 ≈ 2 .* (conj.(A) .* B)
+        end
+
+        # Regression: a short sibling array must throw DimensionMismatch rather
+        # than make vDSP read out of bounds.
+        @testset "short-array validation::$T" begin
+            n = 64
+            A   = CT.(randn(n) .+ im .* randn(n))
+            Ar  = abs.(randn(T, n)) .+ T(0.01)
+            Br  = abs.(randn(T, n)) .+ T(0.01)
+            Cc  = CT.(randn(n) .+ im .* randn(n))
+            short_real = zeros(T, n - 1)
+            short_cplx = zeros(CT, n - 1)
+
+            @test_throws DimensionMismatch AppleAccelerate.zaspec!(short_real, A)
+            @test_throws DimensionMismatch AppleAccelerate.zcoher!(short_real, Ar, Br, Cc)
+            @test_throws DimensionMismatch AppleAccelerate.ztrans!(short_cplx, Ar, Cc)
+            @test_throws DimensionMismatch AppleAccelerate.zcspec!(short_cplx, A, Cc)
         end
     end
 end
