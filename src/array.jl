@@ -152,13 +152,7 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
                 ($f!)(out, X)
             end
             function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
-                # NOT migrated to LibAccelerate.vvcosisin: the generated wrapper types its
-                # output pointer as `Ptr{__double_complex_t}`, and the Clang.jl typedef
-                # currently resolves `__double_complex_t` to `ComplexF32` (not ComplexF64),
-                # so a `Vector{ComplexF64}` would not convert. Use the direct ccall with the
-                # correct element type until the generator emits the right complex typedef.
-                ccall(($(string("vv",fa,suff)),libacc),Cvoid,
-                      (Ptr{Complex{$T}},Ptr{$T},Ref{Cint}),out,X,length(X))
+                LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
         end

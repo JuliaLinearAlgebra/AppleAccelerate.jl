@@ -167,7 +167,7 @@ for T in (Float32, Float64)
             @eval fb = $f
             @eval fa = AppleAccelerate.$f
             @test fa(X)[1] ≈ fb(X)[1]
-            @test fa(X)[2] ≈ fb(X)[2]
+            @test fa(X)[2] == fb(X)[2]
             # Public index return type must remain Int
             @test typeof(fa(X)[2]) == Int
         end

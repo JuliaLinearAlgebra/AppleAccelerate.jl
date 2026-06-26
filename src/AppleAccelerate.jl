@@ -2,7 +2,6 @@ module AppleAccelerate
 using Libdl, LinearAlgebra
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
-const libacc_info_plist = "/System/Library/Frameworks/Accelerate.framework/Versions/Current/Resources/Info.plist"
 
 # Cached macOS version, populated once in __init__()
 const _macos_version = Ref{Union{Nothing,VersionNumber}}(nothing)
@@ -112,10 +111,12 @@ end
 """
     set_num_threads(n::Integer) -> BlasInt
 
-Set the number of threads used by Accelerate BLAS. If `n == 1`, use single-threaded mode;
-if `n > 1`, use multi-threaded mode. Returns the resulting thread count (from
-[`get_num_threads`](@ref)). On macOS < 15 where the threading API is unavailable,
-warns and returns `1`.
+Select Accelerate BLAS threading mode. This is a *toggle*, not an exact thread count:
+`n == 1` selects single-threaded mode, while `n > 1` selects Accelerate-managed
+multi-threaded mode (Accelerate chooses the actual number of threads). Returns the
+resulting thread count as reported by [`get_num_threads`](@ref), which for the
+multi-threaded mode is Accelerate's chosen count rather than `n`. On macOS < 15 where the
+threading API is unavailable, warns and returns `1`.
 """
 function set_num_threads(n::Integer)
     n < 1 && throw(ArgumentError("number of threads must be ≥ 1"))

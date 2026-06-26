@@ -31,8 +31,6 @@ using .LibAccelerate:
     BNNSFilterCreateLayerActivation, BNNSFilterApply, BNNSFilterDestroy,
     BNNSMatMul, BNNSMatMulWorkspaceSize
 
-export BNNSArray, bnns_matmul, bnns_matmul!, bnns_activation, bnns_activation!
-
 """
     bnns_act(f, X)
 

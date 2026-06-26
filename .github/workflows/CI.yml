@@ -27,6 +27,15 @@ jobs:
           - os: macOS-latest
             arch: aarch64
             version: '1'
+          # Pin explicit versions on macOS/aarch64 so version-gated paths
+          # (e.g. the `VERSION < v"1.12"` branch in linalg_tests.jl) are
+          # deterministically exercised on both sides of the gate.
+          - os: macOS-latest
+            arch: aarch64
+            version: '1.10'
+          - os: macOS-latest
+            arch: aarch64
+            version: '1.12'
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3

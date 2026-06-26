@@ -1,4 +1,5 @@
 using AppleAccelerate
+using AppleAccelerate: BNNSArray, bnns_matmul, bnns_matmul!, bnns_activation, bnns_activation!
 using LinearAlgebra
 using Test
 
