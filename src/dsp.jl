@@ -65,7 +65,11 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             if (rsize < xsize + ksize - 1)
                 error("'result' must have at least length(X) + length(K) - 1 elements")
             end
-            xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, ksize)]
+            # vDSP reads rsize + ksize - 1 input elements (not just the minimum),
+            # so size the zero-padding from rsize, not the natural result length,
+            # to keep reads in-bounds for an oversized `result` buffer. Total
+            # padded length = rsize + 2*ksize - 1 (front pad ksize-1).
+            xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, rsize + ksize - xsize)]
             LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
             return result
         end
@@ -110,7 +114,10 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             if (rsize < xsize + ysize - 1)
                 error("'result' must have at least length(X) + length(Y) - 1 elements")
             end
-            xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, ysize)]
+            # vDSP reads rsize + ysize - 1 input elements; size the zero-padding
+            # from rsize so an oversized `result` buffer stays in-bounds. Total
+            # padded length = rsize + 2*ysize - 1 (front pad ysize-1).
+            xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, rsize + ysize - xsize)]
             LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
             return result
         end
@@ -400,6 +407,8 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
         """
         function zaspec!(C::Vector{$T}, A::Vector{Complex{$T}})
             n = length(A)
+            length(C) >= n || throw(DimensionMismatch(
+                "zaspec!: output `C` must have at least length(A) = $n elements; got $(length(C))"))
             realp = $T.(real.(A))
             imagp = $T.(imag.(A))
             GC.@preserve realp imagp begin
@@ -422,6 +431,9 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
         """
         function zcoher!(D::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{Complex{$T}})
             n = length(A)
+            (length(B) >= n && length(C) >= n && length(D) >= n) || throw(DimensionMismatch(
+                "zcoher!: `B`, `C`, and `D` must each have at least length(A) = $n elements; " *
+                "got B=$(length(B)), C=$(length(C)), D=$(length(D))"))
             cr = $T.(real.(C))
             ci = $T.(imag.(C))
             GC.@preserve cr ci begin
@@ -444,6 +456,9 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
         """
         function ztrans!(C::Vector{Complex{$T}}, A::Vector{$T}, B::Vector{Complex{$T}})
             n = length(A)
+            (length(B) >= n && length(C) >= n) || throw(DimensionMismatch(
+                "ztrans!: `B` and `C` must each have at least length(A) = $n elements; " *
+                "got B=$(length(B)), C=$(length(C))"))
             br = $T.(real.(B))
             bi = $T.(imag.(B))
             cr = Vector{$T}(undef, n)
@@ -472,6 +487,9 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
         """
         function zcspec!(C::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
             n = length(A)
+            (length(B) >= n && length(C) >= n) || throw(DimensionMismatch(
+                "zcspec!: `B` and `C` must each have at least length(A) = $n elements; " *
+                "got B=$(length(B)), C=$(length(C))"))
             ar = $T.(real.(A))
             ai = $T.(imag.(A))
             br = $T.(real.(B))

@@ -120,6 +120,18 @@ for T in (Float32, Float64)
         # Numerical correctness: vDSP_zconv applies the kernel without reversal
         # (correlation-style), matching DSP.conv with a reversed kernel.
         @test result ≈ DSP.conv(X, reverse(K)) atol=T(1e-3)
+
+        # Regression: an oversized `result` buffer must not make vDSP read past
+        # the zero-padded input (padding is sized from length(result)).
+        extra = 7
+        big = fill(Complex{T}(NaN), length(result) + extra)
+        AppleAccelerate.zconv!(big, X, K)
+        @test big[1:length(result)] ≈ result atol=T(1e-3)
+        @test !any(isnan, big)
+
+        # Too-short result must still be rejected.
+        @test_throws ErrorException AppleAccelerate.zconv!(
+            similar(big, length(X) + length(K) - 2), X, K)
     end
 end
 

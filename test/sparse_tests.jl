@@ -385,6 +385,22 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test_throws ArgumentError solve!(f, xb_matrix)
         end
 
+        @testset "lu! on unfactored F throws" begin
+            A = sprandn(6, 6, 0.4) + 10I
+            # refactor!-style spellings require F to already hold a factorization.
+            @test_throws ArgumentError lu!(AAFactorization(A), A)
+        end
+
+        @testset "solve!(f, B::Matrix) square" begin
+            N = 5
+            A = sprandn(N, N, 0.5) + N * I
+            f = AAFactorization(A)
+            X = rand(N, 3)
+            B = A * X
+            solve!(f, B)             # square system: B overwritten with solution
+            @test isapprox(B, X; rtol = 1e-8)
+        end
+
         @testset "Cholesky" begin
             # create a random symmetric positive-definite matrix A.
             N = 4
@@ -699,6 +715,91 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             factor!(fl, AppleAccelerate.SparseFactorizationLDLT)
             ldlt!(fl, AASparseMatrix(S2))
             @test isapprox(solve(fl, b), Matrix(S2) \ b; rtol = 1e-7)
+        end
+
+        # Complex sparse support (and the Hermitian refactor kernels) require
+        # macOS 15.5+. Mirrors the real refactor coverage above. Regression for
+        # the Hermitian-refactor crash: libSparse's *Symmetric_Complex* refactor
+        # rejects Hermitian factorizations, so Cholesky/LDLT refactor of a complex
+        # Hermitian matrix must route through the dedicated Hermitian kernels.
+        something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+        @testset "complex $T" for T in (ComplexF64, ComplexF32)
+            rtol = T == ComplexF32 ? 1e-2 : 1e-7
+            N = 12
+
+            # Build a Hermitian positive-definite matrix and a same-pattern variant.
+            herm(B) = sparse(Hermitian(B + B' + N * I))
+            B1 = sprandn(T, N, N, 0.3)
+            H1 = herm(B1)
+            @test ishermitian(H1) && !issymmetric(H1)
+            # Same sparsity pattern, scaled values (scaling preserves Hermitian-ness
+            # and the stored pattern).
+            H2 = copy(H1); H2.nzval .*= T(1.3)
+            @test ishermitian(H2)
+            b = rand(T, N)
+
+            @testset "Hermitian Cholesky refactor" begin
+                f = cholesky(AASparseMatrix(H1))
+                cholesky!(f, AASparseMatrix(H2))
+                xref = solve(f, b)
+                xfresh = solve(cholesky(AASparseMatrix(H2)), b)
+                @test isapprox(xref, xfresh; rtol = rtol)
+                @test isapprox(Matrix(H2) * xref, b; rtol = 10 * rtol)
+            end
+
+            @testset "complex LU refactor" begin
+                # Square, non-Hermitian, diagonally dominant.
+                A1 = sprandn(T, N, N, 0.3) + T(N) * I
+                @test !ishermitian(A1)
+                A2 = copy(A1); A2.nzval .*= T(1.4)
+                f = lu(AASparseMatrix(A1))
+                refactor!(f, AASparseMatrix(A2))
+                xref = solve(f, b)
+                xfresh = solve(lu(AASparseMatrix(A2)), b)
+                @test isapprox(xref, xfresh; rtol = rtol)
+                @test isapprox(Matrix(A2) * xref, b; rtol = 10 * rtol)
+            end
+
+            @testset "complex QR refactor" begin
+                A1 = sprandn(T, N, N, 0.3) + T(N) * I
+                A2 = copy(A1); A2.nzval .*= T(1.2)
+                f = qr(AASparseMatrix(A1))
+                refactor!(f, AASparseMatrix(A2))
+                xref = solve(f, b)
+                xfresh = solve(qr(AASparseMatrix(A2)), b)
+                @test isapprox(xref, xfresh; rtol = rtol)
+                @test isapprox(Matrix(A2) * xref, b; rtol = 10 * rtol)
+            end
+        end
+
+        # Hermitian LDLT refactor must route through the dedicated Hermitian
+        # kernel (the Symmetric_Complex kernel rejects Hermitian factorizations).
+        # This is verified in a *fresh subprocess*: Apple's libSparse has a
+        # process-global defect where any prior complex-Hermitian factorization
+        # (e.g. the Hermitian Cholesky factorize exercised earlier in this suite)
+        # poisons a later complex-Hermitian LDLT refactor, crashing inside
+        # libSparse's own `_SparseGetWorkspaceRequired`. Isolating it in its own
+        # process avoids that libSparse bug while still covering our routing fix.
+        something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+        @testset "Hermitian LDLT refactor (isolated subprocess)" begin
+            code = """
+            using AppleAccelerate, LinearAlgebra, SparseArrays
+            import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, solve
+            T = ComplexF64; N = 12
+            B1 = sprandn(T, N, N, 0.3)
+            H1 = sparse(Hermitian(B1 + B1' + N*I))
+            H2 = copy(H1); H2.nzval .*= T(1.3)
+            b = rand(T, N)
+            f = AAFactorization(AASparseMatrix(H1))
+            factor!(f, AppleAccelerate.SparseFactorizationLDLT)
+            ldlt!(f, AASparseMatrix(H2))                 # Hermitian LDLT refactor
+            xref = solve(f, b)
+            ok = isapprox(Matrix(H2) * xref, b; rtol = 1e-6)
+            exit(ok ? 0 : 1)
+            """
+            proj = Base.active_project()
+            p = run(ignorestatus(`$(Base.julia_cmd()) --project=$(proj) -e $code`))
+            @test p.exitcode == 0
         end
     end
 
