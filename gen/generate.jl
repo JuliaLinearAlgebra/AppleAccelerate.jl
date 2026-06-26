@@ -8,6 +8,7 @@
 # so end users need nothing but the runtime framework that ships with macOS.
 
 using Clang.Generators
+using Libdl
 
 cd(@__DIR__)
 
@@ -81,6 +82,63 @@ function strip_out_of_scope_blas!(path)
     return removed
 end
 
+# Post-process: strip generated wrappers whose `@ccall libacc.<sym>` target is not an
+# exported symbol of the Accelerate framework. Clang.jl turns every C declaration it sees
+# into a `function` wrapper, but several Accelerate "functions" have no exported symbol and
+# would throw `could not load symbol` if ever called:
+#   - The high-level Sparse/Dense Solve API (`SparseFactor`, `SparseSolve`, `SparseMultiply`,
+#     `_DenseMatrixFromVector_*`, …) is defined entirely as `__attribute__((overloadable))`
+#     inline functions/macros in Sparse/Solve.h. The *real* entry points are the
+#     underscore-suffixed-by-type variants (`_SparseFactorSymmetric_Double`,
+#     `_SparseSolveOpaque_Double`, …), which DO export and are used by src/sparse.jl.
+#   - A few header-only BNNS graph setters (`BNNSGraphContextSetBatchSize`, …) are declared
+#     but not exported in the shipping framework binary.
+#   - `CF_ENUM` is a CoreFoundation macro that the generator misparsed as a function
+#     (also covered by the generator.toml ignorelist; this is a belt-and-braces backstop).
+# Rather than maintain a hand-curated denylist, we probe each wrapper's exact ccall symbol
+# with `dlsym` against the live framework at generation time and drop the block iff the
+# symbol does not resolve. This is deterministic on a given machine and self-maintaining:
+# if Apple ever exports one of these, it simply stops being stripped. Wrappers whose symbol
+# resolves (the vast majority, including all the real `_Sparse*` ones) are left untouched.
+function strip_dead_symbol_wrappers!(path)
+    h = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate")
+    lines = readlines(path)
+    out = String[]
+    funchead = r"^function\s+[A-Za-z_][A-Za-z0-9_]*\("
+    ccallsym = r"@ccall\s+libacc\.([A-Za-z_][A-Za-z0-9_]*)\("
+    i, n, removed = 1, length(lines), String[]
+    while i <= n
+        if occursin(funchead, lines[i])
+            # Capture the whole `function … end` block, then decide whether to keep it.
+            block = String[lines[i]]
+            j = i + 1
+            while j <= n && lines[j] != "end"
+                push!(block, lines[j]); j += 1
+            end
+            j <= n && push!(block, lines[j])         # the closing `end`
+            sym = nothing
+            for b in block
+                m = match(ccallsym, b)
+                if m !== nothing
+                    sym = m.captures[1]; break
+                end
+            end
+            if sym !== nothing && dlsym_e(h, sym) == C_NULL
+                push!(removed, sym)
+                i = j + 1
+                i <= n && isempty(lines[i]) && (i += 1)  # swallow one trailing blank line
+            else
+                append!(out, block)
+                i = j + 1
+            end
+        else
+            push!(out, lines[i]); i += 1
+        end
+    end
+    write(path, join(out, "\n") * "\n")
+    return removed
+end
+
 # Post-process: correct the double-precision complex typedefs. Apple's headers define the
 # complex element types via anonymous `_Complex` typedefs (e.g. `typedef _Complex double
 # __double_complex_t;`). Clang.jl mis-resolves these anonymous-`_Complex` typedefs and emits
@@ -109,5 +167,7 @@ end
 out_path = joinpath(@__DIR__, "..", "src", "lib", "LibAccelerate.jl")
 removed = strip_out_of_scope_blas!(out_path)
 @info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"
+dead = strip_dead_symbol_wrappers!(out_path)
+@info "Stripped $(length(dead)) wrappers whose ccall symbol does not exist in the framework" dead
 fixed = fix_double_complex_typedefs!(out_path)
 @info "Corrected $fixed double-precision complex typedef(s) (Clang.jl anonymous-_Complex bug)"

@@ -45,10 +45,6 @@ struct bnns_graph_argument_t
 end
 
 
-function CF_ENUM(arg1, vDSP_DFT_Direction)
-    @ccall libacc.CF_ENUM(arg1::Cint, vDSP_DFT_Direction::Cint)::Cint
-end
-
 const vDSP_Length = Culong
 
 const vDSP_Stride = Clong
@@ -3263,10 +3259,6 @@ function Base.propertynames(x::SparseMatrix_Complex_Float, private::Bool = false
         end...)
 end
 
-function SparseConvertFromCoordinate(rowCount, columnCount, blockCount, blockSize, attributes, row, column, data)
-    @ccall libacc.SparseConvertFromCoordinate(rowCount::Cint, columnCount::Cint, blockCount::Clong, blockSize::UInt8, attributes::SparseAttributes_t, row::Ptr{Cint}, column::Ptr{Cint}, data::Ptr{Cdouble})::SparseMatrix_Double
-end
-
 struct DenseVector_Double
     count::Cint
     data::Ptr{Cdouble}
@@ -3811,46 +3803,6 @@ const SparseUpdate_t = UInt8
     SparseUpdatePartialRefactor = 0
 end
 
-function SparseMultiply(A, X, Y)
-    @ccall libacc.SparseMultiply(A::SparseMatrix_Double, X::DenseMatrix_Double, Y::DenseMatrix_Double)::Cvoid
-end
-
-function SparseMultiplyAdd(A, X, Y)
-    @ccall libacc.SparseMultiplyAdd(A::SparseMatrix_Double, X::DenseMatrix_Double, Y::DenseMatrix_Double)::Cvoid
-end
-
-function SparseGetTranspose(Matrix)
-    @ccall libacc.SparseGetTranspose(Matrix::SparseMatrix_Double)::SparseMatrix_Double
-end
-
-function SparseGetConjugateTranspose(Matrix)
-    @ccall libacc.SparseGetConjugateTranspose(Matrix::SparseMatrix_Complex_Double)::SparseMatrix_Complex_Double
-end
-
-function SparseFactor(type, Matrix)
-    @ccall libacc.SparseFactor(type::SparseFactorization_t, Matrix::SparseMatrix_Double)::SparseOpaqueFactorization_Double
-end
-
-function SparseSolve(Factored, XB)
-    @ccall libacc.SparseSolve(Factored::SparseOpaqueFactorization_Double, XB::DenseMatrix_Double)::Cvoid
-end
-
-function SparseRefactor(Matrix, Factorization)
-    @ccall libacc.SparseRefactor(Matrix::SparseMatrix_Double, Factorization::Ptr{SparseOpaqueFactorization_Double})::Cvoid
-end
-
-function SparseUpdateFactor(updateAlgorithm, Factorization, updateCount, updatedIndices, Update)
-    @ccall libacc.SparseUpdateFactor(updateAlgorithm::SparseUpdate_t, Factorization::Ptr{SparseOpaqueFactorization_Float}, updateCount::Cint, updatedIndices::Ptr{Cint}, Update::SparseMatrix_Float)::Cvoid
-end
-
-function SparseGetInertia(Factored, num_positive, num_zero, num_negative)
-    @ccall libacc.SparseGetInertia(Factored::SparseOpaqueFactorization_Float, num_positive::Ptr{Cint}, num_zero::Ptr{Cint}, num_negative::Ptr{Cint})::Cint
-end
-
-function SparseCreateSubfactor(subfactor, Factor)
-    @ccall libacc.SparseCreateSubfactor(subfactor::SparseSubfactor_t, Factor::SparseOpaqueFactorization_Double)::SparseOpaqueSubfactor_Double
-end
-
 const SparsePreconditioner_t = Cint
 
 @enum var"##Ctag#290"::UInt32 begin
@@ -3882,10 +3834,6 @@ struct SparseOpaquePreconditioner_Complex_Float
     type::SparsePreconditioner_t
     mem::Ptr{Cvoid}
     apply::Ptr{Cvoid}
-end
-
-function SparseCreatePreconditioner(type, A)
-    @ccall libacc.SparseCreatePreconditioner(type::SparsePreconditioner_t, A::SparseMatrix_Double)::SparseOpaquePreconditioner_Double
 end
 
 const SparseIterativeStatus_t = Cint
@@ -4007,42 +3955,6 @@ function Base.propertynames(x::SparseIterativeMethod, private::Bool = false)
         else
             ()
         end...)
-end
-
-function SparseConjugateGradient()
-    @ccall libacc.SparseConjugateGradient()::SparseIterativeMethod
-end
-
-function SparseGMRES()
-    @ccall libacc.SparseGMRES()::SparseIterativeMethod
-end
-
-function SparseLSMR()
-    @ccall libacc.SparseLSMR()::SparseIterativeMethod
-end
-
-function SparseGetStateSize_Double(method, preconditioner, m, n, nrhs)
-    @ccall libacc.SparseGetStateSize_Double(method::SparseIterativeMethod, preconditioner::Bool, m::Cint, n::Cint, nrhs::Cint)::Csize_t
-end
-
-function SparseGetStateSize_Float(method, preconditioner, m, n, nrhs)
-    @ccall libacc.SparseGetStateSize_Float(method::SparseIterativeMethod, preconditioner::Bool, m::Cint, n::Cint, nrhs::Cint)::Csize_t
-end
-
-function SparseGetStateSize_Complex_Double(method, preconditioner, m, n, nrhs)
-    @ccall libacc.SparseGetStateSize_Complex_Double(method::SparseIterativeMethod, preconditioner::Bool, m::Cint, n::Cint, nrhs::Cint)::Csize_t
-end
-
-function SparseGetStateSize_Complex_Float(method, preconditioner, m, n, nrhs)
-    @ccall libacc.SparseGetStateSize_Complex_Float(method::SparseIterativeMethod, preconditioner::Bool, m::Cint, n::Cint, nrhs::Cint)::Csize_t
-end
-
-function SparseRetain(SymbolicFactor)
-    @ccall libacc.SparseRetain(SymbolicFactor::SparseOpaqueSymbolicFactorization)::SparseOpaqueSymbolicFactorization
-end
-
-function SparseCleanup(Opaque)
-    @ccall libacc.SparseCleanup(Opaque::SparseOpaqueSymbolicFactorization)::Cvoid
 end
 
 const _SparseIterativeMethod_t = Cint
@@ -4189,22 +4101,6 @@ function _SparseSpMV_Double(alpha, A, x, accumulate, y)
     @ccall libacc._SparseSpMV_Double(alpha::Cdouble, A::SparseMatrix_Double, x::DenseMatrix_Double, accumulate::Bool, y::DenseMatrix_Double)::Cvoid
 end
 
-function _DenseMatrixFromVector_Double(x)
-    @ccall libacc._DenseMatrixFromVector_Double(x::DenseVector_Double)::DenseMatrix_Double
-end
-
-function _SparseInvalidSubfactor_Double()
-    @ccall libacc._SparseInvalidSubfactor_Double()::SparseOpaqueSubfactor_Double
-end
-
-function _SparseFailedFactor_Double(status)
-    @ccall libacc._SparseFailedFactor_Double(status::SparseStatus_t)::SparseOpaqueFactorization_Double
-end
-
-function _SparseSubFactorGetDimn_Double(Subfactor, m, n)
-    @ccall libacc._SparseSubFactorGetDimn_Double(Subfactor::SparseOpaqueSubfactor_Double, m::Ptr{Cint}, n::Ptr{Cint})::Cvoid
-end
-
 function _SparseConvertFromCoordinate_Float(m, n, nBlock, blockSize, attributes, row, col, val, storage, workspace)
     @ccall libacc._SparseConvertFromCoordinate_Float(m::Cint, n::Cint, nBlock::Clong, blockSize::UInt8, attributes::SparseAttributes_t, row::Ptr{Cint}, col::Ptr{Cint}, val::Ptr{Cfloat}, storage::Ptr{Cchar}, workspace::Ptr{Cint})::SparseMatrix_Float
 end
@@ -4291,22 +4187,6 @@ end
 
 function _SparseSpMV_Float(alpha, A, x, accumulate, y)
     @ccall libacc._SparseSpMV_Float(alpha::Cfloat, A::SparseMatrix_Float, x::DenseMatrix_Float, accumulate::Bool, y::DenseMatrix_Float)::Cvoid
-end
-
-function _DenseMatrixFromVector_Float(x)
-    @ccall libacc._DenseMatrixFromVector_Float(x::DenseVector_Float)::DenseMatrix_Float
-end
-
-function _SparseInvalidSubfactor_Float()
-    @ccall libacc._SparseInvalidSubfactor_Float()::SparseOpaqueSubfactor_Float
-end
-
-function _SparseFailedFactor_Float(status)
-    @ccall libacc._SparseFailedFactor_Float(status::SparseStatus_t)::SparseOpaqueFactorization_Float
-end
-
-function _SparseSubFactorGetDimn_Float(Subfactor, m, n)
-    @ccall libacc._SparseSubFactorGetDimn_Float(Subfactor::SparseOpaqueSubfactor_Float, m::Ptr{Cint}, n::Ptr{Cint})::Cvoid
 end
 
 function _SparseConvertFromCoordinate_Complex_Double(m, n, nBlock, blockSize, attributes, row, col, val, storage, workspace)
@@ -4409,22 +4289,6 @@ function _SparseSpMV_Complex_Double(alpha, A, x, accumulate, y)
     @ccall libacc._SparseSpMV_Complex_Double(alpha::__SPARSE_double_complex, A::SparseMatrix_Complex_Double, x::DenseMatrix_Complex_Double, accumulate::Bool, y::DenseMatrix_Complex_Double)::Cvoid
 end
 
-function _DenseMatrixFromVector_Complex_Double(x)
-    @ccall libacc._DenseMatrixFromVector_Complex_Double(x::DenseVector_Complex_Double)::DenseMatrix_Complex_Double
-end
-
-function _SparseInvalidSubfactor_Complex_Double()
-    @ccall libacc._SparseInvalidSubfactor_Complex_Double()::SparseOpaqueSubfactor_Complex_Double
-end
-
-function _SparseFailedFactor_Complex_Double(status)
-    @ccall libacc._SparseFailedFactor_Complex_Double(status::SparseStatus_t)::SparseOpaqueFactorization_Complex_Double
-end
-
-function _SparseSubFactorGetDimn_Complex_Double(Subfactor, m, n)
-    @ccall libacc._SparseSubFactorGetDimn_Complex_Double(Subfactor::SparseOpaqueSubfactor_Complex_Double, m::Ptr{Cint}, n::Ptr{Cint})::Cvoid
-end
-
 function _SparseConvertFromCoordinate_Complex_Float(m, n, nBlock, blockSize, attributes, row, col, val, storage, workspace)
     @ccall libacc._SparseConvertFromCoordinate_Complex_Float(m::Cint, n::Cint, nBlock::Clong, blockSize::UInt8, attributes::SparseAttributesComplex_t, row::Ptr{Cint}, col::Ptr{Cint}, val::Ptr{__SPARSE_float_complex}, storage::Ptr{Cchar}, workspace::Ptr{Cint})::SparseMatrix_Complex_Float
 end
@@ -4523,22 +4387,6 @@ end
 
 function _SparseSpMV_Complex_Float(alpha, A, x, accumulate, y)
     @ccall libacc._SparseSpMV_Complex_Float(alpha::__SPARSE_float_complex, A::SparseMatrix_Complex_Float, x::DenseMatrix_Complex_Float, accumulate::Bool, y::DenseMatrix_Complex_Float)::Cvoid
-end
-
-function _DenseMatrixFromVector_Complex_Float(x)
-    @ccall libacc._DenseMatrixFromVector_Complex_Float(x::DenseVector_Complex_Float)::DenseMatrix_Complex_Float
-end
-
-function _SparseInvalidSubfactor_Complex_Float()
-    @ccall libacc._SparseInvalidSubfactor_Complex_Float()::SparseOpaqueSubfactor_Complex_Float
-end
-
-function _SparseFailedFactor_Complex_Float(status)
-    @ccall libacc._SparseFailedFactor_Complex_Float(status::SparseStatus_t)::SparseOpaqueFactorization_Complex_Float
-end
-
-function _SparseSubFactorGetDimn_Complex_Float(Subfactor, m, n)
-    @ccall libacc._SparseSubFactorGetDimn_Complex_Float(Subfactor::SparseOpaqueSubfactor_Complex_Float, m::Ptr{Cint}, n::Ptr{Cint})::Cvoid
 end
 
 @enum var"##Ctag#299"::UInt32 begin
@@ -5698,10 +5546,6 @@ function BNNSGraphContextSetDynamicShapes(context, _function, shapes_count, shap
     @ccall libacc.BNNSGraphContextSetDynamicShapes(context::bnns_graph_context_t, _function::Ptr{Cchar}, shapes_count::Csize_t, shapes::Ptr{bnns_graph_shape_t})::Cint
 end
 
-function BNNSGraphContextSetBatchSize(context, _function, batch_size)
-    @ccall libacc.BNNSGraphContextSetBatchSize(context::bnns_graph_context_t, _function::Ptr{Cchar}, batch_size::UInt64)::Cint
-end
-
 function BNNSGraphContextSetArgumentType(context, argument_type)
     @ccall libacc.BNNSGraphContextSetArgumentType(context::bnns_graph_context_t, argument_type::BNNSGraphArgumentType)::Cint
 end
@@ -5728,14 +5572,6 @@ end
 
 function BNNSGraphTensorFillStrides(graph, _function, argument, tensor)
     @ccall libacc.BNNSGraphTensorFillStrides(graph::bnns_graph_t, _function::Ptr{Cchar}, argument::Ptr{Cchar}, tensor::Ptr{BNNSTensor})::Cint
-end
-
-function BNNSGraphContextSetWorkspaceAllocationCallback(context, realloc, free, user_memory_context_size, user_memory_context)
-    @ccall libacc.BNNSGraphContextSetWorkspaceAllocationCallback(context::bnns_graph_context_t, realloc::bnns_graph_realloc_fn_t, free::bnns_graph_free_all_fn_t, user_memory_context_size::Csize_t, user_memory_context::Ptr{Cvoid})::Cint
-end
-
-function BNNSGraphContextSetOutputAllocationCallback(context, realloc, free, user_memory_context_size, user_memory_context)
-    @ccall libacc.BNNSGraphContextSetOutputAllocationCallback(context::bnns_graph_context_t, realloc::bnns_graph_realloc_fn_t, free::bnns_graph_free_all_fn_t, user_memory_context_size::Csize_t, user_memory_context::Ptr{Cvoid})::Cint
 end
 
 function BNNSGraphContextSetMessageLogCallback(context, log_callback_fn, additional_logging_arguments)
@@ -6692,8 +6528,6 @@ function Base.setproperty!(x::Ptr{var"##Ctag#359"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
-
-const vDSP_ENUM = CF_ENUM
 
 const vDSP_Version0 = 1126
 
