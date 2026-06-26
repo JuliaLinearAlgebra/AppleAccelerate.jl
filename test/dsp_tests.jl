@@ -334,19 +334,26 @@ end
         @test p \ X ≈ x
     end
 
-    @testset "Error cases" begin
-        # Non-power-of-2
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 100))
-        @test_throws ArgumentError fft(randn(ComplexF64, 100))
-        # Empty
-        @test_throws ArgumentError plan_fft(ComplexF64[])
-        # Non-power-of-2 2D
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 3, 4))
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 6))
-        # 3D+ arrays
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 4, 4))
-        @test_throws ArgumentError fft(randn(ComplexF64, 4, 4, 4))
-        @test_throws ArgumentError plan_fft!(randn(ComplexF64, 4, 4, 4))
+    @testset "Fallback to FFTW for unsupported sizes (#139)" begin
+        # vDSP only handles power-of-2 1D/2D transforms. With FFTW also loaded
+        # (as in this test environment), loading AppleAccelerate must NOT break
+        # generic `plan_fft`/`fft` for sizes vDSP can't do — they should defer
+        # to FFTW and return correct results rather than throwing.
+        for sz in (100, (3, 4), (4, 6), (4, 4, 4))
+            x = randn(ComplexF64, sz...)
+            @test fft(x) ≈ FFTW.fft(x)
+            @test plan_fft(x) * x ≈ FFTW.fft(x)
+            @test ifft(fft(x)) ≈ x
+        end
+        # In-place planning also delegates for non-power-of-2.
+        x = randn(ComplexF64, 8, 7)
+        @test (plan_fft!(copy(x)) * copy(x)) ≈ FFTW.fft(x)
+
+        # Power-of-2 sizes still use the vDSP path (acceleration preserved).
+        @test occursin("VDSP", string(nameof(typeof(plan_fft(randn(ComplexF64, 8, 8))))))
+
+        # Empty input has no valid transform; an error is still raised.
+        @test_throws Exception plan_fft(ComplexF64[])
     end
 
     @testset "In-place fft!" begin
