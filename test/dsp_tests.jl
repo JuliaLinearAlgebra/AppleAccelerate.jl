@@ -814,4 +814,73 @@ end
     end
 end
 
+@testset "Validation / error paths" begin
+    # conv! result buffer too small (dsp.jl:66)
+    @test_throws ErrorException AppleAccelerate.conv!(zeros(3), randn(10), randn(4))
+    # xcorr! result buffer too small (dsp.jl:115)
+    @test_throws ErrorException AppleAccelerate.xcorr!(zeros(3), randn(10), randn(4))
+
+    # biquadcreate with too few coefficients (dsp.jl:224)
+    @test_throws ErrorException AppleAccelerate.biquadcreate(Float64[1.0, 0, 0], 1)
+    @test_throws ErrorException AppleAccelerate.biquadcreate(Float64[1.0, 0, 0], 1, Float32)
+
+    # biquad: incomplete delays (dsp.jl:244) and numelem too large (dsp.jl:248)
+    bq = AppleAccelerate.biquadcreate(Float64[1.0, 0, 0, 0, 0], 1)
+    X = randn(10)
+    @test_throws ErrorException AppleAccelerate.biquad(X, zeros(2), length(X), bq)  # delays too short (need 4)
+    @test_throws ErrorException AppleAccelerate.biquad(X, zeros(4), length(X) + 1, bq)  # numelem > length
+
+    bq32 = AppleAccelerate.biquadcreate(Float64[1.0, 0, 0, 0, 0], 1, Float32)
+    X32 = randn(Float32, 10)
+    @test_throws ErrorException AppleAccelerate.biquad(X32, zeros(Float32, 2), length(X32), bq32)
+    @test_throws ErrorException AppleAccelerate.biquad(X32, zeros(Float32, 4), length(X32) + 1, bq32)
+
+    # biquadm_create with too few coefficients (dsp.jl:331)
+    @test_throws ErrorException AppleAccelerate.biquadm_create(Float64[1.0, 0, 0, 0, 0], 2, 1, Float32)
+    @test_throws ErrorException AppleAccelerate.biquadm_create(Float64[1.0, 0, 0, 0, 0], 2, 1, Float64)
+
+    # plan_dct invalid type (dsp.jl:777) and invalid length (dsp.jl:779)
+    @test_throws ErrorException AppleAccelerate.plan_dct(4096, 1)   # unsupported DCT type
+    @test_throws ErrorException AppleAccelerate.plan_dct(4096, 5)   # unsupported DCT type
+    @test_throws ErrorException AppleAccelerate.plan_dct(7, 2)      # invalid length (f*2^n, n>=4)
+    @test_throws ErrorException AppleAccelerate.plan_dct(4097, 2)   # not f*2^n
+
+    # zaspec! output too short already covered; add deq22/wiener validation paths
+    @test_throws ErrorException AppleAccelerate.deq22!(zeros(5), randn(5), randn(4))   # B != 5
+    @test_throws ErrorException AppleAccelerate.deq22!(zeros(5), randn(2), Float64[1,2,3,4,5])  # A too short
+    @test_throws ErrorException AppleAccelerate.deq22!(zeros(6), randn(5), Float64[1,2,3,4,5])  # C != A length
+end
+
+@testset "DCT types 2/3/4 vs DSP.dct/idct" begin
+    # vDSP DCT-II is unnormalized vs DSP's orthonormal DCT. Cross-validate the
+    # supported types (2, 3, 4) against the orthonormal reference with the fixed
+    # data-independent scale factors, and exercise setup reuse.
+    n = 2^12
+    r = Float32.(rand(n))
+    rf = Float64.(r)
+
+    # Type II: out[1]=sqrt(N)*ortho[1], out[k]=sqrt(N/2)*ortho[k]
+    setup2 = AppleAccelerate.plan_dct(n, 2)
+    got2a = AppleAccelerate.dct(r, setup2)
+    got2b = AppleAccelerate.dct(r, setup2)   # reuse same setup
+    @test got2a == got2b
+    ortho2 = DSP.dct(rf)
+    scale2 = fill(sqrt(n / 2), n); scale2[1] = sqrt(n)
+    @test Float64.(got2a) ≈ ortho2 .* scale2 rtol = 1e-3
+
+    # Type III is the inverse of Type II. vDSP DCT-III applied to the orthonormal
+    # coefficients (unscaled here) relates to DSP.idct. Validate round-trip:
+    # idct-like recovery via scaled type-III of the forward type-II output.
+    setup3 = AppleAccelerate.plan_dct(n, 3)
+    # vDSP: DCT-III(DCT-II(x)) = (N/2) * x. Verify the scaling relationship.
+    back = AppleAccelerate.dct(got2a, setup3)
+    @test Float64.(back) ./ (n / 2) ≈ rf rtol = 1e-3
+
+    # Type IV is its own inverse up to scale: DCT-IV(DCT-IV(x)) = (N/2) * x.
+    setup4 = AppleAccelerate.plan_dct(n, 4)
+    y4 = AppleAccelerate.dct(r, setup4)
+    back4 = AppleAccelerate.dct(y4, setup4)
+    @test Float64.(back4) ./ (n / 2) ≈ rf rtol = 1e-3
+end
+
 end # @testset "Signal Processing"
