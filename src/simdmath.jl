@@ -134,17 +134,23 @@ using InteractiveUtils
 # Available functions
 
 One argument: `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`, `cbrt`, `cos`,
-`cosh`, `cospi`, `erf`, `erfc`, `exp`, `exp10`, `exp2`, `expm1`, `log`, `log10`,
-`log1p`, `log2`, `sin`, `sinh`, `sinpi`, `tan`, `tanh`, `tanpi`, `tgamma`.
+`cosh`, `cospi`, `exp`, `exp10`, `exp2`, `expm1`, `log`, `log10`, `log1p`, `log2`,
+`sin`, `sinh`, `sinpi`, `tan`, `tanh`, `tanpi`.
 
 Two arguments: `atan(y, x)`, `hypot`, `nextafter`, `pow`, `rem`, `remainder`.
 
-All are defined for `Float32` and `Float64` only. Functions LLVM already lowers to
-native instructions (`sqrt`, `floor`, `ceil`, `round`, `trunc`, `fma`, `abs`) are
-deliberately absent — routing those through a library call would be slower.
+All are defined for `Float32` and `Float64` only. `nextafter`, `pow` and `remainder`
+have no `Base` counterpart with matching semantics and are named after their C
+equivalents; use `pow(x, y)` rather than `x^y`.
 
-`erf`, `erfc`, `tgamma`, `nextafter`, `pow` and `remainder` have no `Base`
-counterpart with matching semantics and are named after their C equivalents.
+Deliberately absent:
+
+  * `sqrt`, `floor`, `ceil`, `round`, `trunc`, `fma`, `abs` — LLVM already lowers
+    these to native instructions, so a library call would be *slower*.
+  * `erf`, `erfc`, `tgamma` — `<simd/math.h>` declares these, but they measure at
+    0.97–0.99x of a scalar libm loop: they are scalar loops behind a vector
+    signature and buy nothing.
+  * `lgamma` — writes the global `signgam`, so it cannot be declared `memory(none)`.
 """
 module SIMDMath
 
@@ -169,8 +175,6 @@ const UNARY = (
     (:cos,      "cos",      "cosf",      "cos"),
     (:cosh,     "cosh",     "coshf",     "cosh"),
     (:cospi,    "__cospi",  "__cospif",  "cospi"),
-    (:erf,      "erf",      "erff",      "erf"),
-    (:erfc,     "erfc",     "erfcf",     "erfc"),
     (:exp,      "exp",      "expf",      "exp"),
     (:exp10,    "__exp10",  "__exp10f",  "exp10"),
     (:exp2,     "exp2",     "exp2f",     "exp2"),
@@ -185,10 +189,14 @@ const UNARY = (
     (:tan,      "tan",      "tanf",      "tan"),
     (:tanh,     "tanh",     "tanhf",     "tanh"),
     (:tanpi,    "__tanpi",  "__tanpif",  "tanpi"),
-    (:tgamma,   "tgamma",   "tgammaf",   "tgamma"),
 )
 # `lgamma` is deliberately omitted: it writes the global `signgam`, which the
 # `memory(none)` declaration below would let LLVM assume never happens.
+#
+# `erf`, `erfc` and `tgamma` are omitted despite `<simd/math.h>` declaring
+# `_simd_erf_f4` and friends: measured against a plain scalar libm loop they come
+# out at 0.97-0.99x, i.e. those routines are scalar loops behind a vector signature
+# and buy nothing. Exposing them would advertise an acceleration that is not there.
 
 const BINARY = (
     # (jlname,     c64,          c32,           simd base)
