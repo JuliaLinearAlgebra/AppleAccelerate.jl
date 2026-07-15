@@ -2,6 +2,8 @@
 
 All benchmarks were run on an Apple M2 Max, macOS 26, single-threaded, with Julia 1.12.5 and AppleAccelerate.jl v0.6.0. Times are the minimum of 5 trials.
 
+Single-threaded execution is used to compare **kernel quality** on a level footing. This is *not* representative of how OpenBLAS is normally deployed — OpenBLAS scales GEMM across CPU cores, whereas Accelerate offloads large GEMM to a shared SME co-processor that a single thread already saturates. See the [GEMM note below](#GEMM-(mul!)-—-GFLOPS-(higher-is-better)) for a multi-threaded comparison.
+
 Run the full benchmark suite with:
 
 ```
@@ -62,7 +64,7 @@ Performance comparison of Apple Accelerate vs OpenBLAS. The dense benchmark scri
 
 ### GEMM (`mul!`) — GFLOPS (higher is better)
 
-Accelerate is 6–14× faster for matrix multiply, with the largest gains for Float32 due to AMX/NEON support:
+Single-threaded, Accelerate is 6–14× faster for matrix multiply, with the largest gains for Float32:
 
 | Type | N | OpenBLAS | Accelerate | Speedup |
 |------|---|----------|------------|---------|
@@ -74,6 +76,34 @@ Accelerate is 6–14× faster for matrix multiply, with the largest gains for Fl
 | Float32 | 256 | 70 | 889 | 12.7× |
 | Float32 | 1,024 | 73 | 1,029 | 14.1× |
 | Float32 | 4,096 | 73 | 906 | 12.4× |
+
+!!! warning "These are single-threaded numbers — read this before comparing"
+    The table above pins **both** libraries to a single thread (`BLAS.set_num_threads(1)`),
+    which is *not* how OpenBLAS is normally used and understates it substantially.
+
+    The two libraries use different execution units on Apple Silicon:
+
+    - **OpenBLAS** runs GEMM on the CPU's P-cores (NEON), and **scales with thread count**.
+    - **Accelerate** dispatches large GEMM to the **SME/AMX matrix co-processor** — a
+      dedicated unit shared per core cluster (one in the P-cluster, one in the E-cluster).
+      This is a CPU-side co-processor, **not** the GPU, and it does support Float64. Because
+      it is a shared unit that a single thread already saturates, Accelerate GEMM throughput
+      is **essentially flat with respect to `BLAS.set_num_threads`.**
+
+    Measured on an Apple M4 (Float64, N=4096, from [issue #132](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/132)):
+
+    | Threads | OpenBLAS (GFLOPS) | OpenBLAS speedup | Accelerate (GFLOPS) |
+    |---------|-------------------|------------------|---------------------|
+    | 1 |  58.3 | 1.0× | 404.3 |
+    | 2 | 112.3 | 1.9× | 404.2 |
+    | 3 | 164.1 | 2.8× | 404.0 |
+    | 4 | 199.6 | 3.4× | 401.3 |
+
+    So the multiple by which Accelerate leads shrinks as OpenBLAS is given more cores.
+    Accelerate still wins here, but the single-threaded speedups above should be read as a
+    kernel-quality comparison, not as the gap you will see against a fully-threaded OpenBLAS.
+    See Apple's [CPU optimization guide](https://developer.apple.com/documentation/apple-silicon/cpu-optimization-guide)
+    for details on the SME engine.
 
 ### Factorizations (Float64) — time in μs (lower is better)
 
