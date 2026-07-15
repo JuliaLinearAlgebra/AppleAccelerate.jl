@@ -1,7 +1,8 @@
-# [Architecture & Package Extensions](@id extensions)
+# [Architecture](@id architecture)
 
-This page explains how AppleAccelerate is structured internally and how its
-optional integrations with other packages are wired together.
+This page explains how AppleAccelerate is structured internally, and why it
+integrates with the rest of the ecosystem through its own namespace rather than
+by hooking other packages' interfaces.
 
 ## Two-layer design
 
@@ -31,53 +32,48 @@ using AppleAccelerate
 AppleAccelerate.LibAccelerate.some_unwrapped_symbol(args...)
 ```
 
-## Package extensions
+## No package extensions
 
-Two optional integrations are implemented as Julia
-[package extensions](https://pkgdocs.julialang.org/v1/creating-packages/#Conditional-loading-of-code-in-packages-(Extensions)).
-An extension is code that ships *inside* AppleAccelerate but only loads when a
-particular **trigger package** is also loaded in the same session. This lets
-AppleAccelerate integrate with those packages without forcing every user to install
-them.
+AppleAccelerate ships **no package extensions**, and defines no methods on other
+packages' functions. Everything it provides lives under the `AppleAccelerate.`
+namespace, and the package exports nothing.
 
-The mechanism, concretely:
+This is a deliberate choice. Earlier versions did hook
+[AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl) and
+[NNlib.jl](https://github.com/FluxML/NNlib.jl) through extensions, which meant
+that merely loading AppleAccelerate — even for an unrelated feature like BLAS
+forwarding — silently changed what `fft`, `plan_fft`, or `batched_mul!` did
+elsewhere in the session. Because Accelerate's kernels only cover a subset of the
+input space (vDSP's FFT is power-of-2 and 1-D/2-D only), those methods won
+dispatch and then failed on inputs the general backend would have handled fine.
+See [issue #139](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/139).
 
-- The extension code lives in `ext/` (`AppleAccelerateAbstractFFTsExt.jl`,
-  `AppleAccelerateNNlibExt.jl`).
-- The trigger packages are declared under `[weakdeps]` in `Project.toml`, and the
-  `[extensions]` table maps each extension module to its trigger.
-- The extension activates **automatically** the moment both packages are loaded —
-  you do not call anything special:
+The consequence for you is simple and predictable:
 
 ```julia
-using AppleAccelerate, NNlib   # NNlib extension activates automatically here
+using AppleAccelerate, FFTW
+
+fft(x)                  # always FFTW — loading AppleAccelerate changes nothing
+AppleAccelerate.fft(x)  # explicitly vDSP, for power-of-2 1-D/2-D input
 ```
 
-You never need `Base.get_extension(...)`; just `using` the trigger package. If the
-trigger package is not installed, AppleAccelerate still loads fine — the extension
-simply stays dormant, and it adds no dependency for users who do not need it.
+You choose Accelerate per call site, by name. Nothing is intercepted, and
+benchmarking one against the other is a matter of changing the prefix.
 
-### Which `using` activates what
+## Why `LinearAlgebra` and `SparseArrays` are hard dependencies
 
-| Integration | Load | Enables |
-|-------------|------|---------|
-| FFT via the standard Julia interface | `using AppleAccelerate, AbstractFFTs` | `plan_fft`/`plan_ifft`/`plan_bfft`, in-place plans, `mul!`, `inv`, `\` backed by vDSP — see [FFT & Transforms](@ref) |
-| Neural-network ops | `using AppleAccelerate, NNlib` | `NNlib.batched_mul!` (`Float32` 3-D) and BNNS-backed activations — see [Neural Network Primitives (BNNS)](@ref) |
-
-## Why `LinearAlgebra` and `SparseArrays` are *not* extensions
-
-The extension mechanism applies **only** to AbstractFFTs and NNlib.
 [`LinearAlgebra`](https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/) and
 [`SparseArrays`](https://docs.julialang.org/en/v1/stdlib/SparseArrays/) are
-deliberately kept as regular (hard) `[deps]`, not weak dependencies, for three
-reasons:
+regular `[deps]`, not weak dependencies:
 
 1. They are standard libraries that are effectively always present in the Julia
    sysimage, so making them weak would save nothing.
 2. BLAS/LAPACK forwarding needs `LinearAlgebra` at **load time** (`__init__`
-   installs Accelerate into libblastrampoline), so it cannot be deferred behind an
-   extension trigger.
+   installs Accelerate into libblastrampoline), so it cannot be deferred.
 3. Keeping `SparseArrays` a hard dependency lets `AAFactorization` subtype
    `LinearAlgebra.Factorization` and lets `AASparseMatrix` interoperate with
-   `SparseMatrixCSC` directly — behavior that would be awkward to gate behind a
-   weak dependency.
+   `SparseMatrixCSC` directly.
+
+BLAS/LAPACK forwarding is the one place AppleAccelerate does change global
+behavior — that is the documented purpose of loading it, and it goes through
+libblastrampoline, a mechanism designed for exactly this.

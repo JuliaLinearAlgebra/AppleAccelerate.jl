@@ -3,12 +3,19 @@
 AppleAccelerate wraps Apple's [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) transform functions for FFT, real FFT, DFT, and DCT.
 
 ```@setup fft
-using AppleAccelerate, AbstractFFTs
+using AppleAccelerate
 ```
 
 ## FFT
 
 The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. All dimensions must be powers of 2.
+
+!!! note "Choosing between AppleAccelerate and FFTW"
+    AppleAccelerate's FFT is a direct vDSP binding: all dimensions must be powers of 2, only 1-D vectors and 2-D matrices are supported, and it is reached exclusively through the `AppleAccelerate.` prefix. It does **not** plug into the AbstractFFTs.jl interface — loading AppleAccelerate never changes what `fft`/`plan_fft` do in your session, and will never override FFTW.jl.
+
+    For general sizes, 3-D and higher arrays, dimension-selective (`region`) transforms, or the standard Julia FFT interface, use [FFTW.jl](https://github.com/JuliaMath/FFTW.jl). vDSP is mainly competitive at small transform sizes; FFTW is typically faster at larger ones.
+
+    Real FFT (`rfft`, `irfft`, `brfft`) is likewise available only through the `AppleAccelerate.` prefix.
 
 ```@example fft
 x = randn(ComplexF64, 1024)
@@ -79,59 +86,6 @@ AppleAccelerate.rfft
 AppleAccelerate.irfft
 AppleAccelerate.brfft
 ```
-
-## AbstractFFTs Integration
-
-AppleAccelerate provides a package extension for [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl), allowing you to use the standard Julia FFT interface backed by Apple's vDSP library. Load both packages to activate the extension:
-
-```@example fft
-x = randn(ComplexF64, 1024)
-
-# Out-of-place
-X = AppleAccelerate.fft(x)
-x_recovered = AppleAccelerate.ifft(X)
-@assert x_recovered ≈ x
-
-# In-place
-y = copy(x)
-AppleAccelerate.fft!(y)
-AppleAccelerate.ifft!(y)
-@assert y ≈ x
-nothing # hide
-```
-
-The extension supports the full AbstractFFTs interface for 1D and 2D:
-
-| Function | Description |
-|----------|-------------|
-| `fft`, `ifft`, `bfft` | Out-of-place complex FFT |
-| `fft!`, `ifft!`, `bfft!` | In-place complex FFT |
-| `plan_fft`, `plan_ifft`, `plan_bfft` | Out-of-place plans |
-| `plan_fft!`, `plan_bfft!` | In-place plans |
-| `inv(plan)`, `p \ x`, `mul!` | Plan operations |
-
-Input must be `Vector` or `Matrix` with `Complex{T}` elements and power-of-2 dimensions. Non-power-of-2 inputs, empty arrays, and 3D+ arrays will throw an `ArgumentError` with a message suggesting to use FFTW.jl.
-
-### Region argument
-
-For 2D transforms, the `region` argument selects which dimensions to transform — matching the AbstractFFTs convention:
-
-```@example fft
-x = randn(ComplexF64, 16, 32)
-
-p_cols = plan_fft(x, (1,))   # transform along columns only (dim 1)
-p_rows = plan_fft(x, (2,))   # transform along rows only (dim 2)
-p_both = plan_fft(x, (1,2))  # transform along both (default)
-
-# Equivalent to two 1D FFTs composed:
-X_both = p_both * x
-X_seq  = p_rows * (p_cols * x)
-@assert X_both ≈ X_seq
-nothing # hide
-```
-
-!!! note
-    Real FFT (`rfft`, `irfft`, `brfft`) is available only via the direct `AppleAccelerate.*` API and is not wired into the AbstractFFTs extension, to avoid dispatch conflicts with other packages that call `rfft` internally on non-power-of-2 inputs.
 
 ## DFT (Complex Discrete Fourier Transform)
 
