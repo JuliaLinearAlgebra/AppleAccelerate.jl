@@ -75,19 +75,65 @@ All are defined for `Float32` and `Float64` only.
 
 | | |
 |---|---|
-| One argument | `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`, `cbrt`, `cos`, `cosh`, `cospi`, `erf`, `erfc`, `exp`, `exp10`, `exp2`, `expm1`, `log`, `log10`, `log1p`, `log2`, `sin`, `sinh`, `sinpi`, `tan`, `tanh`, `tanpi`, `tgamma` |
+| One argument | `acos`, `acosh`, `asin`, `asinh`, `atan`, `atanh`, `cbrt`, `cos`, `cosh`, `cospi`, `exp`, `exp10`, `exp2`, `expm1`, `log`, `log10`, `log1p`, `log2`, `sin`, `sinh`, `sinpi`, `tan`, `tanh`, `tanpi` |
 | Two arguments | `atan(y, x)`, `hypot`, `nextafter`, `pow`, `rem`, `remainder` |
 
-`erf`, `erfc`, `tgamma`, `nextafter`, `pow` and `remainder` have no `Base`
-counterpart with matching semantics, so they are named after their C equivalents.
-Use `pow(x, y)` rather than `x^y`.
+`nextafter`, `pow` and `remainder` have no `Base` counterpart with matching
+semantics, so they are named after their C equivalents. Use `pow(x, y)` rather than
+`x^y`.
 
-Functions LLVM already lowers to native instructions — `sqrt`, `floor`, `ceil`,
-`round`, `trunc`, `fma`, `abs` — are deliberately **absent**: routing those through
-a library call would be slower than the instruction the compiler emits anyway.
+Deliberately **absent**:
 
-`lgamma` is also absent, because it writes the global `signgam` and so cannot be
-declared side-effect-free.
+  * `sqrt`, `floor`, `ceil`, `round`, `trunc`, `fma`, `abs` — LLVM already lowers
+    these to native instructions, so a library call would be *slower*.
+  * `erf`, `erfc`, `tgamma` — `<simd/math.h>` declares `_simd_erf_f4` and friends,
+    but they measure at 0.97–0.99x of a plain scalar libm loop: they are scalar
+    loops behind a vector signature and buy nothing.
+  * `lgamma` — writes the global `signgam`, so it cannot be declared
+    side-effect-free.
+
+## Measured speedups
+
+`out[i] = f(x[i])` over N = 100,000 on an M-series machine. **`SM/Base`** is
+SIMDMath against a scalar `Base` loop (higher is better); **`SM/vForce`** is against
+`AppleAccelerate.f!` (below 1.0 means vForce wins).
+
+| func | Float32 SM/Base | Float32 SM/vForce | Float64 SM/Base | Float64 SM/vForce |
+|---|---|---|---|---|
+| `sinpi` / `cospi` | **26x** | 0.61x | **7.5x** | 0.45x |
+| `tanpi` | **22x** | 0.78x | **5.9x** | 0.57x |
+| `atan(y,x)` | **10.7x** | 0.73x | 3.9x | 0.62x |
+| `atan` | **10.2x** | 0.69x | 3.4x | 0.53x |
+| `asin` / `acos` | **8.6x** | 0.65x | 3.1–3.7x | 0.51–0.63x |
+| `sin` / `cos` | **8.2x** | 0.57x | 2.5x | 0.51x |
+| `rem` | 6.9x | 0.97x | 3.1x | 0.99x |
+| `expm1` | 6.7x | 0.71x | 3.4x | 0.58x |
+| `pow` | 6.4x | 0.78x | 2.6x | 0.66x |
+| `tan` | 6.4x | 0.64x | 4.0x | 0.52x |
+| `tanh` | 5.7x | 0.78x | 3.2x | 0.57x |
+| `atanh` | 5.2x | 0.57x | 2.1x | 0.54x |
+| `exp2` / `exp` / `exp10` | 4.2–5.0x | 0.57x | 1.5x | 0.68x |
+| `log` / `log2` / `log10` / `log1p` | 3.4–4.5x | 0.55–0.67x | 1.8–2.2x | 0.59–0.65x |
+| `sinh` | 4.4x | 0.66x | 1.6x | 0.57x |
+| `acosh` | 4.1x | 0.56x | 1.1x | 0.52x |
+| `asinh` | 2.5x | 0.65x | 1.1x | 0.60x |
+| `cbrt` | 2.1x | 0.73x | 1.3x | 0.66x |
+| `hypot` | 1.2x | — | 4.5x | — |
+| `cosh` | 1.1x | 0.63x | 1.5x | 0.55x |
+| `nextafter` | — | 0.18x | — | 0.33x |
+
+Reading this:
+
+  * **`SM/vForce` is below 1.0 in every single row.** vForce wins across the board,
+    which is why the guidance above is to prefer it whenever it applies. `nextafter`
+    is the extreme case at 0.18x — always prefer `AppleAccelerate.nextafter!`.
+  * The `Float32` trigonometric functions are where this shines against `Base`,
+    especially `sinpi`/`cospi`/`tanpi`, where `Base` is unusually slow.
+  * `cosh` and `hypot` barely beat `Base` in `Float32` because `Base` implements
+    them natively there — those loops vectorise with no library call at all, so
+    there is little left to win.
+  * `hypot` and `exp10` have no vForce equivalent, so `SIMDMath` is the only
+    accelerated option for them.
 
 ## How it works
 

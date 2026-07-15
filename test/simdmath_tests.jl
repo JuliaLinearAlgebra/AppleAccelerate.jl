@@ -105,19 +105,29 @@ print(join(failures, ","))
         end
     end
 
-    # No Base equivalent, so pin against the identities instead of a reference impl.
-    @testset "erf / erfc / tgamma / remainder / nextafter" begin
+    # No Base equivalent, so pin against known values instead of a reference impl.
+    @testset "remainder / nextafter" begin
         for T in (Float32, Float64)
-            X = _simd_domain(:erf, T, 256)
-            @test all(i -> SM.erf(X[i]) + SM.erfc(X[i]) ≈ one(T), eachindex(X))
-            @test SM.erf(zero(T)) == zero(T)
-            # tgamma(n+1) == n!
-            for n in 1:8
-                @test SM.tgamma(T(n + 1)) ≈ T(factorial(n)) rtol = sqrt(eps(T))
-            end
             @test SM.nextafter(one(T), T(2)) === nextfloat(one(T))
             @test SM.nextafter(one(T), zero(T)) === prevfloat(one(T))
             @test SM.remainder(T(5), T(3)) ≈ T(-1)
+        end
+    end
+
+    # Some functions are intentionally not provided; see the note in src/simdmath.jl.
+    # Assert on the tables rather than isdefined(SM, f): every module implicitly does
+    # `using Base`, so isdefined(SM, :sqrt) is true regardless of what we define.
+    @testset "unaccelerated functions stay out" begin
+        provided = Set(Symbol[first(t) for t in (SM.UNARY..., SM.BINARY...)])
+        # measured at ~0.98x of a scalar libm loop -- vector signature, scalar guts
+        @test :erf ∉ provided
+        @test :erfc ∉ provided
+        @test :tgamma ∉ provided
+        # writes the global signgam, so it cannot be declared memory(none)
+        @test :lgamma ∉ provided
+        # LLVM lowers these to native instructions; a libcall would be slower
+        for f in (:sqrt, :floor, :ceil, :round, :trunc, :fma, :abs, :fabs)
+            @test f ∉ provided
         end
     end
 
