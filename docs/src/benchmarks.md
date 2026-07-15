@@ -85,19 +85,30 @@ Single-threaded, Accelerate is 6–14× faster for matrix multiply, with the lar
 
     - **OpenBLAS** runs GEMM on the CPU's P-cores (NEON), and **scales with thread count**.
     - **Accelerate** dispatches large GEMM to the **SME/AMX matrix co-processor** — a
-      dedicated unit shared per core cluster (one in the P-cluster, one in the E-cluster).
-      This is a CPU-side co-processor, **not** the GPU, and it does support Float64. Because
-      it is a shared unit that a single thread already saturates, Accelerate GEMM throughput
-      is **essentially flat with respect to `BLAS.set_num_threads`.**
+      dedicated unit shared *per core cluster*. This is a CPU-side co-processor, **not** the
+      GPU, and it does support Float64. Because each unit is shared and a single thread on
+      that cluster already saturates it, Accelerate GEMM throughput scales only with the
+      number of co-processors (i.e. the number of core clusters), **not** with
+      `BLAS.set_num_threads` beyond that.
 
-    Measured on an Apple M4 (Float64, N=4096, from [issue #132](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/132)):
+    Measured on this page's reference machine, an **Apple M2 Max** (8 P-cores in two
+    clusters + 4 E-cores), Float64/Float32 GEMM at N=4096:
 
-    | Threads | OpenBLAS (GFLOPS) | OpenBLAS speedup | Accelerate (GFLOPS) |
-    |---------|-------------------|------------------|---------------------|
-    | 1 |  58.3 | 1.0× | 404.3 |
-    | 2 | 112.3 | 1.9× | 404.2 |
-    | 3 | 164.1 | 2.8× | 404.0 |
-    | 4 | 199.6 | 3.4× | 401.3 |
+    | Threads | OpenBLAS F64 | OB speedup | Accelerate F64 | OpenBLAS F32 | Accelerate F32 |
+    |---------|-------------:|:----------:|---------------:|-------------:|---------------:|
+    | 1 |  52.5 | 1.0× | 314.8 | 105.1 | 1158.3 |
+    | 2 | 104.4 | 2.0× | 616.2 | 206.7 | 2251.8 |
+    | 3 | 152.1 | 2.9× | 615.8 | 299.4 | 2236.7 |
+    | 4 | 205.8 | 3.9× | 617.4 | 398.8 | 2254.9 |
+    | 6 | 276.2 | 5.3× | 611.7 | 561.1 | 2248.7 |
+    | 8 | 354.1 | 6.7× | 618.1 | 715.6 | 2240.3 |
+
+    (GFLOPS; higher is better.) Two effects are visible. Accelerate **doubles** from 1→2
+    threads — the M2 Max has *two* P-core clusters, so a second thread engages the second
+    SME unit — then stays flat, since there are no more co-processors to recruit. OpenBLAS
+    keeps scaling across all 8 P-cores (~6.7×). On a single-P-cluster chip such as the M4,
+    Accelerate is flat from thread 1 (see the M4 data in
+    [issue #132](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/issues/132)).
 
     So the multiple by which Accelerate leads shrinks as OpenBLAS is given more cores.
     Accelerate still wins here, but the single-threaded speedups above should be read as a
