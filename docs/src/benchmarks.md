@@ -178,7 +178,7 @@ SuiteSparse LU (`\`) is faster for Float64. Apple QR wins for Float32 at N≥100
 
 ### Cholesky Factorize + Solve
 
-Apple Cholesky leads across these sizes, by up to 4.1× at N=5000:
+Apple Cholesky is around parity at N=500 and pulls ahead as N grows, reaching ~4× at N=5000:
 
 | Type | N | Apple (μs) | SuiteSparse (μs) | Speedup |
 |------|---|-----------|-------------------|---------|
