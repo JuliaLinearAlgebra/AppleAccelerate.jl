@@ -7,7 +7,7 @@
   <a href="https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Docs"/></a>
   <a href="https://juliahub.com/ui/Packages/General/AppleAccelerate"><img src="https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg" alt="JuliaHub"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
-  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.10-blue.svg" alt="Julia compat"/></a>
+  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.11-blue.svg" alt="Julia compat"/></a>
 </p>
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
@@ -16,10 +16,11 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Dense linear algebra** via BLAS/LAPACK forwarding through [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — all standard `LinearAlgebra` operations (`lu`, `qr`, `svd`, `cholesky`, `eigen`, etc.) are accelerated transparently — **6–14× faster** GEMM than OpenBLAS on Apple Silicon, **2–4× faster** factorizations and solves
 - **Sparse linear algebra** via `libSparse` — sparse matrix operations and direct solvers (QR, Cholesky, LDLT) — **faster for Float32 QR** and **Cholesky at N=5000** vs SuiteSparse
 - **Signal Processing** — FFT, DCT, convolution, cross-correlation, biquad filtering, window functions — **on par with FFTW** for complex FFT, **up to 2× faster** for Float32 real FFT
+- **SIMD math inside `@simd` loops** via `AppleAccelerate.SIMDMath` — scalar math functions that LLVM turns into SIMD calls, for loops the array API can't express (strided access, values computed on the fly) — **2–4× faster** than a scalar Base loop
 
 ## Installation
 
-Requires macOS 13.4+ and Julia 1.10+.
+Requires macOS 13.4+ and Julia 1.11+.
 
 ```julia
 using Pkg
@@ -44,6 +45,17 @@ Y = AppleAccelerate.sin(X)
 # FFT
 x = randn(ComplexF64, 1024)
 X = AppleAccelerate.fft(x)
+
+# SIMD math inside a loop the array API above can't express.
+# Prefer AppleAccelerate.exp/log on whole arrays when you can -- they're faster.
+using AppleAccelerate.SIMDMath: log
+function logsum_strided(X, stride)
+    u = zero(eltype(X))
+    @simd for i in 1:stride:length(X)
+        @inbounds u += log(X[i])
+    end
+    u
+end
 ```
 
 ## Documentation

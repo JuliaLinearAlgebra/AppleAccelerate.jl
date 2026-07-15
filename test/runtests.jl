@@ -18,6 +18,7 @@ N = 1_000
 include("lib_tests.jl")
 include("array_tests.jl")
 include("vmath_tests.jl")
+include("simdmath_tests.jl")
 include("complexarray_tests.jl")
 include("dsp_tests.jl")
 include("sparse_tests.jl")
