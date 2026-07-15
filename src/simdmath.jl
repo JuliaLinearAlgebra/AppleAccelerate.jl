@@ -60,6 +60,19 @@
 #
 # These routines are *less accurate than Base*. See the `SIMDMath` docstring; the
 # tolerances are pinned in `test/simdmath_tests.jl`.
+#
+# ## Why the package needs Julia >= 1.11
+#
+# The IR below is LLVM 16+. Julia 1.11 ships LLVM 16, Julia 1.10 ships LLVM 15, and
+# two things here do not exist in 15:
+#
+#   * opaque pointers (`ptr`). On LLVM 15 `@llvm.compiler.used` has to be spelled
+#     `[1 x i8*]` with an explicit `bitcast` of the typed function pointer.
+#   * the `memory(none)` attribute, which was `readnone` before LLVM 16.
+#
+# Emitting both dialects is possible but doubles the surface for one superseded
+# LLVM, so `julia = "1.11"` is the floor instead. On 1.10 this file fails to parse
+# with `error: expected type` at the `ptr` in `[1 x ptr]`.
 
 """
     AppleAccelerate.SIMDMath

@@ -30,7 +30,7 @@ elsewhere in your session does. See [Architecture](@ref architecture).
 
 ## Installation
 
-Requires macOS 13.4+ and Julia 1.10+.
+Requires macOS 13.4+ and Julia 1.11+.
 
 ```julia
 using Pkg
