@@ -216,181 +216,28 @@ end
     end
 end
 
-@testset "AbstractFFTs extension" begin
-    @testset "Forward FFT matches FFTW" begin
-        for T in (ComplexF64, ComplexF32)
-            F = real(T)
-            @testset "$T" begin
-                for n in (16, 64, 256, 1024)
-                    x = randn(T, n)
-                    result = AbstractFFTs.fft(x)
-                    expected = FFTW.fft(x)
-                    if F == Float64
-                        @test result ≈ expected
-                    else
-                        @test result ≈ expected rtol=sqrt(eps(Float32))
-                    end
-                end
-            end
-        end
-    end
+@testset "does not hijack FFTW planning (#139)" begin
+    # Loading AppleAccelerate must not claim AbstractFFTs.plan_fft, which would
+    # break generic FFT planning for sizes vDSP cannot handle.
 
-    @testset "mul! variant" begin
-        x = randn(ComplexF64, 256)
-        p = plan_fft(x)
-        y = similar(x)
-        mul!(y, p, x)
-        @test y ≈ FFTW.fft(x)
-    end
+    # The repro from #139: non-power-of-2, 2D.
+    x = rand(ComplexF64, 64, 63)
+    @test (FFTW.plan_fft(x) * x) ≈ FFTW.fft(x)
 
-    @testset "bfft roundtrip" begin
-        for T in (ComplexF64, ComplexF32)
-            F = real(T)
-            @testset "$T" begin
-                for n in (16, 256, 1024)
-                    x = randn(T, n)
-                    X = AbstractFFTs.fft(x)
-                    y = AbstractFFTs.bfft(X)
-                    if F == Float64
-                        @test y ≈ n * x
-                    else
-                        @test y ≈ n * x rtol=sqrt(eps(Float32))
-                    end
-                end
-            end
-        end
-    end
+    # 3D: previously threw.
+    z = rand(ComplexF64, 4, 4, 4)
+    @test (FFTW.plan_fft(z) * z) ≈ FFTW.fft(z)
 
-    @testset "ifft roundtrip" begin
-        for T in (ComplexF64, ComplexF32)
-            F = real(T)
-            @testset "$T" begin
-                for n in (16, 256, 1024)
-                    x = randn(T, n)
-                    @test AbstractFFTs.ifft(AbstractFFTs.fft(x)) ≈ x rtol=(F == Float64 ? 1e-10 : sqrt(eps(Float32)))
-                end
-            end
-        end
-    end
+    # Power-of-2 must also route to FFTW now, not vDSP.
+    @test FFTW.plan_fft(rand(ComplexF64, 16)) isa FFTW.cFFTWPlan
 
-    @testset "inv(plan) and p \\ x" begin
-        x = randn(ComplexF64, 256)
-        p = plan_fft(x)
-        X = p * x
-        pinv = inv(p)
-        @test pinv * X ≈ x
-        @test inv(p) === pinv
-        @test p \ X ≈ x
-    end
+    # Fails loudly if an AbstractFFTs extension is ever reintroduced.
+    @test !any(m -> occursin("AppleAccelerate", string(m.module)),
+               methods(FFTW.plan_fft))
 
-    @testset "Known values" begin
-        x_impulse = ComplexF64[1, 0, 0, 0]
-        @test AbstractFFTs.fft(x_impulse) ≈ ComplexF64[1, 1, 1, 1]
-        x_const = ComplexF64[1, 1, 1, 1]
-        @test AbstractFFTs.fft(x_const) ≈ ComplexF64[4, 0, 0, 0]
-    end
-
-    @testset "Parseval's theorem" begin
-        x = randn(ComplexF64, 256)
-        X = AbstractFFTs.fft(x)
-        @test sum(abs2, x) ≈ sum(abs2, X) / 256
-    end
-
-    @testset "2D Forward FFT matches FFTW" begin
-        for T in (ComplexF64, ComplexF32)
-            F = real(T)
-            @testset "$T" begin
-                for (nr, nc) in ((4, 4), (8, 16), (16, 8), (32, 32))
-                    x = randn(T, nr, nc)
-                    result = AbstractFFTs.fft(x)
-                    expected = FFTW.fft(x)
-                    if F == Float64
-                        @test result ≈ expected
-                    else
-                        @test result ≈ expected rtol=sqrt(eps(Float32))
-                    end
-                end
-            end
-        end
-    end
-
-    @testset "2D mul! variant" begin
-        x = randn(ComplexF64, 16, 32)
-        p = plan_fft(x)
-        y = similar(x)
-        mul!(y, p, x)
-        @test y ≈ FFTW.fft(x)
-    end
-
-    @testset "2D ifft roundtrip" begin
-        for T in (ComplexF64, ComplexF32)
-            F = real(T)
-            @testset "$T" begin
-                for (nr, nc) in ((4, 8), (16, 16))
-                    x = randn(T, nr, nc)
-                    @test AbstractFFTs.ifft(AbstractFFTs.fft(x)) ≈ x rtol=(F == Float64 ? 1e-10 : sqrt(eps(Float32)))
-                end
-            end
-        end
-    end
-
-    @testset "2D inv(plan) and p \\ x" begin
-        x = randn(ComplexF64, 16, 16)
-        p = plan_fft(x)
-        X = p * x
-        pinv = inv(p)
-        @test pinv * X ≈ x
-        @test p \ X ≈ x
-    end
-
-    @testset "Error cases" begin
-        # Non-power-of-2
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 100))
-        @test_throws ArgumentError fft(randn(ComplexF64, 100))
-        # Empty
-        @test_throws ArgumentError plan_fft(ComplexF64[])
-        # Non-power-of-2 2D
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 3, 4))
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 6))
-        # 3D+ arrays
-        @test_throws ArgumentError plan_fft(randn(ComplexF64, 4, 4, 4))
-        @test_throws ArgumentError fft(randn(ComplexF64, 4, 4, 4))
-        @test_throws ArgumentError plan_fft!(randn(ComplexF64, 4, 4, 4))
-    end
-
-    @testset "wrong-size input to a plan throws" begin
-        # A plan built for size N must reject a differently-sized input rather
-        # than silently returning a wrong-size result.
-        p = plan_fft(randn(ComplexF64, 64))
-        @test_throws DimensionMismatch p * randn(ComplexF64, 16)
-        y = Vector{ComplexF64}(undef, 16)
-        @test_throws DimensionMismatch mul!(y, p, randn(ComplexF64, 16))
-
-        # In-place plan: same guard.
-        pin = plan_fft!(randn(ComplexF64, 64))
-        @test_throws DimensionMismatch pin * randn(ComplexF64, 16)
-
-        # 2D plan rejects wrong matrix size.
-        p2 = plan_fft(randn(ComplexF64, 16, 16))
-        @test_throws DimensionMismatch p2 * randn(ComplexF64, 8, 8)
-    end
-
-    @testset "In-place fft!" begin
-        x = randn(ComplexF64, 256)
-        p = plan_fft!(x)
-        y = copy(x)
-        p * y
-        @test y ≈ FFTW.fft(x)
-    end
-
-    @testset "In-place ifft! roundtrip" begin
-        x = randn(ComplexF64, 256)
-        fwd = copy(x)
-        fft!(fwd)
-        ifft!(fwd)
-        @test fwd ≈ x
-    end
-
+    # The native API is unaffected.
+    v = rand(ComplexF64, 16)
+    @test AppleAccelerate.fft(v) ≈ FFTW.fft(v)
 end
 
 
@@ -766,50 +613,6 @@ end
             @test_throws DimensionMismatch AppleAccelerate.zcoher!(short_real, Ar, Br, Cc)
             @test_throws DimensionMismatch AppleAccelerate.ztrans!(short_cplx, Ar, Cc)
             @test_throws DimensionMismatch AppleAccelerate.zcspec!(short_cplx, A, Cc)
-        end
-    end
-end
-
-@testset "plan_fft region argument" begin
-    @testset "2D FFT along dim 1 only" begin
-        x = randn(ComplexF64, 16, 8)
-        p = plan_fft(x, (1,))
-        result = p * x
-        expected = FFTW.fft(x, (1,))
-        @test result ≈ expected
-    end
-
-    @testset "2D FFT along dim 2 only" begin
-        x = randn(ComplexF64, 16, 8)
-        p = plan_fft(x, (2,))
-        result = p * x
-        expected = FFTW.fft(x, (2,))
-        @test result ≈ expected
-    end
-
-    @testset "2D FFT along both dims matches full 2D FFT" begin
-        x = randn(ComplexF64, 8, 16)
-        p12 = plan_fft(x, 1:2)
-        p_default = plan_fft(x)
-        @test (p12 * x) ≈ (p_default * x)
-    end
-
-    @testset "2D ifft roundtrip with region" begin
-        x = randn(ComplexF64, 8, 8)
-        for region in ((1,), (2,), 1:2)
-            fwd = plan_fft(x, region) * x
-            result = plan_bfft(x, region) * fwd
-            n = prod(size(x, d) for d in region)
-            @test result ./ n ≈ x
-        end
-    end
-
-    @testset "2D plan_fft region Float32" begin
-        x = randn(ComplexF32, 8, 8)
-        for region in ((1,), (2,))
-            result = plan_fft(x, region) * x
-            expected = FFTW.fft(x, collect(region))
-            @test result ≈ expected rtol=sqrt(eps(Float32))
         end
     end
 end

@@ -70,47 +70,40 @@ AppleAccelerate.bnns_activation
 AppleAccelerate.bnns_activation!
 ```
 
-## NNlib extension
+## Using BNNS with NNlib
 
-AppleAccelerate ships a [package extension](@ref extensions) for
-[NNlib.jl](https://github.com/FluxML/NNlib.jl). Loading both packages activates a
-BNNS-backed method of `NNlib.batched_mul!` for dense `Float32` 3-D batches: each
-`m×k` × `k×n` slice is evaluated with `BNNSMatMul`. Only the cleanly handled case
-(`β == 0`, contiguous non-transposed `Array{Float32,3}`) is intercepted; every
-other call falls through to NNlib's generic implementation.
+AppleAccelerate defines no methods on NNlib's functions — loading it never changes
+what `batched_mul!` or an activation function does. To use BNNS for a batched
+`Float32` matmul, call [`bnns_matmul!`](@ref AppleAccelerate.bnns_matmul!) per
+slice explicitly:
 
 ```@example bnns
-using NNlib
+A = rand(Float32, 4, 3, 8)   # 8 batched 4x3 matrices
+B = rand(Float32, 3, 5, 8)   # 8 batched 3x5 matrices
+C = Array{Float32}(undef, 4, 5, 8)
 
-A = rand(Float32, 4, 3, 8)   # 8 batched 4×3 matrices
-B = rand(Float32, 3, 5, 8)   # 8 batched 3×5 matrices
-
-C = NNlib.batched_mul(A, B)  # uses BNNS under the hood
-@assert size(C) == (4, 5, 8)
+for i in axes(C, 3)
+    AppleAccelerate.bnns_matmul!(view(C, :, :, i), view(A, :, :, i), view(B, :, :, i))
+end
 @assert C[:, :, 1] ≈ A[:, :, 1] * B[:, :, 1]
 nothing # hide
 ```
 
-The extension also exposes `AppleAccelerate.bnns_act(f, X::Array{Float32})`, which
-maps an NNlib activation function (`relu`, `sigmoid`/`σ`, `tanh`, `tanh_fast`,
-`abs`, `identity`) to the corresponding BNNS activation, falling back to `f.(X)`
-for anything unsupported.
+For activations, [`bnns_activation`](@ref AppleAccelerate.bnns_activation) takes a
+`Symbol` (`:relu`, `:sigmoid`, `:tanh`, `:abs`, `:identity`) rather than an NNlib
+function object, so no NNlib dependency is involved:
 
 ```@example bnns
 x = randn(Float32, 6)
-@assert AppleAccelerate.bnns_act(relu, x) ≈ relu.(x)
+@assert AppleAccelerate.bnns_activation(:relu, x) ≈ max.(x, 0f0)
 nothing # hide
-```
-
-```@docs
-AppleAccelerate.bnns_act
 ```
 
 ## What's left to the raw layer
 
 BNNS is large (~139 C functions, 110+ structs). Deliberately *not* given idiomatic
 wrappers — use the raw `AppleAccelerate.LibAccelerate` layer
-directly if you need them (see [Architecture & Package Extensions](@ref extensions)) — are the BNNS graph-compiler API (`bnns_graph.h`),
+directly if you need them (see [Architecture](@ref architecture)) — are the BNNS graph-compiler API (`bnns_graph.h`),
 convolution / pooling / normalization / LSTM / attention layers, quantization, and
 training. These require substantial stateful plumbing or are hard to verify
 generically, so they fall outside this idiomatic core.

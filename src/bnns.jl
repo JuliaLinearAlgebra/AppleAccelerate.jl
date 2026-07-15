@@ -31,15 +31,6 @@ using .LibAccelerate:
     BNNSFilterCreateLayerActivation, BNNSFilterApply, BNNSFilterDestroy,
     BNNSMatMul, BNNSMatMulWorkspaceSize
 
-"""
-    bnns_act(f, X)
-
-Apply an NNlib activation function `f` to `X` using BNNS. This is a stub
-implemented by the `AppleAccelerateNNlibExt` package extension and only becomes
-available once `NNlib` is also loaded.
-"""
-function bnns_act end
-
 # --- Data-type mapping -------------------------------------------------------
 
 # Map a Julia element type to the corresponding BNNS data-type enum value.
