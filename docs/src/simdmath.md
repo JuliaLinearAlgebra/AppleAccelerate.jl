@@ -59,8 +59,21 @@ end
 
 A call only becomes a SIMD call if the surrounding loop actually vectorises, which
 in practice means `@simd` and usually `@inbounds`. Nothing warns you if it does not
-— the code stays correct and simply runs at scalar speed. To check, look for the
-symbol in the generated code:
+— the code stays correct and simply runs at scalar speed.
+
+!!! note
+    Two common flags silently disable this entirely, because each stops the loop
+    from vectorising at all:
+
+      * **`--check-bounds=yes`** — disables `@inbounds`. This is what `Pkg.test()`
+        passes by default, so `SIMDMath` runs at scalar speed inside a test suite.
+      * **`--code-coverage`** — the counters coverage inserts into the loop body
+        block vectorisation.
+
+    Both leave results correct, just scalar. If you are benchmarking `SIMDMath`,
+    make sure neither is on.
+
+To check, look for the symbol in the generated code:
 
 ```julia
 using InteractiveUtils

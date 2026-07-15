@@ -24,11 +24,18 @@ const ULP_TOL = 8.0
 # SIMD routine. If that silently stops happening the functions still return correct
 # answers, just slowly -- so assert on the emitted code, not only on the numbers.
 #
-# This has to run in a child process. Vectorisation only happens when `@inbounds` is
-# honoured, and `Pkg.test()` defaults to `--check-bounds=yes`, which disables it and
-# blocks vectorisation outright. Checking in-process would mean this test silently
-# never runs under CI -- precisely where a regression would slip through -- so spawn
-# a child with the default bounds-checking setting instead.
+# This has to run in a child process, because two things the *test harness* does each
+# independently stop the loop from vectorising at all:
+#
+#   * `Pkg.test()` defaults to `--check-bounds=yes`, which disables `@inbounds`;
+#   * `julia-actions/julia-runtest` defaults to coverage on, and the counters
+#     coverage inserts into the loop body block vectorisation outright.
+#
+# Neither affects correctness, so the numeric tests above stay green and only this
+# check would fail -- in CI only, which is exactly where a real regression needs
+# catching. So spawn a child with both explicitly turned off. `Base.julia_cmd()`
+# propagates the parent's `--check-bounds` and `--code-coverage`, so both have to be
+# overridden here; the last occurrence of a flag wins.
 const _VECTORISE_CHECK = raw"""
 using AppleAccelerate, InteractiveUtils
 const SM = AppleAccelerate.SIMDMath
@@ -57,8 +64,8 @@ print(join(failures, ","))
         script = tempname() * ".jl"
         write(script, _VECTORISE_CHECK)
         try
-            out = read(`$(Base.julia_cmd()) --check-bounds=auto --startup-file=no
-                        --project=$(Base.active_project()) $script`, String)
+            out = read(`$(Base.julia_cmd()) --check-bounds=auto --code-coverage=none
+                        --startup-file=no --project=$(Base.active_project()) $script`, String)
             failed = filter(!isempty, split(out, ","))
             # Name the offenders rather than just asserting a count, so a regression
             # points straight at the broken mapping.

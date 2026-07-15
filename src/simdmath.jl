@@ -137,6 +137,11 @@ in practice means `@simd` (and usually `@inbounds`). Outside a vectorised loop
 these are ordinary — correct, but no faster than `Base`, and sometimes slower.
 `Float32` runs 4 lanes at a time, `Float64` runs 2.
 
+!!! note
+    `--check-bounds=yes` (which `Pkg.test()` passes by default) and `--code-coverage`
+    each stop the loop vectorising at all, silently reducing these to scalar libm
+    calls. Results stay correct; the speedup disappears.
+
 To confirm you are getting the vectorised form, look for the symbol:
 
 ```julia
