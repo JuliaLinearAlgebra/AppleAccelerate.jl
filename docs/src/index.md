@@ -4,7 +4,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 
 ## Installation
 
-Requires macOS 13.4+ and Julia 1.10+.
+Requires macOS 13.4+ and Julia 1.11+.
 
 ```julia
 using Pkg

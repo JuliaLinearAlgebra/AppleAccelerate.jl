@@ -7,7 +7,7 @@
   <a href="https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Docs"/></a>
   <a href="https://juliahub.com/ui/Packages/General/AppleAccelerate"><img src="https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg" alt="JuliaHub"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
-  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.10-blue.svg" alt="Julia compat"/></a>
+  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.11-blue.svg" alt="Julia compat"/></a>
 </p>
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
@@ -20,7 +20,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 
 ## Installation
 
-Requires macOS 13.4+ and Julia 1.10+.
+Requires macOS 13.4+ and Julia 1.11+.
 
 ```julia
 using Pkg
