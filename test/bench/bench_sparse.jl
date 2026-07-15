@@ -33,7 +33,7 @@ const SUITE_CHOL = Dict{Tuple{Type,Int}, Float64}()
 
 # Pre-generate matrices so both phases use the same data
 const spmv_sizes = (1000, 5000, 10000, 50000)
-const solve_sizes = (100, 500, 1000, 2000, 5000)
+const sparse_solve_sizes = (100, 500, 1000, 2000, 5000)
 const spmv_types = (Float64, Float32)
 
 const SPMV_MATRICES = Dict{Tuple{Type,Int}, SparseMatrixCSC}()
@@ -49,7 +49,7 @@ for T in spmv_types
         SPMV_MATRICES[(T,N)] = sprandn(T, N, N, 0.01)
         SPMV_VECTORS[(T,N)]  = randn(T, N)
     end
-    for N in solve_sizes
+    for N in sparse_solve_sizes
         QR_MATRICES[(T,N)]   = sprandn(T, N, N, 0.01) + T(20) * I
         QR_VECTORS[(T,N)]    = randn(T, N)
         A_raw = sprandn(T, N, N, 0.01)
@@ -79,7 +79,7 @@ end
 
 println("Benchmarking QR Solve (SuiteSparse)...")
 for T in spmv_types
-    for N in solve_sizes
+    for N in sparse_solve_sizes
         A_jl = QR_MATRICES[(T,N)]
         b = QR_VECTORS[(T,N)]
         t = bench_min(() -> A_jl \ b)
@@ -90,7 +90,7 @@ end
 
 println("Benchmarking Cholesky Solve (SuiteSparse)...")
 for T in spmv_types
-    for N in solve_sizes
+    for N in sparse_solve_sizes
         A_spd = CHOL_MATRICES[(T,N)]
         b = CHOL_VECTORS[(T,N)]
         t = bench_min(() -> begin
@@ -151,7 +151,7 @@ end
 println("Benchmarking QR Factorize + Solve (Apple)...")
 let results = NamedTuple{(:type, :size, :apple_us, :suite_us, :speedup), Tuple{String, String, Float64, Float64, Float64}}[]
     for T in spmv_types
-        for N in solve_sizes
+        for N in sparse_solve_sizes
             A_jl = QR_MATRICES[(T,N)]
             b = QR_VECTORS[(T,N)]
             t_apple = bench_min(() -> begin
@@ -172,7 +172,7 @@ end
 println("Benchmarking Cholesky Factorize + Solve (Apple)...")
 let results = NamedTuple{(:type, :size, :apple_us, :suite_us, :speedup), Tuple{String, String, Float64, Float64, Float64}}[]
     for T in spmv_types
-        for N in solve_sizes
+        for N in sparse_solve_sizes
             A_spd = CHOL_MATRICES[(T,N)]
             b = CHOL_VECTORS[(T,N)]
             t_apple = bench_min(() -> begin

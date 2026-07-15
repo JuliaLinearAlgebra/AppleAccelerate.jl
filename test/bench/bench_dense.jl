@@ -2,7 +2,8 @@
 #
 # This script benchmarks OpenBLAS FIRST (before loading AppleAccelerate),
 # then loads AppleAccelerate and re-runs the same benchmarks.
-# All benchmarks run single-threaded for a fair, reproducible comparison.
+# Benchmarks run single-threaded by default (set BENCH_THREADS to sweep thread
+# counts) for a fair, reproducible comparison. See issue #132.
 #
 # Benchmark count: ~42 problems per backend (×2 = 84 timing calls)
 #   GEMM:            2 types × 6 sizes = 12
@@ -11,8 +12,14 @@
 
 using LinearAlgebra, Printf
 
-# Force single-threaded for fair comparison
-BLAS.set_num_threads(1)
+# Thread count for the BLAS backends. Defaults to 1 for a reproducible
+# kernel-quality comparison, but can be overridden to measure how OpenBLAS
+# scales across cores vs. Accelerate's (flat) SME co-processor throughput:
+#   BENCH_THREADS=4 julia --project=test/bench test/bench/bench_dense.jl
+# See issue #132.
+const BENCH_THREADS = parse(Int, get(ENV, "BENCH_THREADS", "1"))
+BLAS.set_num_threads(BENCH_THREADS)
+@info "Dense benchmark BLAS threads" BENCH_THREADS
 
 # Timing helper: 1 warmup call + N timed runs, return minimum
 function bench_min(f; runs=5)
@@ -102,8 +109,8 @@ openblas_solve_f32 = bench_solve(Float32, solve_sizes)
 println("\n" * "="^70)
 println("Phase 2: Loading AppleAccelerate...")
 using AppleAccelerate
-AppleAccelerate.set_num_threads(1)
-BLAS.set_num_threads(1)
+AppleAccelerate.set_num_threads(BENCH_THREADS)
+BLAS.set_num_threads(BENCH_THREADS)
 println("Current BLAS: ", BLAS.get_config())
 println("="^70)
 

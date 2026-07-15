@@ -1,21 +1,26 @@
 # AppleAccelerate.jl Benchmark Suite
 #
 # Usage:
-#   julia --project test/bench/run_benchmarks.jl           # run all
-#   julia --project test/bench/run_benchmarks.jl fft        # run only FFT
-#   julia --project test/bench/run_benchmarks.jl sparse      # run only sparse
-#   julia --project test/bench/run_benchmarks.jl dense       # run only dense
-#   julia --project test/bench/run_benchmarks.jl array       # run only array ops
+#   julia --project=test/bench test/bench/run_benchmarks.jl           # run all
+#   julia --project=test/bench test/bench/run_benchmarks.jl fft        # run only FFT
+#   julia --project=test/bench test/bench/run_benchmarks.jl sparse      # run only sparse
+#   julia --project=test/bench test/bench/run_benchmarks.jl dense       # run only dense
+#   julia --project=test/bench test/bench/run_benchmarks.jl array       # run only array ops
 #
-# NOTE: bench_dense.jl and bench_sparse.jl must be run BEFORE loading
-# AppleAccelerate — they load it internally after the OpenBLAS/SuiteSparse
-# benchmarks. The other bench files require AppleAccelerate to already be
-# loaded. The runner handles this ordering.
+# Each bench file is launched in its OWN fresh Julia process. This is
+# essential for a fair comparison: bench_dense.jl and bench_sparse.jl
+# benchmark OpenBLAS/SuiteSparse *before* loading AppleAccelerate, then load
+# it internally. If they shared one process, whichever ran second would find
+# AppleAccelerate already loaded — its OpenBLAS/SuiteSparse "baseline" would
+# then route BLAS through Accelerate (via libblastrampoline) and be
+# contaminated. Separate processes guarantee each gets a clean pre-Accelerate
+# baseline, and let the documented command reproduce the published numbers.
 #
 # All benchmarks run single-threaded (BLAS, FFTW, Accelerate) for fair,
-# reproducible comparisons. Each bench file sets its own thread counts.
+# reproducible comparisons. Each bench file sets its own thread counts; set
+# the BENCH_THREADS env var to sweep BLAS thread counts in the dense suite.
 
-using Dates, Printf
+using Dates
 
 const BENCH_DIR = @__DIR__
 
@@ -34,31 +39,22 @@ else
     Set(["fft", "sparse", "dense", "array"])
 end
 
-# Dense and sparse MUST run first (before AppleAccelerate is loaded) because
-# they benchmark OpenBLAS/SuiteSparse and then load AppleAccelerate internally.
-if "dense" in requested
-    println("\n>>> Running Dense LA Benchmarks <<<\n")
-    include(joinpath(BENCH_DIR, "bench_dense.jl"))
-end
+# (key, banner, filename) in a stable, sensible display order.
+const BENCHES = [
+    ("dense",  "Dense LA Benchmarks",        "bench_dense.jl"),
+    ("sparse", "Sparse Benchmarks",          "bench_sparse.jl"),
+    ("fft",    "FFT Benchmarks",             "bench_fft.jl"),
+    ("array",  "Array Operation Benchmarks", "bench_array.jl"),
+]
 
-if "sparse" in requested
-    println("\n>>> Running Sparse Benchmarks <<<\n")
-    include(joinpath(BENCH_DIR, "bench_sparse.jl"))
-end
+# Reuse the current project (the bench environment) for each child process.
+const PROJECT = something(Base.active_project(), joinpath(BENCH_DIR, "Project.toml"))
 
-# Ensure AppleAccelerate is loaded for remaining benchmarks
-if !isdefined(Main, :AppleAccelerate)
-    using AppleAccelerate
-end
-
-if "fft" in requested
-    println("\n>>> Running FFT Benchmarks <<<\n")
-    include(joinpath(BENCH_DIR, "bench_fft.jl"))
-end
-
-if "array" in requested
-    println("\n>>> Running Array Operation Benchmarks <<<\n")
-    include(joinpath(BENCH_DIR, "bench_array.jl"))
+for (key, banner, file) in BENCHES
+    key in requested || continue
+    println("\n>>> Running $banner (isolated process) <<<\n")
+    cmd = `$(Base.julia_cmd()) --project=$(PROJECT) $(joinpath(BENCH_DIR, file))`
+    run(pipeline(setenv(cmd, ENV); stdout, stderr))
 end
 
 println("\n" * "="^70)
