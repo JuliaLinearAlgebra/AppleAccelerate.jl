@@ -44,7 +44,9 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
   jetls_check:
     name: JETLS check
-    runs-on: ubuntu-latest
+    # macOS runner: on Linux the Sys.isapple() branches are inactive, so JETLS
+    # flags Apple-only globals (e.g. LIBSPARSE) as undefined.
+    runs-on: macOS-latest
     steps:
       - uses: actions/checkout@v7
       - uses: aviatesk/JETLS.jl/.github/actions/check@release
