@@ -358,7 +358,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             interleaved_out = Vector{$T}(undef, 2 * n)
             GC.@preserve X interleaved_out begin
                 LibAccelerate.$(Symbol(string("vDSP_polar", suff)))(
-                      Ptr{$T}(pointer(X)), 2, interleaved_out, 2, n)
+                      reinterpret($T, X), 2, interleaved_out, 2, n)
             end
             magnitudes = interleaved_out[1:2:end]
             angles = interleaved_out[2:2:end]
@@ -378,7 +378,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             result = Vector{Complex{$T}}(undef, n)
             GC.@preserve interleaved_in result begin
                 LibAccelerate.$(Symbol(string("vDSP_rect", suff)))(
-                      interleaved_in, 2, Ptr{$T}(pointer(result)), 2, n)
+                      interleaved_in, 2, reinterpret($T, result), 2, n)
             end
             return result
         end
