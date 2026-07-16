@@ -1442,48 +1442,361 @@ function _brfft1d(X::Vector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
     return result
 end
 
+# --- Internal 2D real FFT ---
+#
+# vDSP 2D real FFT (vDSP_fft2d_zrop) conventions, mapped to Julia's column-major
+# layout: Julia's first (contiguous) dimension is vDSP's N0 and the second is N1.
+# For an n1×n2 real input the transform works on an (n1/2)×n2 split-complex array.
+#
+# Input packing (same even/odd interleave as the 1D real FFT, along dim 1):
+#   realp[k, j] = x[2k-1, j],  imagp[k, j] = x[2k, j]
+#
+# Output packing (from Apple's vDSP_fft2d_zrip documentation, translated so that
+# H[k0, k1] is the full 2D DFT with k0 the dim-1 frequency and k1 the dim-2
+# frequency, both 0-based; h1 = n1/2, h2 = n2/2):
+#   * For 0 < k0 < h1 and all k1 (the "regular" region):
+#       C[k0+1, k1+1] = H[k0, k1]
+#   * Row 1 of C packs the two real-Hermitian columns k0 = 0 (in realp) and
+#     k0 = h1 (in imagp), each in 1D real-FFT packed order with Re/Im
+#     interleaved along dim 2 (verified empirically against FFTW):
+#       realp[1, 1] = H[0, 0]  (DC, real)      imagp[1, 1] = H[h1, 0]   (real)
+#       realp[1, 2] = H[0, h2] (Nyquist, real) imagp[1, 2] = H[h1, h2]  (real)
+#       for 0 < k1 < h2:
+#         realp[1, 2k1+1] = Re(H[0, k1])    imagp[1, 2k1+1] = Re(H[h1, k1])
+#         realp[1, 2k1+2] = Im(H[0, k1])    imagp[1, 2k1+2] = Im(H[h1, k1])
+#     The remaining H[0, k1] / H[h1, k1] for k1 > h2 follow from Hermitian
+#     symmetry: H[0, n2-k1] = conj(H[0, k1]), H[h1, n2-k1] = conj(H[h1, k1]).
+# Like the 1D real FFT, the forward output is scaled by 2 relative to the
+# mathematical DFT, and the inverse of the (unscaled) DFT coefficients returns
+# n1*n2 times the original signal.
+#
+# The unpacked result matches FFTW's `rfft(A)`: an (n1÷2+1)×n2 complex matrix.
+
+for (T, SC, fft2d_zrop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zropD),
+                            (Float32, :DSPSplitComplex, :vDSP_fft2d_zrop))
+    @eval begin
+        function _rfft2d(x::Matrix{$T}, setup::FFTSetup{$T})
+            n1, n2 = size(x)
+            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
+            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            log2n1 = trailing_zeros(n1)
+            log2n2 = trailing_zeros(n2)
+            h1 = n1 >> 1
+            h2 = n2 >> 1
+
+            # Even/odd split of the contiguous (first) dimension.
+            inp_realp = x[1:2:end, :]
+            inp_imagp = x[2:2:end, :]
+            out_realp = Matrix{$T}(undef, h1, n2)
+            out_imagp = Matrix{$T}(undef, h1, n2)
+
+            GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+                input = $SC(pointer(inp_realp), pointer(inp_imagp))
+                output = $SC(pointer(out_realp), pointer(out_imagp))
+                LibAccelerate.$fft2d_zrop(setup.plan, Ref(input), SIGNAL_STRIDE, 0,
+                                          Ref(output), SIGNAL_STRIDE, 0,
+                                          log2n1, log2n2, FFT_FORWARD)
+            end
+
+            # Unpack into FFTW `rfft` layout, dividing by 2 (vDSP forward scaling).
+            result = Matrix{Complex{$T}}(undef, h1 + 1, n2)
+            @inbounds for j in 1:n2, k in 2:h1
+                result[k, j] = complex(out_realp[k, j], out_imagp[k, j]) / 2
+            end
+            # Purely real corner points (DC/Nyquist combinations).
+            result[1, 1]        = complex(out_realp[1, 1] / 2)
+            result[h1+1, 1]     = complex(out_imagp[1, 1] / 2)
+            result[1, h2+1]     = complex(out_realp[1, 2] / 2)
+            result[h1+1, h2+1]  = complex(out_imagp[1, 2] / 2)
+            # Packed k0 = 0 and k0 = n1/2 rows; upper half via Hermitian symmetry.
+            @inbounds for k1 in 1:h2-1
+                result[1, k1+1]       = complex(out_realp[1, 2k1+1], out_realp[1, 2k1+2]) / 2
+                result[h1+1, k1+1]    = complex(out_imagp[1, 2k1+1], out_imagp[1, 2k1+2]) / 2
+                result[1, n2-k1+1]    = conj(result[1, k1+1])
+                result[h1+1, n2-k1+1] = conj(result[h1+1, k1+1])
+            end
+            return result
+        end
+
+        function _brfft2d(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T})
+            n2 = size(X, 2)
+            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
+            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            log2n1 = trailing_zeros(n1)
+            log2n2 = trailing_zeros(n2)
+            h1 = n1 >> 1
+            h2 = n2 >> 1
+            @assert size(X, 1) == h1 + 1 "input must have size (n1÷2+1)×n2"
+
+            # Pack the FFTW-layout coefficients back into the vDSP packed format
+            # (inverse of the unpacking above; the redundant upper halves of the
+            # k0 = 0 and k0 = n1/2 rows are dropped).
+            inp_realp = Matrix{$T}(undef, h1, n2)
+            inp_imagp = Matrix{$T}(undef, h1, n2)
+            @inbounds for j in 1:n2, k in 2:h1
+                inp_realp[k, j] = real(X[k, j])
+                inp_imagp[k, j] = imag(X[k, j])
+            end
+            inp_realp[1, 1] = real(X[1, 1])
+            inp_imagp[1, 1] = real(X[h1+1, 1])
+            inp_realp[1, 2] = real(X[1, h2+1])
+            inp_imagp[1, 2] = real(X[h1+1, h2+1])
+            @inbounds for k1 in 1:h2-1
+                inp_realp[1, 2k1+1] = real(X[1, k1+1])
+                inp_realp[1, 2k1+2] = imag(X[1, k1+1])
+                inp_imagp[1, 2k1+1] = real(X[h1+1, k1+1])
+                inp_imagp[1, 2k1+2] = imag(X[h1+1, k1+1])
+            end
+
+            out_realp = Matrix{$T}(undef, h1, n2)
+            out_imagp = Matrix{$T}(undef, h1, n2)
+
+            GC.@preserve inp_realp inp_imagp out_realp out_imagp begin
+                input = $SC(pointer(inp_realp), pointer(inp_imagp))
+                output = $SC(pointer(out_realp), pointer(out_imagp))
+                LibAccelerate.$fft2d_zrop(setup.plan, Ref(input), SIGNAL_STRIDE, 0,
+                                          Ref(output), SIGNAL_STRIDE, 0,
+                                          log2n1, log2n2, FFT_INVERSE)
+            end
+
+            # Unpack even/odd interleaved real output.
+            result = Matrix{$T}(undef, n1, n2)
+            @inbounds for j in 1:n2, k in 1:h1
+                result[2k - 1, j] = out_realp[k, j]
+                result[2k, j] = out_imagp[k, j]
+            end
+            return result
+        end
+    end
+end
+
+# --- Internal 1D real DFT (mixed-radix, non-power-of-2 lengths) ---
+#
+# vDSP_DFT_zrop uses the same even/odd input packing and DC/Nyquist output
+# packing as vDSP_fft_zrop, including the forward scaling by 2, but supports
+# lengths of the form f * 2^k with f ∈ {1, 3, 5, 15}. Setup creation returns
+# NULL for unsupported lengths.
+
+# Throw an informative error for an unsupported 1D real FFT length.
+@noinline function _unsupported_rfft_length(n::Integer)
+    throw(ArgumentError(string(
+        "unsupported real FFT length $n: AppleAccelerate supports power-of-2 real FFT ",
+        "lengths, plus mixed-radix lengths of the form f*2^k with f ∈ {3, 5, 15} ",
+        "(k ≥ 4) via Apple's real-input DFT. For other lengths, use FFTW.jl instead.")))
+end
+
+for (T, createfn, execfn) in ((Float64, :vDSP_DFT_zrop_CreateSetupD, :vDSP_DFT_ExecuteD),
+                              (Float32, :vDSP_DFT_zrop_CreateSetup, :vDSP_DFT_Execute))
+    @eval begin
+        # Create a real-input DFT setup; throws for unsupported lengths.
+        function _plan_rdft(n::Int, direction::Int, ::Type{$T})
+            setup = LibAccelerate.$createfn(C_NULL, n, Cint(direction))
+            setup == C_NULL && _unsupported_rfft_length(n)
+            return DFTSetup($T, Ptr{Cvoid}(setup), direction)
+        end
+
+        function _rfft1d_dft(x::Vector{$T})
+            n = length(x)
+            half = n >> 1
+            setup = _plan_rdft(n, DFT_FORWARD, $T)
+            Ir = x[1:2:end]
+            Ii = x[2:2:end]
+            Or = Vector{$T}(undef, half)
+            Oi = Vector{$T}(undef, half)
+            GC.@preserve setup begin
+                LibAccelerate.$execfn(setup.setup, Ir, Ii, Or, Oi)
+            end
+            result = Vector{Complex{$T}}(undef, half + 1)
+            result[1] = complex(Or[1] / 2)
+            @inbounds for k in 2:half
+                result[k] = complex(Or[k], Oi[k]) / 2
+            end
+            result[half + 1] = complex(Oi[1] / 2)
+            return result
+        end
+
+        function _brfft1d_dft(X::Vector{Complex{$T}}, n::Int)
+            half = n >> 1
+            length(X) == half + 1 || throw(DimensionMismatch(
+                "brfft: input must have length n÷2+1 = $(half + 1); got $(length(X))"))
+            setup = _plan_rdft(n, DFT_INVERSE, $T)
+            Ir = Vector{$T}(undef, half)
+            Ii = Vector{$T}(undef, half)
+            Ir[1] = real(X[1])
+            Ii[1] = real(X[half + 1])
+            @inbounds for k in 2:half
+                Ir[k] = real(X[k])
+                Ii[k] = imag(X[k])
+            end
+            Or = Vector{$T}(undef, half)
+            Oi = Vector{$T}(undef, half)
+            GC.@preserve setup begin
+                LibAccelerate.$execfn(setup.setup, Ir, Ii, Or, Oi)
+            end
+            result = Vector{$T}(undef, n)
+            @inbounds for k in 1:half
+                result[2k - 1] = Or[k]
+                result[2k] = Oi[k]
+            end
+            return result
+        end
+    end
+end
+
 # --- Public API: rfft (forward real FFT) ---
 
 """
-    plan_rfft(x::Vector{T}) where T <: Union{Float32, Float64}
+    plan_rfft(x::VecOrMat{T}) where T <: Union{Float32, Float64}
 
 Create a reusable FFT setup for real-input forward transforms of the same size as `x`.
+For a matrix, the setup covers both dimensions (and can also be reused for the
+matching inverse transforms).
 Wraps [`vDSP_create_fftsetup`](https://developer.apple.com/documentation/accelerate/vdsp_create_fftsetup).
 """
 plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
+plan_rfft(x::Matrix{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(max(size(x)...))
 
 """
-    rfft(x::Vector{T}, [setup::FFTSetup{T}])
+    rfft(x::VecOrMat{T}, [setup::FFTSetup{T}])
 
-Compute the forward FFT of a real-valued vector `x` via Apple vDSP.
-Returns the non-redundant complex coefficients of length `N÷2+1`.
-Input length must be a power of 2.
-Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
+Compute the forward FFT of a real-valued vector or matrix `x` via Apple vDSP.
+Returns the non-redundant complex coefficients: length `N÷2+1` for a vector of
+length `N`, and size `(n1÷2+1)×n2` for an `n1×n2` matrix (matching FFTW's `rfft`).
+
+For a 1D vector with no explicit `setup`, non-power-of-2 lengths supported by
+Apple's real-input mixed-radix DFT (`f * 2^k`, `f ∈ {3, 5, 15}`, `k ≥ 4`) are also
+accepted; an unsupported length throws an `ArgumentError`. With an explicit
+`setup::FFTSetup`, or for 2D inputs, all dimensions must be powers of 2.
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop) (1D) /
+[`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D) /
+[`vDSP_DFT_zrop_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_zrop_createsetup) (1D mixed-radix).
 """
 rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
-rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
+rfft(x::Matrix{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup)
+function rfft(x::Vector{T}) where {T<:Union{Float32,Float64}}
+    n = length(x)
+    ispow2(n) && return rfft(x, plan_rfft(x))
+    (iseven(n) && is_supported_fft_length(n)) || _unsupported_rfft_length(n)
+    return _rfft1d_dft(x)
+end
+rfft(x::Matrix{T}) where {T<:Union{Float32,Float64}} = rfft(x, plan_rfft(x))
 
 # --- Public API: brfft (backward/unnormalized inverse real FFT) ---
 
 """
     brfft(X::Vector{Complex{T}}, n::Int, [setup::FFTSetup{T}])
+    brfft(X::Matrix{Complex{T}}, n1::Int, [setup::FFTSetup{T}])
 
-Compute the unnormalized inverse real FFT, returning a real vector of length `n`.
-`X` must have length `n÷2+1`. The result is *not* divided by `n`;
-use [`irfft`](@ref) for the normalized version.
-Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
+Compute the unnormalized inverse real FFT, returning a real vector of length `n`
+(`X` must have length `n÷2+1`) or a real matrix of size `n1×n2` where
+`n2 = size(X, 2)` (`X` must have size `(n1÷2+1)×n2`). The result is *not* divided
+by the output length; use [`irfft`](@ref) for the normalized version.
+
+For a 1D input with no explicit `setup`, non-power-of-2 lengths supported by
+Apple's real-input mixed-radix DFT are also accepted (see [`rfft`](@ref)).
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop) (1D) /
+[`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D).
 """
 brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
-brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n, FFTSetup{T}(n))
+brfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft2d(X, n1, setup)
+function brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}}
+    ispow2(n) && return brfft(X, n, FFTSetup{T}(n))
+    (iseven(n) && is_supported_fft_length(n)) || _unsupported_rfft_length(n)
+    return _brfft1d_dft(X, n)
+end
+brfft(X::Matrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
+    brfft(X, n1, FFTSetup{T}(max(n1, size(X, 2))))
 
 # --- Public API: irfft (normalized inverse real FFT) ---
 
 """
     irfft(X::Vector{Complex{T}}, n::Int, [setup::FFTSetup{T}])
+    irfft(X::Matrix{Complex{T}}, n1::Int, [setup::FFTSetup{T}])
 
-Compute the normalized inverse real FFT, returning a real vector of length `n`.
-Satisfies `irfft(rfft(x), length(x)) ≈ x`.
-Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop).
+Compute the normalized inverse real FFT, returning a real vector of length `n`
+or a real matrix of size `n1×n2` where `n2 = size(X, 2)`.
+Satisfies `irfft(rfft(x), size(x, 1)) ≈ x`.
+
+For a 1D input with no explicit `setup`, non-power-of-2 lengths supported by
+Apple's real-input mixed-radix DFT are also accepted (see [`rfft`](@ref)).
+Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop) (1D) /
+[`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D).
 """
 irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
-irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = irfft(X, n, FFTSetup{T}(n))
+irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n) ./ n
+irfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+    brfft(X, n1, setup) ./ (n1 * size(X, 2))
+irfft(X::Matrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
+    brfft(X, n1) ./ (n1 * size(X, 2))
+
+# --- Batched 1D complex FFT (vDSP_fftm_*) ---
+
+for (T, SC, fftm_zop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fftm_zopD),
+                          (Float32, :DSPSplitComplex, :vDSP_fftm_zop))
+    @eval begin
+        function _fftm(x::Matrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T}, direction::Int)
+            dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
+            nrows, ncols = size(x)
+            n = size(x, dims)                      # transform length
+            m = dims == 1 ? ncols : nrows          # number of transforms
+            @assert ispow2(n) "transform length must be a power of 2"
+            logn = trailing_zeros(n)
+            # Julia is column-major: for column transforms (dims=1) the element
+            # stride is 1 and consecutive transforms are nrows apart; for row
+            # transforms (dims=2) it is the other way around.
+            elstride, batchstride = dims == 1 ? (1, nrows) : (nrows, 1)
+
+            realp = $T.(real.(x))
+            imagp = $T.(imag.(x))
+            retr = Matrix{$T}(undef, nrows, ncols)
+            reti = Matrix{$T}(undef, nrows, ncols)
+
+            GC.@preserve realp imagp retr reti begin
+                input = $SC(pointer(realp), pointer(imagp))
+                output = $SC(pointer(retr), pointer(reti))
+                LibAccelerate.$fftm_zop(setup.plan, Ref(input), elstride, batchstride,
+                                        Ref(output), elstride, batchstride,
+                                        logn, m, direction)
+            end
+
+            return complex.(retr, reti)
+        end
+    end
+end
+
+"""
+    fft(x::Matrix{Complex{T}}, dims::Integer, [setup::FFTSetup{T}])
+
+Batched 1D forward FFT: transform each column (`dims = 1`) or each row
+(`dims = 2`) of `x` independently, like FFTW's `fft(x, dims)`. The transform
+length (`size(x, dims)`) must be a power of 2.
+Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
+"""
+fft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+    _fftm(x, dims, setup, FFT_FORWARD)
+fft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+    fft(x, dims, FFTSetup{T}(size(x, dims)))
+
+"""
+    bfft(x::Matrix{Complex{T}}, dims::Integer, [setup::FFTSetup{T}])
+
+Batched 1D unnormalized inverse (backward) FFT along dimension `dims`
+(1 = columns, 2 = rows). Use [`ifft`](@ref) for the normalized version.
+Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
+"""
+bfft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+    _fftm(x, dims, setup, FFT_INVERSE)
+bfft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+    bfft(x, dims, FFTSetup{T}(size(x, dims)))
+
+"""
+    ifft(x::Matrix{Complex{T}}, dims::Integer, [setup::FFTSetup{T}])
+
+Batched 1D normalized inverse FFT along dimension `dims` (1 = columns, 2 = rows).
+Satisfies `ifft(fft(x, dims), dims) ≈ x`.
+Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
+"""
+ifft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+    bfft(x, dims, setup) ./ size(x, dims)
+ifft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+    bfft(x, dims) ./ size(x, dims)

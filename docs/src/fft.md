@@ -8,10 +8,10 @@ using AppleAccelerate
 
 ## FFT
 
-The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. A **1D complex** `fft`/`ifft`/`bfft` (called without an explicit `plan_fft` setup) accepts lengths of the form `f * 2^k` with `f ∈ {1, 3, 5, 15}` — powers of two use vDSP's fast FFT path, while other supported lengths transparently use Apple's mixed-radix DFT (see [`is_supported_fft_length`](@ref AppleAccelerate.is_supported_fft_length)). **2D transforms and the real FFT (`rfft`/`brfft`) remain power-of-2 only.** Unsupported 1D lengths throw an `ArgumentError`.
+The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. A **1D** `fft`/`ifft`/`bfft`/`rfft`/`irfft` (called without an explicit `plan_fft` setup) accepts lengths of the form `f * 2^k` with `f ∈ {1, 3, 5, 15}` — powers of two use vDSP's fast FFT path, while other supported lengths transparently use Apple's mixed-radix DFT (see [`is_supported_fft_length`](@ref AppleAccelerate.is_supported_fft_length); the real-input DFT additionally requires `k ≥ 4`). **2D transforms remain power-of-2 only.** Unsupported lengths throw an `ArgumentError`.
 
 !!! note "Choosing between AppleAccelerate and FFTW"
-    AppleAccelerate's FFT is a direct vDSP binding: 1-D complex transforms support `f * 2^k` lengths (`f ∈ {1, 3, 5, 15}`), while 2-D transforms and the real FFT are power-of-2 only. Only 1-D vectors and 2-D matrices are supported, and it is reached exclusively through the `AppleAccelerate.` prefix. It does **not** plug into the AbstractFFTs.jl interface — loading AppleAccelerate never changes what `fft`/`plan_fft` do in your session, and will never override FFTW.jl.
+    AppleAccelerate's FFT is a direct vDSP binding: 1-D transforms support `f * 2^k` lengths (`f ∈ {1, 3, 5, 15}`), while 2-D transforms are power-of-2 only. Only 1-D vectors and 2-D matrices are supported, and it is reached exclusively through the `AppleAccelerate.` prefix. It does **not** plug into the AbstractFFTs.jl interface — loading AppleAccelerate never changes what `fft`/`plan_fft` do in your session, and will never override FFTW.jl.
 
     For general sizes, 3-D and higher arrays, dimension-selective (`region`) transforms, or the standard Julia FFT interface, use [FFTW.jl](https://github.com/JuliaMath/FFTW.jl). vDSP is mainly competitive at small transform sizes; FFTW is typically faster at larger ones.
 
@@ -42,6 +42,20 @@ nothing # hide
 x2 = randn(ComplexF64, 16, 32)
 X2 = AppleAccelerate.fft(x2)
 x2_recovered = AppleAccelerate.ifft(X2)
+nothing # hide
+```
+
+### Batched 1D FFT
+
+Passing a `dims` argument (1 = each column, 2 = each row) computes a batch of
+independent 1D transforms over a matrix in a single call, like FFTW's
+`fft(A, dims)`. This wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop). The transform length (`size(A, dims)`) must be a power of 2:
+
+```@example fft
+A = randn(ComplexF64, 16, 8)
+F = AppleAccelerate.fft(A, 1)     # FFT of each column
+A1 = AppleAccelerate.ifft(F, 1)   # normalized inverse
+@assert A1 ≈ A
 nothing # hide
 ```
 
@@ -78,6 +92,18 @@ x = randn(Float64, 1024)
 X = AppleAccelerate.rfft(x)          # Complex vector of length 513
 x_recovered = AppleAccelerate.irfft(X, 1024)  # Back to real, length 1024
 @assert x_recovered ≈ x
+nothing # hide
+```
+
+1D real transforms called without an explicit setup also accept non-power-of-2 lengths of the form `f * 2^k` with `f ∈ {3, 5, 15}` and `k ≥ 4` (e.g. 48, 160, 240), via Apple's real-input mixed-radix DFT ([`vDSP_DFT_zrop_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_zrop_createsetup)).
+
+2D real FFT is supported for power-of-2 dimensions and matches FFTW's `rfft` layout — an `n1×n2` real matrix transforms to an `(n1÷2+1)×n2` complex matrix:
+
+```@example fft
+x2 = randn(Float64, 16, 32)
+X2 = AppleAccelerate.rfft(x2)                # 9×32 complex matrix
+x2_recovered = AppleAccelerate.irfft(X2, 16) # back to real, 16×32
+@assert x2_recovered ≈ x2
 nothing # hide
 ```
 

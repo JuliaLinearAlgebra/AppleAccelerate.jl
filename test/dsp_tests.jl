@@ -254,6 +254,124 @@ end
     end
 end
 
+@testset "rfft 2D" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            # Non-square sizes (16×32 and 32×16) catch dimension swaps.
+            for sz in ((8, 8), (16, 32), (32, 16), (64, 64))
+                x = randn(T, sz...)
+                result = AppleAccelerate.rfft(x)
+                expected = FFTW.rfft(x)
+                @test size(result) == (sz[1] ÷ 2 + 1, sz[2])
+                if T == Float64
+                    @test result ≈ expected
+                else
+                    @test result ≈ expected rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        x = randn(Float64, 16, 32)
+        setup = AppleAccelerate.plan_rfft(x)
+        @test AppleAccelerate.rfft(x, setup) ≈ FFTW.rfft(x)
+        @test AppleAccelerate.rfft(x, setup) ≈ FFTW.rfft(x)  # reuse
+    end
+
+    # Non-power-of-2 dimensions are rejected.
+    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 8, 12))
+    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 12, 8))
+end
+
+@testset "brfft and irfft 2D roundtrip" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            for sz in ((8, 8), (16, 32), (32, 16), (64, 64))
+                x = randn(T, sz...)
+                X = AppleAccelerate.rfft(x)
+                n1 = sz[1]
+                if T == Float64
+                    @test AppleAccelerate.brfft(X, n1) ./ length(x) ≈ x
+                    @test AppleAccelerate.irfft(X, n1) ≈ x
+                else
+                    @test AppleAccelerate.brfft(X, n1) ./ length(x) ≈ x rtol=sqrt(eps(Float32))
+                    @test AppleAccelerate.irfft(X, n1) ≈ x rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        x = randn(Float64, 32, 16)
+        setup = AppleAccelerate.plan_rfft(x)
+        X = AppleAccelerate.rfft(x, setup)
+        @test AppleAccelerate.irfft(X, 32, setup) ≈ x
+    end
+end
+
+@testset "rfft non-power-of-2 (mixed-radix)" begin
+    # Lengths f * 2^k with f ∈ {3, 5, 15} supported by vDSP_DFT_zrop.
+    supported = (48, 96, 160, 240, 480)
+    for T in (Float64, Float32)
+        @testset "$T n=$n" for n in supported
+            x = randn(T, n)
+            result = AppleAccelerate.rfft(x)
+            expected = FFTW.rfft(x)
+            if T == Float64
+                @test result ≈ expected
+                @test AppleAccelerate.brfft(result, n) ./ n ≈ x
+                @test AppleAccelerate.irfft(result, n) ≈ x
+            else
+                @test result ≈ expected rtol=sqrt(eps(Float32))
+                @test AppleAccelerate.brfft(result, n) ./ n ≈ x rtol=sqrt(eps(Float32))
+                @test AppleAccelerate.irfft(result, n) ≈ x rtol=sqrt(eps(Float32))
+            end
+        end
+    end
+
+    @testset "unsupported lengths throw" begin
+        for n in (100, 63, 7)  # odd cofactor not in {1,3,5,15} or odd length
+            @test_throws ArgumentError AppleAccelerate.rfft(randn(Float64, n))
+            @test_throws ArgumentError AppleAccelerate.irfft(randn(ComplexF64, n ÷ 2 + 1), n)
+        end
+    end
+end
+
+@testset "batched fft (fftm)" begin
+    for T in (ComplexF64, ComplexF32)
+        RT = real(T)
+        @testset "$T" begin
+            for sz in ((16, 8), (32, 5), (8, 64))
+                A = randn(T, sz...)
+                for dims in (1, 2)
+                    ispow2(size(A, dims)) || continue
+                    result = AppleAccelerate.fft(A, dims)
+                    expected = FFTW.fft(A, dims)
+                    if T == ComplexF64
+                        @test result ≈ expected
+                        @test AppleAccelerate.bfft(result, dims) ./ size(A, dims) ≈ A
+                        @test AppleAccelerate.ifft(result, dims) ≈ A
+                    else
+                        @test result ≈ expected rtol=sqrt(eps(RT))
+                        @test AppleAccelerate.bfft(result, dims) ./ size(A, dims) ≈ A rtol=sqrt(eps(RT))
+                        @test AppleAccelerate.ifft(result, dims) ≈ A rtol=sqrt(eps(RT))
+                    end
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        A = randn(ComplexF64, 16, 8)
+        setup = AppleAccelerate.plan_fft(16, Float64)
+        @test AppleAccelerate.fft(A, 1, setup) ≈ FFTW.fft(A, 1)
+        @test AppleAccelerate.ifft(FFTW.fft(A, 1), 1, setup) ≈ A
+    end
+
+    @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF64, 16, 8), 3)
+end
+
 @testset "does not hijack FFTW planning (#139)" begin
     # Loading AppleAccelerate must not claim AbstractFFTs.plan_fft, which would
     # break generic FFT planning for sizes vDSP cannot handle.
