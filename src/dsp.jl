@@ -230,6 +230,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
             setup = ccall(($(string("vDSP_biquad_CreateSetup", Dsuff), libacc)),  Ptr{Cvoid},
                           (Ptr{Float64}, UInt64),
                           coefficients, sections)
+            setup == C_NULL && error("vDSP_biquad_CreateSetup$($Dsuff) failed to create a setup for $sections section(s)")
             return Biquad($T, setup, sections)
         end
     end
@@ -336,6 +337,7 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
             setup = ccall(($(string("vDSP_biquadm_CreateSetup", Dsuff)), libacc), Ptr{Cvoid},
                           (Ptr{Float64}, UInt64, UInt64),
                           coefficients, sections, channels)
+            setup == C_NULL && error("vDSP_biquadm_CreateSetup$($Dsuff) failed to create a setup for $channels channel(s) and $sections section(s)")
             return BiquadMulti($T, setup, channels, sections)
         end
 
@@ -784,6 +786,7 @@ function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     setup::Ptr{Cvoid} = ccall(("vDSP_DCT_CreateSetup", libacc), Ptr{Cvoid},
                              (Ptr{Cvoid}, UInt64, UInt64),
                              previous, length, dct_type)
+    setup == C_NULL && error("vDSP_DCT_CreateSetup failed to create a setup for length $length and DCT type $dct_type")
     return DFTSetup(Float32, setup, 0)
 end
 

@@ -1,13 +1,30 @@
 # Benchmarks
 
-All benchmarks were run on an Apple M2 Max, macOS 26, single-threaded, with Julia 1.12.6 and AppleAccelerate.jl v0.8.0. Times are the minimum of 5 trials.
+All benchmarks were run on an Apple M2 Max, macOS 26, single-threaded, with Julia 1.12.6 and AppleAccelerate.jl v0.8.0 (all tables measured July 2026). Times are the minimum of 5 trials.
 
 Single-threaded execution is used to compare **kernel quality** on a level footing. This is *not* representative of how OpenBLAS is normally deployed — OpenBLAS scales GEMM across CPU cores, whereas Accelerate offloads large GEMM to a shared SME co-processor that a single thread already saturates. See the GEMM note below for a multi-threaded comparison.
 
-Run the full benchmark suite with:
+## How these benchmarks are generated
+
+Every table on this page is produced by the scripts in
+[`test/bench/`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/tree/master/test/bench),
+driven by
+[`run_benchmarks.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/run_benchmarks.jl):
 
 ```
-julia --project=test/bench test/bench/run_benchmarks.jl
+julia --project=test/bench test/bench/run_benchmarks.jl          # all suites
+julia --project=test/bench test/bench/run_benchmarks.jl dense    # one suite
+```
+
+Each suite runs in its own fresh Julia process so that the OpenBLAS/SuiteSparse
+baselines are measured *before* AppleAccelerate is loaded (loading it forwards
+BLAS/LAPACK through libblastrampoline for the rest of the process). All suites
+default to a single thread; the dense suite additionally honors a
+`BENCH_THREADS` environment variable for thread-scaling sweeps like the GEMM
+table below:
+
+```
+BENCH_THREADS=4 julia --project=test/bench test/bench/run_benchmarks.jl dense
 ```
 
 ## Array Operations
@@ -86,7 +103,9 @@ Single-threaded, Accelerate is 6–13× faster for matrix multiply, with the lar
     - **OpenBLAS** runs GEMM on the CPU's P-cores (NEON), and **scales with thread count**.
     - **Accelerate** dispatches large GEMM to the **SME/AMX matrix co-processor** — a
       dedicated unit shared *per core cluster*. This is a CPU-side co-processor, **not** the
-      GPU, and it does support Float64. Because each unit is shared and a single thread on
+      GPU (Apple GPUs do not natively support Float64, and
+      [Apple documents Accelerate as CPU-based](https://developer.apple.com/documentation/accelerate#overview)).
+      Because each unit is shared and a single thread on
       that cluster already saturates it, Accelerate GEMM throughput scales only with the
       number of co-processors (i.e. the number of core clusters), **not** with
       `BLAS.set_num_threads` beyond that.
@@ -116,7 +135,9 @@ Single-threaded, Accelerate is 6–13× faster for matrix multiply, with the lar
     Accelerate still wins here, but the single-threaded speedups above should be read as a
     kernel-quality comparison, not as the gap you will see against a fully-threaded OpenBLAS.
     See Apple's [CPU optimization guide](https://developer.apple.com/documentation/apple-silicon/cpu-optimization-guide)
-    for details on the SME engine.
+    for details on the SME engine, and [arXiv:2409.18779](https://arxiv.org/abs/2409.18779)
+    for independent benchmarks of matrix-multiply throughput on Apple Silicon's
+    matrix co-processor.
 
 ### Factorizations (Float64) — time in μs (lower is better)
 
