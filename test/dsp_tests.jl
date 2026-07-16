@@ -15,6 +15,57 @@
         got = AppleAccelerate.dct(Float32.(r))
         @test Float64.(got) ≈ ref rtol = (T == Float32 ? 1e-3 : 1e-4)
     end
+
+    @testset "Float64 input throws (no Float64 DCT in Accelerate)" begin
+        # vDSP has no vDSP_DCT_CreateSetupD/vDSP_DCT_ExecuteD; the wrapper must
+        # reject Float64 with a clear ArgumentError rather than a MethodError.
+        x = rand(Float64, 64)
+        @test_throws ArgumentError AppleAccelerate.dct(x)
+        @test_throws ArgumentError AppleAccelerate.dct(x, 3)
+        @test_throws ArgumentError AppleAccelerate.dct(x, AppleAccelerate.plan_dct(64, 2))
+        @test_throws ArgumentError AppleAccelerate.idct(x)
+    end
+
+    @testset "idct (inverse DCT via DCT-III)" begin
+        n = 2^10
+        x = rand(Float32, n)
+        # Round-trip: idct is normalized so that idct(dct(x)) ≈ x.
+        @test AppleAccelerate.idct(AppleAccelerate.dct(x)) ≈ x rtol=sqrt(eps(Float32))
+        # Cross-check against DSP.jl's orthonormal inverse DCT with the fixed
+        # vDSP-to-orthonormal scaling (see the DCT testset comment above).
+        scale = fill(sqrt(n / 2), n); scale[1] = sqrt(n)
+        X_ortho = Float32.(DSP.dct(Float64.(x)))
+        @test AppleAccelerate.idct(X_ortho .* Float32.(scale)) ≈ x rtol=1e-3
+    end
+end
+
+@testset "FFT setup cache" begin
+    # Repeated no-plan calls must give identical results and reuse one shared setup.
+    for T in (ComplexF32, ComplexF64)
+        r = randn(T, 256)
+        @test AppleAccelerate.fft(r) == AppleAccelerate.fft(r)
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(r)) ≈ r
+    end
+    # The cache hands back the same FFTSetup object for the same (T, log2n, radix).
+    s1 = AppleAccelerate._cached_fftsetup(Float32, 256)
+    s2 = AppleAccelerate._cached_fftsetup(Float32, 256)
+    @test s1 === s2
+    @test s1 isa AppleAccelerate.FFTSetup{Float32}
+    @test haskey(AppleAccelerate._FFT_SETUP_CACHE, (Float32, 8, 2))
+    @test AppleAccelerate._cached_fftsetup(Float64, 256) !==
+          AppleAccelerate._cached_fftsetup(Float64, 512)
+    # Real FFT convenience path shares the same cache.
+    x = randn(Float64, 128)
+    @test AppleAccelerate.rfft(x) == AppleAccelerate.rfft(x)
+    @test AppleAccelerate.irfft(AppleAccelerate.rfft(x), 128) ≈ x
+    # Mixed-radix (DFT) convenience path is cached too, keyed by (T, n, direction).
+    y = randn(ComplexF64, 96)
+    @test AppleAccelerate.fft(y) == AppleAccelerate.fft(y)
+    @test haskey(AppleAccelerate._DFT_SETUP_CACHE, (Float64, 96, AppleAccelerate.DFT_FORWARD))
+    @test AppleAccelerate._cached_dftsetup(Float64, 96, AppleAccelerate.DFT_FORWARD) ===
+          AppleAccelerate._cached_dftsetup(Float64, 96, AppleAccelerate.DFT_FORWARD)
+    # Explicit plan API still returns fresh, uncached setups.
+    @test AppleAccelerate.plan_fft(256, Float32) !== AppleAccelerate.plan_fft(256, Float32)
 end
 
 @testset "fft::Float64" begin
