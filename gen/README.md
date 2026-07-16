@@ -30,8 +30,24 @@ so it needs Xcode or the Command Line Tools) and overwrites `src/lib/LibAccelera
 The committed output is self-contained — **end users need only the runtime
 framework that ships with every Mac**, not the headers or Clang.jl.
 
-Generation is deterministic: re-running with the same SDK produces byte-identical
-output, so CI can regenerate and diff to catch drift when a new SDK adds symbols.
+## Reproducibility
+
+Generation is deterministic **per machine**: re-running with the same SDK *and* the
+same macOS runtime produces byte-identical output. It is not deterministic across
+machines, because:
+
+- The dead-symbol strip pass `dlopen`s the **live** framework at
+  `/System/Library/Frameworks/Accelerate.framework/Accelerate` (not the SDK), so the
+  set of stripped wrappers depends on which symbols the running macOS version exports.
+- Clang.jl names anonymous structs with a global counter (`var"##Ctag#NNN"`). These
+  names renumber **wholesale** when SDK headers add or remove any anonymous type, so
+  even a small SDK update can produce a large, mechanical diff in the committed output.
+
+There is currently no CI job that regenerates and diffs the output; drift against a
+new SDK is caught by re-running the generator manually. To make silent drift harder,
+`generate.jl` pins Clang.jl (via `Project.toml` `[compat]`) and every
+post-processing pass **errors** if an expected
+transformation finds zero matches instead of silently no-opping.
 
 ## Scope
 
@@ -46,6 +62,8 @@ coverage by appending headers to that list.
   post-processes the output to strip the `cblas_*`/`catlas_*`/`clapack_*` wrappers.
 - `LinearAlgebra/` — C++ generics, not C-mappable.
 - `Sparse/BLAS.h` dense×sparse multiply — C++ name-mangled (hand-wrapped elsewhere).
+- vImage — a separate Accelerate sub-framework (not part of vecLib), not currently
+  in scope.
 
 ## Known limitations
 
@@ -62,4 +80,4 @@ coverage by appending headers to that list.
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
 | `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
 | `shims/bnns_graph_shim.h` | Neutralizes availability attributes that break Clang.jl |
-| `Project.toml` | Pins Clang.jl for the generator environment |
+| `Project.toml` | Generator environment; `[compat]` pins Clang.jl |
