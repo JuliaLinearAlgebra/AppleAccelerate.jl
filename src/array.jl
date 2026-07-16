@@ -449,6 +449,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
             function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+                length(result) == length(X) ||
+                    throw(DimensionMismatch("result and X must have the same length"))
                 LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(X, 1, Ref(c), result, 1, length(result))
                 return result
             end
@@ -479,6 +481,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
         function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+            length(result) == length(X) ||
+                throw(DimensionMismatch("result and X must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vsadd", suff)))(X, 1, Ref(-c), result, 1, length(result))
             return result
         end
@@ -509,6 +513,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
         function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+            length(result) == length(X) ||
+                throw(DimensionMismatch("result and X must have the same length"))
             # c - X == X * (-1) + c, computed in one pass via vDSP_vsmsa (D = A*B + C)
             LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(X, 1, Ref(-one($T)), Ref(c), result, 1, length(result))
             return result
@@ -562,6 +568,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         f! = Symbol("$(f)!")
         @eval begin
             function ($f!)(result::Vector{$T}, X::Vector{$T})
+                length(result) >= length(X) ||
+                    throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,result,1,length(X))
                 return result
             end
@@ -619,6 +627,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vtmerg!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+            (length(X) == length(Y) == length(result)) ||
+                throw(DimensionMismatch("result, X and Y must have the same length"))
             LibAccelerate.$(Symbol(string("vDSP_vtmerg", suff)))(X,1,Y,1,result,1,length(X))
             return result
         end
@@ -643,6 +653,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function svdiv!(result::Vector{$T}, X::Vector{$T}, c::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_svdiv", suff)))(Ref(c),X,1,result,1,length(X))
             return result
         end
@@ -1061,6 +1073,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return result
         end
         function vrampmul!(result::Vector{$T}, X::Vector{$T}, start::$T, step::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             s = Ref{$T}(start)
             LibAccelerate.$(Symbol(string("vDSP_vrampmul", suff)))(X,1,s,Ref(step),result,1,length(X))
             return result
@@ -1119,6 +1133,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vrsum!(result::Vector{$T}, X::Vector{$T}, scale::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vrsum", suff)))(X,1,Ref(scale),result,1,length(X))
             return result
         end
@@ -1127,6 +1143,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vrsum!(result, X, scale)
         end
         function vsimps!(result::Vector{$T}, X::Vector{$T}, step::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vsimps", suff)))(X,1,Ref(step),result,1,length(X))
             return result
         end
@@ -1135,6 +1153,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vsimps!(result, X, step)
         end
         function vtrapz!(result::Vector{$T}, X::Vector{$T}, step::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vtrapz", suff)))(X,1,Ref(step),result,1,length(X))
             return result
         end
@@ -1233,6 +1253,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vpoly!(result::Vector{$T}, coeffs::Vector{$T}, X::Vector{$T})
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vpoly", suff)))(coeffs,1,X,1,result,1,length(X),length(coeffs) - 1)
             return result
         end
@@ -1257,6 +1279,8 @@ Evaluate polynomial at each point in `X`. Coefficients are highest degree first:
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vnormalize!(result::Vector{$T}, X::Vector{$T})
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             mean_out = Ref{$T}(0.0)
             stddev_out = Ref{$T}(0.0)
             LibAccelerate.$(Symbol(string("vDSP_normalize", suff)))(X,1,result,1,mean_out,stddev_out,length(X))
@@ -1519,6 +1543,8 @@ end
 
 # --- Integer operations (Int32) ---
 function vaddi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
+    (length(A) == length(B) == length(C)) ||
+        throw(DimensionMismatch("C, A and B must have the same length"))
     LibAccelerate.vDSP_vaddi(A,1,B,1,C,1,length(A))
     return C
 end
@@ -1528,6 +1554,8 @@ function vaddi(A::Vector{Int32}, B::Vector{Int32})
 end
 
 function vabsi!(C::Vector{Int32}, A::Vector{Int32})
+    length(C) >= length(A) ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
     LibAccelerate.vDSP_vabsi(A,1,C,1,length(A))
     return C
 end
@@ -1542,6 +1570,8 @@ function vfilli!(C::Vector{Int32}, a::Int32)
 end
 
 function veqvi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
+    (length(A) == length(B) == length(C)) ||
+        throw(DimensionMismatch("C, A and B must have the same length"))
     LibAccelerate.vDSP_veqvi(A,1,B,1,C,1,length(A))
     return C
 end
