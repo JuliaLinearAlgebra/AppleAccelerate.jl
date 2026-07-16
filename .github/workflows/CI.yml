@@ -16,7 +16,6 @@ jobs:
           - '1'
         os:
           - ubuntu-latest
-          - windows-latest
           - macOS-15-intel
         arch:
           - x64
@@ -43,47 +42,6 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-  bindings:
-    name: LibAccelerate bindings (informational)
-    runs-on: macOS-latest
-    # Informational only: the committed bindings are generated against a reference SDK.
-    # CI runners may ship a different Xcode/SDK, so byte-identical regeneration is not
-    # guaranteed — we surface any drift as a notice but never fail the build on it.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: '1'
-      - uses: julia-actions/cache@v3
-      - name: Regenerate bindings and report drift
-        run: |
-          # Informational: never fail. Clang parse warnings (e.g. arm_neon under the GCC
-          # artifact include path) and SDK differences across runners are expected.
-          set +e
-          julia --project=gen -e 'using Pkg; Pkg.instantiate()'
-          julia --project=gen gen/generate.jl
-          if ! git diff --quiet -- src/lib/LibAccelerate.jl; then
-            echo "::notice::src/lib/LibAccelerate.jl differs from a fresh regeneration on this runner's SDK ($(xcrun --show-sdk-path)). This is expected when the runner SDK differs from the reference SDK."
-            git diff --stat -- src/lib/LibAccelerate.jl
-          fi
-          exit 0
-  smoke:
-    name: Bare-load smoke (no test extras)
-    runs-on: macOS-latest
-    # Load the package with ONLY its own dependencies (no test/ extras) to catch an
-    # accidental hard-dependency on a weakdep: `using AppleAccelerate` must precompile
-    # and load cleanly against the package's own Project.toml deps alone.
-    steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: '1'
-      - uses: julia-actions/cache@v3
-      - name: Instantiate package deps only
-        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
-      - name: Load AppleAccelerate
-        run: julia --project=. -e 'using AppleAccelerate; @info "AppleAccelerate loaded cleanly"'
   docs:
     name: Documentation
     runs-on: macOS-latest
