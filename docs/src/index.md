@@ -17,7 +17,7 @@ Pkg.add("AppleAccelerate")
 |---------|---------|---------|
 | Dense Linear Algebra | [BLAS](https://developer.apple.com/documentation/accelerate/blas) / [LAPACK](https://developer.apple.com/documentation/accelerate/solving-systems-of-linear-equations-with-lapack) | Automatic forwarding via LBT — `lu`, `qr`, `svd`, `mul!`, etc. |
 | Array Operations | [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) / [vecLib](https://developer.apple.com/documentation/accelerate/veclib) | Element-wise math (`exp`, `sin`, `log`), reductions, vector arithmetic |
-| FFT & Transforms | [vDSP FFT](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) | Complex/real FFT (1D/2D, power-of-2), DFT, DCT — direct vDSP bindings under the `AppleAccelerate.` namespace |
+| FFT & Transforms | [vDSP FFT](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) | Complex FFT (1D `f*2^k` with `f ∈ {1,3,5,15}`, 2D power-of-2), real FFT (power-of-2), DFT, DCT — direct vDSP bindings under the `AppleAccelerate.` namespace |
 | Filtering & Spectral | [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) | Convolution, biquad IIR, spectral analysis, window functions |
 | Sparse Linear Algebra | [Sparse Solvers](https://developer.apple.com/documentation/accelerate/sparse_solvers) | SpMV, direct solvers (QR, Cholesky, LDLT), factorization reuse (`refactor!`) |
 | Neural Network Primitives | [BNNS](https://developer.apple.com/documentation/accelerate/bnns) | `Float32` matmul and activations — see [BNNS](@ref "Neural Network Primitives (BNNS)") |
@@ -34,7 +34,7 @@ elsewhere in your session does. See [Architecture](@ref architecture).
 
 !!! warning "Key Limitations"
     - **macOS only** — this package uses Apple's Accelerate framework, which is not available on Linux or Windows.
-    - **FFT requires power-of-2 sizes** — use FFTW.jl for arbitrary sizes. DFT supports `f * 2^n` where `f ∈ {1, 3, 5, 15}`.
+    - **FFT size limits** — 1D complex `fft`/`ifft`/`bfft` support lengths `f * 2^k` with `f ∈ {1, 3, 5, 15}`; 2D transforms and the real FFT (`rfft`/`brfft`) are power-of-2 only. DFT also supports `f * 2^n` where `f ∈ {1, 3, 5, 15}`. Use FFTW.jl for other sizes or N-D transforms.
     - **Float32/Float64 only** — no support for integer or extended-precision types.
 
 ## Quick Start
