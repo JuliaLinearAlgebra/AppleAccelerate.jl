@@ -15,6 +15,57 @@
         got = AppleAccelerate.dct(Float32.(r))
         @test Float64.(got) ≈ ref rtol = (T == Float32 ? 1e-3 : 1e-4)
     end
+
+    @testset "Float64 input throws (no Float64 DCT in Accelerate)" begin
+        # vDSP has no vDSP_DCT_CreateSetupD/vDSP_DCT_ExecuteD; the wrapper must
+        # reject Float64 with a clear ArgumentError rather than a MethodError.
+        x = rand(Float64, 64)
+        @test_throws ArgumentError AppleAccelerate.dct(x)
+        @test_throws ArgumentError AppleAccelerate.dct(x, 3)
+        @test_throws ArgumentError AppleAccelerate.dct(x, AppleAccelerate.plan_dct(64, 2))
+        @test_throws ArgumentError AppleAccelerate.idct(x)
+    end
+
+    @testset "idct (inverse DCT via DCT-III)" begin
+        n = 2^10
+        x = rand(Float32, n)
+        # Round-trip: idct is normalized so that idct(dct(x)) ≈ x.
+        @test AppleAccelerate.idct(AppleAccelerate.dct(x)) ≈ x rtol=sqrt(eps(Float32))
+        # Cross-check against DSP.jl's orthonormal inverse DCT with the fixed
+        # vDSP-to-orthonormal scaling (see the DCT testset comment above).
+        scale = fill(sqrt(n / 2), n); scale[1] = sqrt(n)
+        X_ortho = Float32.(DSP.dct(Float64.(x)))
+        @test AppleAccelerate.idct(X_ortho .* Float32.(scale)) ≈ x rtol=1e-3
+    end
+end
+
+@testset "FFT setup cache" begin
+    # Repeated no-plan calls must give identical results and reuse one shared setup.
+    for T in (ComplexF32, ComplexF64)
+        r = randn(T, 256)
+        @test AppleAccelerate.fft(r) == AppleAccelerate.fft(r)
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(r)) ≈ r
+    end
+    # The cache hands back the same FFTSetup object for the same (T, log2n, radix).
+    s1 = AppleAccelerate._cached_fftsetup(Float32, 256)
+    s2 = AppleAccelerate._cached_fftsetup(Float32, 256)
+    @test s1 === s2
+    @test s1 isa AppleAccelerate.FFTSetup{Float32}
+    @test haskey(AppleAccelerate._FFT_SETUP_CACHE, (Float32, 8, 2))
+    @test AppleAccelerate._cached_fftsetup(Float64, 256) !==
+          AppleAccelerate._cached_fftsetup(Float64, 512)
+    # Real FFT convenience path shares the same cache.
+    x = randn(Float64, 128)
+    @test AppleAccelerate.rfft(x) == AppleAccelerate.rfft(x)
+    @test AppleAccelerate.irfft(AppleAccelerate.rfft(x), 128) ≈ x
+    # Mixed-radix (DFT) convenience path is cached too, keyed by (T, n, direction).
+    y = randn(ComplexF64, 96)
+    @test AppleAccelerate.fft(y) == AppleAccelerate.fft(y)
+    @test haskey(AppleAccelerate._DFT_SETUP_CACHE, (Float64, 96, AppleAccelerate.DFT_FORWARD))
+    @test AppleAccelerate._cached_dftsetup(Float64, 96, AppleAccelerate.DFT_FORWARD) ===
+          AppleAccelerate._cached_dftsetup(Float64, 96, AppleAccelerate.DFT_FORWARD)
+    # Explicit plan API still returns fresh, uncached setups.
+    @test AppleAccelerate.plan_fft(256, Float32) !== AppleAccelerate.plan_fft(256, Float32)
 end
 
 @testset "fft::Float64" begin
@@ -252,6 +303,124 @@ end
             end
         end
     end
+end
+
+@testset "rfft 2D" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            # Non-square sizes (16×32 and 32×16) catch dimension swaps.
+            for sz in ((8, 8), (16, 32), (32, 16), (64, 64))
+                x = randn(T, sz...)
+                result = AppleAccelerate.rfft(x)
+                expected = FFTW.rfft(x)
+                @test size(result) == (sz[1] ÷ 2 + 1, sz[2])
+                if T == Float64
+                    @test result ≈ expected
+                else
+                    @test result ≈ expected rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        x = randn(Float64, 16, 32)
+        setup = AppleAccelerate.plan_rfft(x)
+        @test AppleAccelerate.rfft(x, setup) ≈ FFTW.rfft(x)
+        @test AppleAccelerate.rfft(x, setup) ≈ FFTW.rfft(x)  # reuse
+    end
+
+    # Non-power-of-2 dimensions are rejected.
+    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 8, 12))
+    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 12, 8))
+end
+
+@testset "brfft and irfft 2D roundtrip" begin
+    for T in (Float64, Float32)
+        @testset "$T" begin
+            for sz in ((8, 8), (16, 32), (32, 16), (64, 64))
+                x = randn(T, sz...)
+                X = AppleAccelerate.rfft(x)
+                n1 = sz[1]
+                if T == Float64
+                    @test AppleAccelerate.brfft(X, n1) ./ length(x) ≈ x
+                    @test AppleAccelerate.irfft(X, n1) ≈ x
+                else
+                    @test AppleAccelerate.brfft(X, n1) ./ length(x) ≈ x rtol=sqrt(eps(Float32))
+                    @test AppleAccelerate.irfft(X, n1) ≈ x rtol=sqrt(eps(Float32))
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        x = randn(Float64, 32, 16)
+        setup = AppleAccelerate.plan_rfft(x)
+        X = AppleAccelerate.rfft(x, setup)
+        @test AppleAccelerate.irfft(X, 32, setup) ≈ x
+    end
+end
+
+@testset "rfft non-power-of-2 (mixed-radix)" begin
+    # Lengths f * 2^k with f ∈ {3, 5, 15} supported by vDSP_DFT_zrop.
+    supported = (48, 96, 160, 240, 480)
+    for T in (Float64, Float32)
+        @testset "$T n=$n" for n in supported
+            x = randn(T, n)
+            result = AppleAccelerate.rfft(x)
+            expected = FFTW.rfft(x)
+            if T == Float64
+                @test result ≈ expected
+                @test AppleAccelerate.brfft(result, n) ./ n ≈ x
+                @test AppleAccelerate.irfft(result, n) ≈ x
+            else
+                @test result ≈ expected rtol=sqrt(eps(Float32))
+                @test AppleAccelerate.brfft(result, n) ./ n ≈ x rtol=sqrt(eps(Float32))
+                @test AppleAccelerate.irfft(result, n) ≈ x rtol=sqrt(eps(Float32))
+            end
+        end
+    end
+
+    @testset "unsupported lengths throw" begin
+        for n in (100, 63, 7)  # odd cofactor not in {1,3,5,15} or odd length
+            @test_throws ArgumentError AppleAccelerate.rfft(randn(Float64, n))
+            @test_throws ArgumentError AppleAccelerate.irfft(randn(ComplexF64, n ÷ 2 + 1), n)
+        end
+    end
+end
+
+@testset "batched fft (fftm)" begin
+    for T in (ComplexF64, ComplexF32)
+        RT = real(T)
+        @testset "$T" begin
+            for sz in ((16, 8), (32, 5), (8, 64))
+                A = randn(T, sz...)
+                for dims in (1, 2)
+                    ispow2(size(A, dims)) || continue
+                    result = AppleAccelerate.fft(A, dims)
+                    expected = FFTW.fft(A, dims)
+                    if T == ComplexF64
+                        @test result ≈ expected
+                        @test AppleAccelerate.bfft(result, dims) ./ size(A, dims) ≈ A
+                        @test AppleAccelerate.ifft(result, dims) ≈ A
+                    else
+                        @test result ≈ expected rtol=sqrt(eps(RT))
+                        @test AppleAccelerate.bfft(result, dims) ./ size(A, dims) ≈ A rtol=sqrt(eps(RT))
+                        @test AppleAccelerate.ifft(result, dims) ≈ A rtol=sqrt(eps(RT))
+                    end
+                end
+            end
+        end
+    end
+
+    @testset "reusable plan" begin
+        A = randn(ComplexF64, 16, 8)
+        setup = AppleAccelerate.plan_fft(16, Float64)
+        @test AppleAccelerate.fft(A, 1, setup) ≈ FFTW.fft(A, 1)
+        @test AppleAccelerate.ifft(FFTW.fft(A, 1), 1, setup) ≈ A
+    end
+
+    @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF64, 16, 8), 3)
 end
 
 @testset "does not hijack FFTW planning (#139)" begin
