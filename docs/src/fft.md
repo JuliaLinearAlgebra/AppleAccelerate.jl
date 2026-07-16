@@ -150,10 +150,12 @@ Wraps Apple's [vDSP DCT functions](https://developer.apple.com/documentation/acc
 |----------|-------------|
 | [`plan_dct`](@ref AppleAccelerate.plan_dct) | Create a DCT setup object |
 | [`dct`](@ref AppleAccelerate.dct) | Compute the Discrete Cosine Transform |
+| [`idct`](@ref AppleAccelerate.idct) | Compute the inverse Discrete Cosine Transform |
 | [`plan_destroy`](@ref AppleAccelerate.plan_destroy) | Destroy a DCT setup object |
 
 ```@docs
 AppleAccelerate.plan_dct
 AppleAccelerate.dct
+AppleAccelerate.idct
 AppleAccelerate.plan_destroy
 ```
