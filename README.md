@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml"><img src="https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/actions/workflows/CI.yml/badge.svg" alt="CI"/></a>
+  <a href="https://codecov.io/gh/JuliaLinearAlgebra/AppleAccelerate.jl"><img src="https://codecov.io/gh/JuliaLinearAlgebra/AppleAccelerate.jl/branch/master/graph/badge.svg" alt="Coverage"/></a>
   <a href="https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Docs"/></a>
   <a href="https://juliahub.com/ui/Packages/General/AppleAccelerate"><img src="https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg" alt="JuliaHub"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
