@@ -34,6 +34,44 @@ end
     end
 end
 
+@testset "fft non-power-of-2 (mixed-radix)" begin
+    # Supported non-power-of-2 lengths: f * 2^k with f ∈ {3, 5, 15}.
+    supported = (3 * 2^4, 3 * 2^5, 5 * 2^4, 5 * 2^5, 15 * 2^3, 15 * 2^4)  # 48,96,80,160,120,240
+
+    @testset "ComplexF64 n=$n" for n in supported
+        r = randn(ComplexF64, n)
+        ref = FFTW.fft(r)
+        @test AppleAccelerate.fft(r) ≈ ref
+        # inverse round-trip and match to FFTW's inverse
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(r)) ≈ r
+        @test AppleAccelerate.ifft(ref) ≈ FFTW.ifft(ref)
+        # unnormalized backward transform
+        @test AppleAccelerate.bfft(r) ≈ FFTW.bfft(r)
+    end
+
+    @testset "ComplexF32 n=$n" for n in supported
+        r = randn(ComplexF32, n)
+        ref = FFTW.fft(r)
+        @test AppleAccelerate.fft(r) ≈ ref rtol=sqrt(eps(Float32))
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(r)) ≈ r rtol=sqrt(eps(Float32))
+        @test AppleAccelerate.bfft(r) ≈ FFTW.bfft(r) rtol=sqrt(eps(Float32))
+    end
+
+    # Power-of-2 fast path is unchanged and still routes through fft().
+    @test AppleAccelerate.is_supported_fft_length(1024)
+    @test AppleAccelerate.is_supported_fft_length(48)
+    @test !AppleAccelerate.is_supported_fft_length(7)
+    @test !AppleAccelerate.is_supported_fft_length(11)
+
+    # Unsupported (prime / non-f*2^k) lengths must throw a clear ArgumentError.
+    for n in (7, 11, 13, 63)  # 63 = 7*9, odd cofactor 63 ∉ {1,3,5,15}
+        @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF64, n))
+        @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF32, n))
+        @test_throws ArgumentError AppleAccelerate.ifft(randn(ComplexF64, n))
+        @test_throws ArgumentError AppleAccelerate.bfft(randn(ComplexF64, n))
+    end
+end
+
 @testset "fft known values" begin
     # DFT of unit impulse is all ones
     @test AppleAccelerate.fft(ComplexF64[1, 0, 0, 0]) ≈ ComplexF64[1, 1, 1, 1]
