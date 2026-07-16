@@ -42,6 +42,14 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+  jetls_check:
+    name: JETLS check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aviatesk/JETLS.jl/.github/actions/check@release
+        with:
+          files: src/AppleAccelerate.jl
   docs:
     name: Documentation
     runs-on: macOS-latest
