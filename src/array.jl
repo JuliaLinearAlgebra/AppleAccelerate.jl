@@ -277,8 +277,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                     (:meanmag,  :meamgv), (:meansqr, :measqv), (:meanssqr, :mvessq),
                     (:sum, :sve), (:summag, :svemg), (:sumsqr, :svesq),
                     (:sumssqr, :svs))
+        # vDSP returns ±Inf for max/min of an empty vector; match Base and throw instead.
+        guard = f in (:maximum, :minimum) ?
+            :(isempty(X) && throw(ArgumentError($(string(f)) * " over an empty collection is not allowed"))) :
+            :(nothing)
         @eval begin
             function ($f)(X::Vector{$T})
+                $guard
                 val = Ref{$T}(0.0)
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, length(X))
                 return val[]
@@ -289,6 +294,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:findmax, :maxvi), (:findmin, :minvi))
         @eval begin
             function ($f)(X::Vector{$T})
+                # vDSP returns (±Inf, 0) for an empty vector; match Base and throw instead.
+                isempty(X) && throw(ArgumentError($(string(f)) * " over an empty collection is not allowed"))
                 index = Ref{UInt}(0)
                 val = Ref{$T}(0.0)
                 LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, index, length(X))

@@ -7,6 +7,7 @@ makedocs(;
     pages = [
         "Introduction" => "index.md",
         "Array Operations" => "array.md",
+        "Complex Array Operations" => "complex.md",
         "Dense Linear Algebra" => "blas.md",
         "Sparse Linear Algebra" => "sparse.md",
         "FFT & Transforms" => "fft.md",
