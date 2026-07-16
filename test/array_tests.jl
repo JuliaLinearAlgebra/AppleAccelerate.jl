@@ -1481,4 +1481,87 @@ for T in (Float32, Float64)
     end
 end
 
+for T in (Float32, Float64)
+    @testset "StridedArray support::$T" begin
+        X::Vector{T} = randn(T, N)
+        Y::Vector{T} = randn(T, N)
+        c::T = randn(T)
+
+        # --- contiguous views ---
+        xv = @view X[2:end-1]
+        yv = @view Y[2:end-1]
+
+        # vecLib elementwise math accepts contiguous views
+        @test AppleAccelerate.exp(xv) ≈ exp.(xv)
+        @test AppleAccelerate.abs(xv) ≈ abs.(xv)
+        @test AppleAccelerate.atan(xv, yv) ≈ atan.(xv, yv)
+
+        # vDSP two-vector / vector-scalar ops
+        @test AppleAccelerate.vadd(xv, yv) ≈ xv .+ yv
+        @test AppleAccelerate.vmul(xv, yv) ≈ xv .* yv
+        @test AppleAccelerate.vsadd(xv, c) ≈ xv .+ c
+
+        # reductions on views
+        @test AppleAccelerate.sum(xv) ≈ sum(xv)
+        @test AppleAccelerate.maximum(xv) ≈ maximum(xv)
+        @test AppleAccelerate.dot(xv, yv) ≈ sum(xv .* yv)
+        @test AppleAccelerate.findmax(xv)[2] == findmax(xv)[2]
+
+        # mutating variant writing into a contiguous view
+        buf = zeros(T, N)
+        bv = @view buf[2:end-1]
+        AppleAccelerate.vadd!(bv, xv, yv)
+        @test bv ≈ xv .+ yv
+        @test buf[1] == 0 && buf[end] == 0
+        AppleAccelerate.exp!(bv, xv)
+        @test bv ≈ exp.(xv)
+
+        # reshapes and matrix-shaped contiguous views through vecLib
+        M = randn(T, 8, 4)
+        mv = @view M[:, 2:3]
+        @test AppleAccelerate.sin(mv) ≈ sin.(mv)
+        @test AppleAccelerate.exp(reshape(X, :, 10)) ≈ exp.(reshape(X, :, 10))
+
+        # --- strided (non-unit-stride) views ---
+        xs = @view X[1:2:end]
+        ys = @view Y[1:2:end]
+
+        # vDSP ops honor the stride
+        @test AppleAccelerate.vadd(xs, ys) ≈ xs .+ ys
+        @test AppleAccelerate.vsub(xs, ys) ≈ xs .- ys
+        @test AppleAccelerate.vsmul(xs, c) ≈ xs .* c
+        @test AppleAccelerate.vabs(xs) ≈ abs.(xs)
+        @test AppleAccelerate.sum(xs) ≈ sum(xs)
+        @test AppleAccelerate.minimum(xs) ≈ minimum(xs)
+        @test AppleAccelerate.dot(xs, ys) ≈ sum(xs .* ys)
+        @test AppleAccelerate.vclip(xs, T(-1), T(1)) ≈ clamp.(xs, T(-1), T(1))
+
+        # index-returning reductions convert memory offsets back to view indices
+        @test AppleAccelerate.findmax(xs) == findmax(xs)
+        @test AppleAccelerate.findmin(xs) == findmin(xs)
+        @test AppleAccelerate.maxmgvi(xs)[2] == argmax(abs.(xs))
+
+        # mutating into a strided view only touches the view's elements
+        sbuf = zeros(T, N)
+        sv = @view sbuf[1:2:end]
+        AppleAccelerate.vmul!(sv, xs, ys)
+        @test sv ≈ xs .* ys
+        @test all(iszero, sbuf[2:2:end])
+
+        # negative stride (reversed view)
+        xr = @view X[end:-1:1]
+        @test AppleAccelerate.vadd(xr, xr) ≈ 2 .* xr
+
+        # vecLib vv* has no stride argument: strided views must throw
+        @test_throws ArgumentError AppleAccelerate.exp(xs)
+        @test_throws ArgumentError AppleAccelerate.sin!(zeros(T, length(xs)), xs)
+        @test_throws ArgumentError AppleAccelerate.atan(xs, ys)
+
+        # ops without stride parameters reject non-unit strides
+        @test_throws ArgumentError AppleAccelerate.vsort!(xs)
+        @test_throws ArgumentError AppleAccelerate.vswsum(xs, 2)
+        @test_throws ArgumentError AppleAccelerate.nzcros(xs)
+    end
+end
+
 end # @testset "Array Operations"

@@ -1,5 +1,51 @@
 ## array.jl ##
 
+# ------------------------------------------------------------
+# StridedArray support helpers
+#
+# vDSP functions take explicit stride arguments, so most wrappers below accept
+# any StridedArray/StridedVector and pass `stride(X, 1)` through to vDSP.
+# vecLib vv* functions (the transcendental math wrappers) take NO stride
+# argument and require contiguous memory, as do a few vDSP entry points whose
+# prototypes have no stride parameter for a given operand (e.g. the table in
+# `vlint`) or whose stride semantics are unclear (e.g. sliding windows).
+# ------------------------------------------------------------
+
+@inline function _iscontiguous(A::StridedArray)
+    expected = 1
+    for i in 1:ndims(A)
+        size(A, i) == 1 || stride(A, i) == expected || return false
+        expected *= size(A, i)
+    end
+    return true
+end
+@inline _iscontiguous(A::DenseArray) = true
+
+function _check_contiguous(As::StridedArray...)
+    for A in As
+        _iscontiguous(A) || throw(ArgumentError(
+            "this operation requires contiguous (unit-stride) arrays, but got an " *
+            "array with strides $(strides(A)); copy the data first (e.g. with `collect`)"))
+    end
+    return nothing
+end
+
+@inline function _check_unit_stride(A::StridedVector, name::Symbol)
+    stride(A, 1) == 1 || throw(ArgumentError(
+        "$name requires a unit-stride (contiguous) vector for this argument, but got " *
+        "stride $(stride(A, 1)); copy the data first (e.g. with `collect`)"))
+    return nothing
+end
+
+# vDSP index-returning reductions report the 0-based *memory offset* of the
+# element (a multiple of the stride), so a positive stride is required to map
+# it back to a 1-based vector index.
+@inline function _check_positive_stride(A::StridedVector, name::Symbol)
+    stride(A, 1) >= 1 || throw(ArgumentError(
+        "$name requires a positive stride, but got stride $(stride(A, 1))"))
+    return nothing
+end
+
 mksymtuple(x) = (x, x)
 
 for (T, suff) in ((Float64, ""), (Float32, "f"))
@@ -22,13 +68,14 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
         f! = Symbol("$(f)!")
         @eval begin
             # Allocating variant
-            function ($f)(X::Array{$T})
+            function ($f)(X::StridedArray{$T})
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X)
             end
 
             # In-place mutating variant
-            function ($f!)(out::Array{$T}, X::Array{$T})
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T})
+                _check_contiguous(out, X)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
@@ -47,12 +94,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, fa) in twoarg_funcs
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T}, Y::Array{$T})
+            function ($f)(X::StridedArray{$T}, Y::StridedArray{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X, Y)
             end
-            function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T}, Y::StridedArray{$T})
+                _check_contiguous(out, X, Y)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Y, Ref{Cint}(length(X)))
                 out
             end
@@ -63,12 +111,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, fa) in ((:pow,:pow),)
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T}, Y::Array{$T})
+            function ($f)(X::StridedArray{$T}, Y::StridedArray{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X, Y)
             end
-            function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T}, Y::StridedArray{$T})
+                _check_contiguous(out, X, Y)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, Y, X, Ref{Cint}(length(X)))
                 out
             end
@@ -82,11 +131,12 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, fa) in ((:cbrt,:cbrt),)
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T})
+            function ($f)(X::StridedArray{$T})
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X)
             end
-            function ($f!)(out::Array{$T}, X::Array{$T})
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T})
+                _check_contiguous(out, X)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
@@ -99,12 +149,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, fa) in ((:nextafter,:nextafter), (:remainder,:remainder))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T}, Y::Array{$T})
+            function ($f)(X::StridedArray{$T}, Y::StridedArray{$T})
                 size(X) == size(Y) || throw(DimensionMismatch("Arguments must have same shape"))
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X, Y)
             end
-            function ($f!)(out::Array{$T}, X::Array{$T}, Y::Array{$T})
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T}, Y::StridedArray{$T})
+                _check_contiguous(out, X, Y)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Y, Ref{Cint}(length(X)))
                 out
             end
@@ -116,11 +167,12 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, fa) in ((:pows,:pows),)
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T}, y::$T)
+            function ($f)(X::StridedArray{$T}, y::$T)
                 out = Array{$T}(undef, size(X))
                 ($f!)(out, X, y)
             end
-            function ($f!)(out::Array{$T}, X::Array{$T}, y::$T)
+            function ($f!)(out::StridedArray{$T}, X::StridedArray{$T}, y::$T)
+                _check_contiguous(out, X)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, Ref(y), X, Ref{Cint}(length(X)))
                 out
             end
@@ -131,12 +183,13 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f, _) in ((:sincos,:sincos),)
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T})
+            function ($f)(X::StridedArray{$T})
                 out1 = Array{$T}(undef, size(X))
                 out2 = Array{$T}(undef, size(X))
                 ($f!)(out1, out2, X)
             end
-            function ($f!)(out1::Array{$T}, out2::Array{$T}, X::Array{$T})
+            function ($f!)(out1::StridedArray{$T}, out2::StridedArray{$T}, X::StridedArray{$T})
+                _check_contiguous(out1, out2, X)
                 LibAccelerate.$(Symbol(string("vv",f,suff)))(out1, out2, X, Ref{Cint}(length(X)))
                 out1, out2
             end
@@ -147,11 +200,12 @@ for (T, suff) in ((Float64, ""), (Float32, "f"))
     for (f,fa) in ((:cis,:cosisin),)
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f)(X::Array{$T})
+            function ($f)(X::StridedArray{$T})
                 out = Array{Complex{$T}}(undef, size(X))
                 ($f!)(out, X)
             end
-            function ($f!)(out::Array{Complex{$T}}, X::Array{$T})
+            function ($f!)(out::StridedArray{Complex{$T}}, X::StridedArray{$T})
+                _check_contiguous(out, X)
                 LibAccelerate.$(Symbol(string("vv",fa,suff)))(out, X, Ref{Cint}(length(X)))
                 out
             end
@@ -278,9 +332,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                     (:sum, :sve), (:summag, :svemg), (:sumsqr, :svesq),
                     (:sumssqr, :svs))
         @eval begin
-            function ($f)(X::Vector{$T})
+            function ($f)(X::StridedVector{$T})
                 val = Ref{$T}(0.0)
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1), val, length(X))
                 return val[]
             end
         end
@@ -288,95 +342,97 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     for (f, fa) in ((:findmax, :maxvi), (:findmin, :minvi))
         @eval begin
-            function ($f)(X::Vector{$T})
+            function ($f)(X::StridedVector{$T})
+                _check_positive_stride(X, $(QuoteNode(f)))
                 index = Ref{UInt}(0)
                 val = Ref{$T}(0.0)
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X, 1, val, index, length(X))
-                return (val[], Int(index[])+1)
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1), val, index, length(X))
+                # vDSP reports the 0-based memory offset (a multiple of the stride)
+                return (val[], div(Int(index[]), stride(X,1)) + 1)
             end
         end
     end
 end
 
 @doc """
-    maximum(X::Vector{T}) where T <: Union{Float32, Float64}
+    maximum(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the maximum value in `X` via vDSP. Equivalent to `Base.maximum(X)`.
 Wraps [`vDSP_maxv`](https://developer.apple.com/documentation/accelerate/vdsp_maxv).
 """ maximum
 
 @doc """
-    minimum(X::Vector{T}) where T <: Union{Float32, Float64}
+    minimum(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the minimum value in `X` via vDSP. Equivalent to `Base.minimum(X)`.
 Wraps [`vDSP_minv`](https://developer.apple.com/documentation/accelerate/vdsp_minv).
 """ minimum
 
 @doc """
-    sum(X::Vector{T}) where T <: Union{Float32, Float64}
+    sum(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of elements in `X` via vDSP. Equivalent to `Base.sum(X)`.
 Wraps [`vDSP_sve`](https://developer.apple.com/documentation/accelerate/vdsp_sve).
 """ sum
 
 @doc """
-    mean(X::Vector{T}) where T <: Union{Float32, Float64}
+    mean(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the arithmetic mean of elements in `X` via vDSP.
 Wraps [`vDSP_meanv`](https://developer.apple.com/documentation/accelerate/vdsp_meanv).
 """ mean
 
 @doc """
-    meanmag(X::Vector{T}) where T <: Union{Float32, Float64}
+    meanmag(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of absolute values: `sum(abs.(X)) / length(X)`.
 Wraps [`vDSP_meamgv`](https://developer.apple.com/documentation/accelerate/vdsp_meamgv).
 """ meanmag
 
 @doc """
-    meansqr(X::Vector{T}) where T <: Union{Float32, Float64}
+    meansqr(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of squares: `sum(X.^2) / length(X)`.
 Wraps [`vDSP_measqv`](https://developer.apple.com/documentation/accelerate/vdsp_measqv).
 """ meansqr
 
 @doc """
-    meanssqr(X::Vector{T}) where T <: Union{Float32, Float64}
+    meanssqr(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the mean of signed squares: `sum(X .* abs.(X)) / length(X)`.
 Wraps [`vDSP_mvessq`](https://developer.apple.com/documentation/accelerate/vdsp_mvessq).
 """ meanssqr
 
 @doc """
-    summag(X::Vector{T}) where T <: Union{Float32, Float64}
+    summag(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of absolute values: `sum(abs.(X))`.
 Wraps [`vDSP_svemg`](https://developer.apple.com/documentation/accelerate/vdsp_svemg).
 """ summag
 
 @doc """
-    sumsqr(X::Vector{T}) where T <: Union{Float32, Float64}
+    sumsqr(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of squares: `sum(X.^2)`.
 Wraps [`vDSP_svesq`](https://developer.apple.com/documentation/accelerate/vdsp_svesq).
 """ sumsqr
 
 @doc """
-    sumssqr(X::Vector{T}) where T <: Union{Float32, Float64}
+    sumssqr(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return the sum of signed squares: `sum(X .* abs.(X))`.
 Wraps [`vDSP_svs`](https://developer.apple.com/documentation/accelerate/vdsp_svs).
 """ sumssqr
 
 @doc """
-    findmax(X::Vector{T}) where T <: Union{Float32, Float64}
+    findmax(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return `(value, index)` of the maximum element in `X` via vDSP. Equivalent to `Base.findmax(X)`.
 Wraps [`vDSP_maxvi`](https://developer.apple.com/documentation/accelerate/vdsp_maxvi).
 """ findmax
 
 @doc """
-    findmin(X::Vector{T}) where T <: Union{Float32, Float64}
+    findmin(X::StridedVector{T}) where T <: Union{Float32, Float64}
 
 Return `(value, index)` of the minimum element in `X` via vDSP. Equivalent to `Base.findmin(X)`.
 Wraps [`vDSP_minvi`](https://developer.apple.com/documentation/accelerate/vdsp_minvi).
@@ -391,27 +447,27 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         @eval begin
             @doc """
-            `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, Y::Vector{$($T)})`
+            `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, Y::StridedVector{$($T)})`
 
             Implements element-wise **$($name)** over two **Vector{$($T)}** and overwrites
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
-            function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
                 (length(X) == length(Y) == length(result)) ||
                     throw(DimensionMismatch("result, X and Y must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(Y, 1, X, 1, result, 1, length(result))
+                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(Y,stride(Y,1),X,stride(X,1),result,stride(result,1), length(result))
                 return result
             end
         end
 
         @eval begin
             @doc """
-            `$($f)(X::Vector{$($T)}, Y::Vector{$($T)})`
+            `$($f)(X::StridedVector{$($T)}, Y::StridedVector{$($T)})`
 
             Implements element-wise **$($name)** over two **Vector{$($T)}**. Allocates
             memory to store result. *Returns:* **Vector{$($T)}**
             """ ->
-            function ($f)(X::Vector{$T}, Y::Vector{$T})
+            function ($f)(X::StridedVector{$T}, Y::StridedVector{$T})
                 result = similar(X)
                 ($f!)(result, X, Y)
                 return result
@@ -443,25 +499,25 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         @eval begin
             @doc """
-            `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+            `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
 
             Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T) and overwrites
             the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
             """ ->
-            function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
-                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(X, 1, Ref(c), result, 1, length(result))
+            function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
+                LibAccelerate.$(Symbol(string("vDSP_", f, suff)))(X,stride(X,1), Ref(c),result,stride(result,1), length(result))
                 return result
             end
         end
 
         @eval begin
             @doc """
-            `$($f)(X::Vector{$($T)}, c::$($T))`
+            `$($f)(X::StridedVector{$($T)}, c::$($T))`
 
             Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T). Allocates
             memory to store result. *Returns:* **Vector{$($T)}**
             """ ->
-            function ($f)(X::Vector{$T}, c::$T)
+            function ($f)(X::StridedVector{$T}, c::$T)
                 result = similar(X)
                 ($f!)(result, X, c)
                 return result
@@ -473,25 +529,25 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         @doc """
-        `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+        `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
 
         Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T) and overwrites
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
-        function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vsadd", suff)))(X, 1, Ref(-c), result, 1, length(result))
+        function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vsadd", suff)))(X,stride(X,1), Ref(-c),result,stride(result,1), length(result))
             return result
         end
     end
 
     @eval begin
         @doc """
-        `$($f)(X::Vector{$($T)}, c::$($T))`
+        `$($f)(X::StridedVector{$($T)}, c::$($T))`
 
         Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T). Allocates
         memory to store result. *Returns:* **Vector{$($T)}**
         """ ->
-        function ($f)(X::Vector{$T}, c::$T)
+        function ($f)(X::StridedVector{$T}, c::$T)
             result = similar(X)
             ($f!)(result, X, c)
             return result
@@ -503,26 +559,26 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         @doc """
-        `$($f!)(result::Vector{$($T)}, X::Vector{$($T)}, c::$($T))`
+        `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
 
         Implements vector-scalar **subtraction** over $($T) and **Vector{$($T)}** and overwrites
         the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
         """ ->
-        function ($f!)(result::Vector{$T}, X::Vector{$T}, c::$T)
+        function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
             # c - X == X * (-1) + c, computed in one pass via vDSP_vsmsa (D = A*B + C)
-            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(X, 1, Ref(-one($T)), Ref(c), result, 1, length(result))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(X,stride(X,1), Ref(-one($T)), Ref(c),result,stride(result,1), length(result))
             return result
         end
     end
 
     @eval begin
         @doc """
-        `$($f)(X::Vector{$($T), c::$($T)})`
+        `$($f)(X::StridedVector{$($T), c::$($T)})`
 
         Implements vector-scalar **subtraction** over $($T) and  **Vector{$($T)}**. Allocates
         memory to store result. *Returns:* **Vector{$($T)}**
         """ ->
-        function ($f)(X::Vector{$T}, c::$T)
+        function ($f)(X::StridedVector{$T}, c::$T)
             result = similar(X)
             ($f!)(result, X, c)
             return result
@@ -561,11 +617,11 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                     (:vssq, :vssq), (:vfrac, :vfrac), (:vabs, :vabs))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, X::Vector{$T})
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,result,1,length(X))
+            function ($f!)(result::StridedVector{$T}, X::StridedVector{$T})
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1),result,stride(result,1),length(X))
                 return result
             end
-            function ($f)(X::Vector{$T})
+            function ($f)(X::StridedVector{$T})
                 result = similar(X)
                 ($f!)(result, X)
             end
@@ -574,11 +630,11 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     # vreverse: in-place only
     @eval begin
-        function vreverse!(X::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vrvrs", suff)))(X,1,length(X))
+        function vreverse!(X::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vrvrs", suff)))(X,stride(X,1),length(X))
             return X
         end
-        function vreverse(X::Vector{$T})
+        function vreverse(X::StridedVector{$T})
             Y = copy(X)
             vreverse!(Y)
         end
@@ -604,13 +660,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                     (:vdist, :vdist))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
                 (length(X) == length(Y) == length(result)) ||
                     throw(DimensionMismatch("result, X and Y must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,Y,1,result,1,length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1),Y,stride(Y,1),result,stride(result,1),length(X))
                 return result
             end
-            function ($f)(X::Vector{$T}, Y::Vector{$T})
+            function ($f)(X::StridedVector{$T}, Y::StridedVector{$T})
                 result = similar(X)
                 ($f!)(result, X, Y)
             end
@@ -618,11 +674,11 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function vtmerg!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vtmerg", suff)))(X,1,Y,1,result,1,length(X))
+        function vtmerg!(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vtmerg", suff)))(X,stride(X,1),Y,stride(Y,1),result,stride(result,1),length(X))
             return result
         end
-        function vtmerg(X::Vector{$T}, Y::Vector{$T})
+        function vtmerg(X::StridedVector{$T}, Y::StridedVector{$T})
             result = similar(X)
             vtmerg!(result, X, Y)
         end
@@ -642,11 +698,11 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function svdiv!(result::Vector{$T}, X::Vector{$T}, c::$T)
-            LibAccelerate.$(Symbol(string("vDSP_svdiv", suff)))(Ref(c),X,1,result,1,length(X))
+        function svdiv!(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
+            LibAccelerate.$(Symbol(string("vDSP_svdiv", suff)))(Ref(c),X,stride(X,1),result,stride(result,1),length(X))
             return result
         end
-        function svdiv(X::Vector{$T}, c::$T)
+        function svdiv(X::StridedVector{$T}, c::$T)
             result = similar(X)
             svdiv!(result, X, c)
         end
@@ -665,13 +721,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:vam, :vam), (:vsbm, :vsbm))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
                 (length(A) == length(B) == length(C) == length(result)) ||
                     throw(DimensionMismatch("result, A, B and C must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),result,stride(result,1),length(A))
                 return result
             end
-            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+            function ($f)(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
                 result = similar(A)
                 ($f!)(result, A, B, C)
             end
@@ -679,13 +735,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function venvlp!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+        function venvlp!(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
             (length(A) == length(B) == length(C) == length(result)) ||
                 throw(DimensionMismatch("result, A, B and C must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_venvlp", suff)))(A,1,B,1,C,1,result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_venvlp", suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),result,stride(result,1),length(A))
             return result
         end
-        function venvlp(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+        function venvlp(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
             result = similar(A)
             venvlp!(result, A, B, C)
         end
@@ -695,13 +751,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:vaam, :vaam), (:vsbsbm, :vsbsbm), (:vasbm, :vasbm))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
                 (length(A) == length(B) == length(C) == length(D) == length(result)) ||
                     throw(DimensionMismatch("result, A, B, C and D must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),D,stride(D,1),result,stride(result,1),length(A))
                 return result
             end
-            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+            function ($f)(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
                 result = similar(A)
                 ($f!)(result, A, B, C, D)
             end
@@ -709,13 +765,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function vpythg!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+        function vpythg!(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
             (length(A) == length(B) == length(C) == length(D) == length(result)) ||
                 throw(DimensionMismatch("result, A, B, C and D must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vpythg", suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vpythg", suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),D,stride(D,1),result,stride(result,1),length(A))
             return result
         end
-        function vpythg(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+        function vpythg(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
             result = similar(A)
             vpythg!(result, A, B, C, D)
         end
@@ -725,13 +781,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:vasm, :vasm), (:vsbsm, :vsbsm))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
+            function ($f!)(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, c::$T)
                 (length(A) == length(B) == length(result)) ||
                     throw(DimensionMismatch("result, A and B must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,Ref(c),result,1,length(A))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,stride(A,1),B,stride(B,1),Ref(c),result,stride(result,1),length(A))
                 return result
             end
-            function ($f)(A::Vector{$T}, B::Vector{$T}, c::$T)
+            function ($f)(A::StridedVector{$T}, B::StridedVector{$T}, c::$T)
                 result = similar(A)
                 ($f!)(result, A, B, c)
             end
@@ -739,37 +795,37 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function vsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
+        function vsma!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, C::StridedVector{$T})
             (length(A) == length(C) == length(result)) ||
                 throw(DimensionMismatch("result, A and C must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vsma", suff)))(A,1,Ref(b),C,1,result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vsma", suff)))(A,stride(A,1),Ref(b),C,stride(C,1),result,stride(result,1),length(A))
             return result
         end
-        function vsma(A::Vector{$T}, b::$T, C::Vector{$T})
+        function vsma(A::StridedVector{$T}, b::$T, C::StridedVector{$T})
             result = similar(A)
             vsma!(result, A, b, C)
         end
     end
 
     @eval begin
-        function vsmsa!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
+        function vsmsa!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, c::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(A,stride(A,1),Ref(b),Ref(c),result,stride(result,1),length(A))
             return result
         end
-        function vsmsa(A::Vector{$T}, b::$T, c::$T)
+        function vsmsa(A::StridedVector{$T}, b::$T, c::$T)
             result = similar(A)
             vsmsa!(result, A, b, c)
         end
     end
 
     @eval begin
-        function vaddsub!(add_result::Vector{$T}, sub_result::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+        function vaddsub!(add_result::StridedVector{$T}, sub_result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T})
             (length(A) == length(B) == length(add_result) == length(sub_result)) ||
                 throw(DimensionMismatch("add_result, sub_result, A and B must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vaddsub", suff)))(A,1,B,1,add_result,1,sub_result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vaddsub", suff)))(A,stride(A,1),B,stride(B,1),add_result,stride(add_result,1),sub_result,stride(sub_result,1),length(A))
             return (add_result, sub_result)
         end
-        function vaddsub(A::Vector{$T}, B::Vector{$T})
+        function vaddsub(A::StridedVector{$T}, B::StridedVector{$T})
             add_result = similar(A)
             sub_result = similar(A)
             vaddsub!(add_result, sub_result, A, B)
@@ -798,13 +854,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:vma, :vma), (:vmsb, :vmsb))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
                 (length(A) == length(B) == length(C) == length(result)) ||
                     throw(DimensionMismatch("result, A, B and C must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,result,1,length(A))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),result,stride(result,1),length(A))
                 return result
             end
-            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T})
+            function ($f)(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T})
                 result = similar(A)
                 ($f!)(result, A, B, C)
             end
@@ -816,13 +872,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     for (f, fa) in ((:vmma, :vmma), (:vmmsb, :vmmsb))
         f! = Symbol("$(f)!")
         @eval begin
-            function ($f!)(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+            function ($f!)(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
                 (length(A) == length(B) == length(C) == length(D) == length(result)) ||
                     throw(DimensionMismatch("result, A, B, C and D must have the same length"))
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,1,B,1,C,1,D,1,result,1,length(A))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),D,stride(D,1),result,stride(result,1),length(A))
                 return result
             end
-            function ($f)(A::Vector{$T}, B::Vector{$T}, C::Vector{$T}, D::Vector{$T})
+            function ($f)(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{$T}, D::StridedVector{$T})
                 result = similar(A)
                 ($f!)(result, A, B, C, D)
             end
@@ -831,13 +887,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     # vmsa: D[n] = A[n]*B[n] + c  (2-vector + scalar → 1-vector)
     @eval begin
-        function vmsa!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, c::$T)
+        function vmsa!(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, c::$T)
             (length(A) == length(B) == length(result)) ||
                 throw(DimensionMismatch("result, A and B must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vmsa", suff)))(A,1,B,1,Ref(c),result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vmsa", suff)))(A,stride(A,1),B,stride(B,1),Ref(c),result,stride(result,1),length(A))
             return result
         end
-        function vmsa(A::Vector{$T}, B::Vector{$T}, c::$T)
+        function vmsa(A::StridedVector{$T}, B::StridedVector{$T}, c::$T)
             result = similar(A)
             vmsa!(result, A, B, c)
         end
@@ -845,13 +901,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     # vsmsb: D[n] = A[n]*b - C[n]  (vector*scalar - vector)
     @eval begin
-        function vsmsb!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T})
+        function vsmsb!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, C::StridedVector{$T})
             (length(A) == length(C) == length(result)) ||
                 throw(DimensionMismatch("result, A and C must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vsmsb", suff)))(A,1,Ref(b),C,1,result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsb", suff)))(A,stride(A,1),Ref(b),C,stride(C,1),result,stride(result,1),length(A))
             return result
         end
-        function vsmsb(A::Vector{$T}, b::$T, C::Vector{$T})
+        function vsmsb(A::StridedVector{$T}, b::$T, C::StridedVector{$T})
             result = similar(A)
             vsmsb!(result, A, b, C)
         end
@@ -859,13 +915,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     # vsmsma: E[n] = A[n]*b + C[n]*d  (vector*scalar + vector*scalar)
     @eval begin
-        function vsmsma!(result::Vector{$T}, A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
+        function vsmsma!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, C::StridedVector{$T}, d::$T)
             (length(A) == length(C) == length(result)) ||
                 throw(DimensionMismatch("result, A and C must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vsmsma", suff)))(A,1,Ref(b),C,1,Ref(d),result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vsmsma", suff)))(A,stride(A,1),Ref(b),C,stride(C,1),Ref(d),result,stride(result,1),length(A))
             return result
         end
-        function vsmsma(A::Vector{$T}, b::$T, C::Vector{$T}, d::$T)
+        function vsmsma(A::StridedVector{$T}, b::$T, C::StridedVector{$T}, d::$T)
             result = similar(A)
             vsmsma!(result, A, b, C, d)
         end
@@ -886,18 +942,18 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function dot(X::Vector{$T}, Y::Vector{$T})
+        function dot(X::StridedVector{$T}, Y::StridedVector{$T})
             length(X) == length(Y) ||
                 throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
-            LibAccelerate.$(Symbol(string("vDSP_dotpr", suff)))(X,1,Y,1,val,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_dotpr", suff)))(X,stride(X,1),Y,stride(Y,1),val,length(X))
             return val[]
         end
-        function distancesq(X::Vector{$T}, Y::Vector{$T})
+        function distancesq(X::StridedVector{$T}, Y::StridedVector{$T})
             length(X) == length(Y) ||
                 throw(DimensionMismatch("X and Y must have the same length"))
             val = Ref{$T}(0.0)
-            LibAccelerate.$(Symbol(string("vDSP_distancesq", suff)))(X,1,Y,1,val,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_distancesq", suff)))(X,stride(X,1),Y,stride(Y,1),val,length(X))
             return val[]
         end
     end
@@ -911,19 +967,19 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     # rmsqv: root mean square — sqrt(sum(X.^2)/N)
     @eval begin
-        function rmsqv(X::Vector{$T})
+        function rmsqv(X::StridedVector{$T})
             val = Ref{$T}(0)
-            LibAccelerate.$(Symbol(string("vDSP_rmsqv", suff)))(X,1,val,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_rmsqv", suff)))(X,stride(X,1),val,length(X))
             return val[]
         end
     end
 
     # sve_svesq: simultaneous sum and sum-of-squares
     @eval begin
-        function sve_svesq(X::Vector{$T})
+        function sve_svesq(X::StridedVector{$T})
             s = Ref{$T}(0)
             ssq = Ref{$T}(0)
-            LibAccelerate.$(Symbol(string("vDSP_sve_svesq", suff)))(X,1,s,ssq,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_sve_svesq", suff)))(X,stride(X,1),s,ssq,length(X))
             return (s[], ssq[])
         end
     end
@@ -931,9 +987,9 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # maxmgv / minmgv: max/min magnitude
     for (f, fa) in ((:maxmgv, :maxmgv), (:minmgv, :minmgv))
         @eval begin
-            function ($f)(X::Vector{$T})
+            function ($f)(X::StridedVector{$T})
                 val = Ref{$T}(0)
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,val,length(X))
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1),val,length(X))
                 return val[]
             end
         end
@@ -942,11 +998,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # maxmgvi / minmgvi: max/min magnitude with index
     for (f, fa) in ((:maxmgvi, :maxmgvi), (:minmgvi, :minmgvi))
         @eval begin
-            function ($f)(X::Vector{$T})
+            function ($f)(X::StridedVector{$T})
+                _check_positive_stride(X, $(QuoteNode(f)))
                 val = Ref{$T}(0)
                 idx = Ref{UInt}(0)
-                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,1,val,idx,length(X))
-                return (val[], Int(idx[]) + 1)
+                LibAccelerate.$(Symbol(string("vDSP_", fa, suff)))(X,stride(X,1),val,idx,length(X))
+                # vDSP reports the 0-based memory offset (a multiple of the stride)
+                return (val[], div(Int(idx[]), stride(X,1)) + 1)
             end
         end
     end
@@ -965,51 +1023,51 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+        function vclip!(result::StridedVector{$T}, X::StridedVector{$T}, low::$T, high::$T)
             length(result) >= length(X) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vclip", suff)))(X,stride(X,1),Ref(low),Ref(high),result,stride(result,1),length(X))
             return result
         end
-        function vclip(X::Vector{$T}, low::$T, high::$T)
+        function vclip(X::StridedVector{$T}, low::$T, high::$T)
             result = similar(X)
             vclip!(result, X, low, high)
         end
-        function viclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+        function viclip!(result::StridedVector{$T}, X::StridedVector{$T}, low::$T, high::$T)
             length(result) >= length(X) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
-            LibAccelerate.$(Symbol(string("vDSP_viclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_viclip", suff)))(X,stride(X,1),Ref(low),Ref(high),result,stride(result,1),length(X))
             return result
         end
-        function viclip(X::Vector{$T}, low::$T, high::$T)
+        function viclip(X::StridedVector{$T}, low::$T, high::$T)
             result = similar(X)
             viclip!(result, X, low, high)
         end
-        function vthr!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
+        function vthr!(result::StridedVector{$T}, X::StridedVector{$T}, threshold::$T)
             length(result) >= length(X) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vthr", suff)))(X,1,Ref(threshold),result,1,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vthr", suff)))(X,stride(X,1),Ref(threshold),result,stride(result,1),length(X))
             return result
         end
-        function vthr(X::Vector{$T}, threshold::$T)
+        function vthr(X::StridedVector{$T}, threshold::$T)
             result = similar(X)
             vthr!(result, X, threshold)
         end
-        function vthres!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
+        function vthres!(result::StridedVector{$T}, X::StridedVector{$T}, threshold::$T)
             length(result) >= length(X) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vthres", suff)))(X,1,Ref(threshold),result,1,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vthres", suff)))(X,stride(X,1),Ref(threshold),result,stride(result,1),length(X))
             return result
         end
-        function vthres(X::Vector{$T}, threshold::$T)
+        function vthres(X::StridedVector{$T}, threshold::$T)
             result = similar(X)
             vthres!(result, X, threshold)
         end
-        function vcmprs!(result::Vector{$T}, X::Vector{$T}, gate::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vcmprs", suff)))(X,1,gate,1,result,1,length(X))
+        function vcmprs!(result::StridedVector{$T}, X::StridedVector{$T}, gate::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vcmprs", suff)))(X,stride(X,1),gate,stride(gate,1),result,stride(result,1),length(X))
             return result
         end
-        function vcmprs(X::Vector{$T}, gate::Vector{$T})
+        function vcmprs(X::StridedVector{$T}, gate::StridedVector{$T})
             result = similar(X)
             vcmprs!(result, X, gate)
         end
@@ -1028,24 +1086,24 @@ end
 # ============================================================
 
 """
-    vdouble(X::Vector{Float32}) -> Vector{Float64}
+    vdouble(X::StridedVector{Float32}) -> Vector{Float64}
 
 Convert single-precision to double-precision. Wraps [`vDSP_vspdp`](https://developer.apple.com/documentation/accelerate/vdsp_vspdp).
 """
-function vdouble(X::Vector{Float32})
+function vdouble(X::StridedVector{Float32})
     result = Vector{Float64}(undef, length(X))
-    LibAccelerate.vDSP_vspdp(X,1,result,1,length(X))
+    LibAccelerate.vDSP_vspdp(X,stride(X,1),result,stride(result,1),length(X))
     return result
 end
 
 """
-    vsingle(X::Vector{Float64}) -> Vector{Float32}
+    vsingle(X::StridedVector{Float64}) -> Vector{Float32}
 
 Convert double-precision to single-precision. Wraps [`vDSP_vdpsp`](https://developer.apple.com/documentation/accelerate/vdsp_vdpsp).
 """
-function vsingle(X::Vector{Float64})
+function vsingle(X::StridedVector{Float64})
     result = Vector{Float32}(undef, length(X))
-    LibAccelerate.vDSP_vdpsp(X,1,result,1,length(X))
+    LibAccelerate.vDSP_vdpsp(X,stride(X,1),result,stride(result,1),length(X))
     return result
 end
 
@@ -1057,15 +1115,15 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vramp(start::$T, step::$T, n::Integer)
             result = Vector{$T}(undef, n)
-            LibAccelerate.$(Symbol(string("vDSP_vramp", suff)))(Ref(start),Ref(step),result,1,n)
+            LibAccelerate.$(Symbol(string("vDSP_vramp", suff)))(Ref(start),Ref(step),result,stride(result,1),n)
             return result
         end
-        function vrampmul!(result::Vector{$T}, X::Vector{$T}, start::$T, step::$T)
+        function vrampmul!(result::StridedVector{$T}, X::StridedVector{$T}, start::$T, step::$T)
             s = Ref{$T}(start)
-            LibAccelerate.$(Symbol(string("vDSP_vrampmul", suff)))(X,1,s,Ref(step),result,1,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul", suff)))(X,stride(X,1),s,Ref(step),result,stride(result,1),length(X))
             return result
         end
-        function vrampmul(X::Vector{$T}, start::$T, step::$T)
+        function vrampmul(X::StridedVector{$T}, start::$T, step::$T)
             result = similar(X)
             vrampmul!(result, X, start, step)
         end
@@ -1077,13 +1135,17 @@ end
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vrampmul2!(O0::Vector{$T}, O1::Vector{$T}, I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
+        function vrampmul2!(O0::StridedVector{$T}, O1::StridedVector{$T}, I0::StridedVector{$T}, I1::StridedVector{$T}, start::$T, step::$T)
             n = length(I0)
+            stride(I0,1) == stride(I1,1) ||
+                throw(ArgumentError("vrampmul2!: I0 and I1 must have the same stride (vDSP shares one input stride)"))
+            stride(O0,1) == stride(O1,1) ||
+                throw(ArgumentError("vrampmul2!: O0 and O1 must have the same stride (vDSP shares one output stride)"))
             s = Ref{$T}(start)
-            LibAccelerate.$(Symbol(string("vDSP_vrampmul2", suff)))(I0,I1,1,s,Ref(step),O0,O1,1,n)
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul2", suff)))(I0,I1,stride(I0,1),s,Ref(step),O0,O1,stride(O0,1),n)
             return (O0, O1)
         end
-        function vrampmul2(I0::Vector{$T}, I1::Vector{$T}, start::$T, step::$T)
+        function vrampmul2(I0::StridedVector{$T}, I1::StridedVector{$T}, start::$T, step::$T)
             O0 = similar(I0)
             O1 = similar(I1)
             vrampmul2!(O0, O1, I0, I1, start, step)
@@ -1095,15 +1157,15 @@ end
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vavlin!(C::Vector{$T}, A::Vector{$T}, weight::$T)
+        function vavlin!(C::StridedVector{$T}, A::StridedVector{$T}, weight::$T)
             length(A) == length(C) ||
                 throw(DimensionMismatch("C and A must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vavlin", suff)))(A,1,Ref(weight),C,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vavlin", suff)))(A,stride(A,1),Ref(weight),C,stride(C,1),length(A))
             return C
         end
         # Operand order matches the mutating `vavlin!(C, A, weight)`: C is the
         # running accumulator, A is the new sample vector.
-        function vavlin(C::Vector{$T}, A::Vector{$T}, weight::$T)
+        function vavlin(C::StridedVector{$T}, A::StridedVector{$T}, weight::$T)
             result = copy(C)
             vavlin!(result, A, weight)
         end
@@ -1118,56 +1180,60 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vrsum!(result::Vector{$T}, X::Vector{$T}, scale::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vrsum", suff)))(X,1,Ref(scale),result,1,length(X))
+        function vrsum!(result::StridedVector{$T}, X::StridedVector{$T}, scale::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vrsum", suff)))(X,stride(X,1),Ref(scale),result,stride(result,1),length(X))
             return result
         end
-        function vrsum(X::Vector{$T}, scale::$T)
+        function vrsum(X::StridedVector{$T}, scale::$T)
             result = similar(X)
             vrsum!(result, X, scale)
         end
-        function vsimps!(result::Vector{$T}, X::Vector{$T}, step::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vsimps", suff)))(X,1,Ref(step),result,1,length(X))
+        function vsimps!(result::StridedVector{$T}, X::StridedVector{$T}, step::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vsimps", suff)))(X,stride(X,1),Ref(step),result,stride(result,1),length(X))
             return result
         end
-        function vsimps(X::Vector{$T}, step::$T)
+        function vsimps(X::StridedVector{$T}, step::$T)
             result = similar(X)
             vsimps!(result, X, step)
         end
-        function vtrapz!(result::Vector{$T}, X::Vector{$T}, step::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vtrapz", suff)))(X,1,Ref(step),result,1,length(X))
+        function vtrapz!(result::StridedVector{$T}, X::StridedVector{$T}, step::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vtrapz", suff)))(X,stride(X,1),Ref(step),result,stride(result,1),length(X))
             return result
         end
-        function vtrapz(X::Vector{$T}, step::$T)
+        function vtrapz(X::StridedVector{$T}, step::$T)
             result = similar(X)
             vtrapz!(result, X, step)
         end
-        function vswsum!(result::Vector{$T}, X::Vector{$T}, window::Integer)
+        function vswsum!(result::StridedVector{$T}, X::StridedVector{$T}, window::Integer)
             (1 <= window <= length(X)) ||
                 throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
             length(result) >= n_out ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) - window + 1 ($n_out)"))
+            _check_unit_stride(X, :vswsum!)
+            _check_unit_stride(result, :vswsum!)
             LibAccelerate.$(Symbol(string("vDSP_vswsum", suff)))(X,1,result,1,n_out,window)
             return result
         end
-        function vswsum(X::Vector{$T}, window::Integer)
+        function vswsum(X::StridedVector{$T}, window::Integer)
             (1 <= window <= length(X)) ||
                 throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
             result = Vector{$T}(undef, n_out)
             vswsum!(result, X, window)
         end
-        function vswmax!(result::Vector{$T}, X::Vector{$T}, window::Integer)
+        function vswmax!(result::StridedVector{$T}, X::StridedVector{$T}, window::Integer)
             (1 <= window <= length(X)) ||
                 throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
             length(result) >= n_out ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) - window + 1 ($n_out)"))
+            _check_unit_stride(X, :vswmax!)
+            _check_unit_stride(result, :vswmax!)
             LibAccelerate.$(Symbol(string("vDSP_vswmax", suff)))(X,1,result,1,n_out,window)
             return result
         end
-        function vswmax(X::Vector{$T}, window::Integer)
+        function vswmax(X::StridedVector{$T}, window::Integer)
             (1 <= window <= length(X)) ||
                 throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
@@ -1189,33 +1255,35 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vintb!(result::Vector{$T}, A::Vector{$T}, B::Vector{$T}, t::$T)
+        function vintb!(result::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, t::$T)
             (length(A) == length(B) == length(result)) ||
                 throw(DimensionMismatch("result, A and B must have the same length"))
-            LibAccelerate.$(Symbol(string("vDSP_vintb", suff)))(A,1,B,1,Ref(t),result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vintb", suff)))(A,stride(A,1),B,stride(B,1),Ref(t),result,stride(result,1),length(A))
             return result
         end
-        function vintb(A::Vector{$T}, B::Vector{$T}, t::$T)
+        function vintb(A::StridedVector{$T}, B::StridedVector{$T}, t::$T)
             result = similar(A)
             vintb!(result, A, B, t)
         end
-        function vlint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
+        function vlint!(result::StridedVector{$T}, table::StridedVector{$T}, indices::StridedVector{$T})
             length(result) >= length(indices) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(indices) ($(length(indices)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vlint", suff)))(table,indices,1,result,1,length(indices),length(table))
+            _check_unit_stride(table, :vlint!)
+            LibAccelerate.$(Symbol(string("vDSP_vlint", suff)))(table,indices,stride(indices,1),result,stride(result,1),length(indices),length(table))
             return result
         end
-        function vlint(table::Vector{$T}, indices::Vector{$T})
+        function vlint(table::StridedVector{$T}, indices::StridedVector{$T})
             result = Vector{$T}(undef, length(indices))
             vlint!(result, table, indices)
         end
-        function vqint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
+        function vqint!(result::StridedVector{$T}, table::StridedVector{$T}, indices::StridedVector{$T})
             length(result) >= length(indices) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(indices) ($(length(indices)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vqint", suff)))(table,indices,1,result,1,length(indices),length(table))
+            _check_unit_stride(table, :vqint!)
+            LibAccelerate.$(Symbol(string("vDSP_vqint", suff)))(table,indices,stride(indices,1),result,stride(result,1),length(indices),length(table))
             return result
         end
-        function vqint(table::Vector{$T}, indices::Vector{$T})
+        function vqint(table::StridedVector{$T}, indices::StridedVector{$T})
             result = Vector{$T}(undef, length(indices))
             vqint!(result, table, indices)
         end
@@ -1232,11 +1300,11 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vpoly!(result::Vector{$T}, coeffs::Vector{$T}, X::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vpoly", suff)))(coeffs,1,X,1,result,1,length(X),length(coeffs) - 1)
+        function vpoly!(result::StridedVector{$T}, coeffs::StridedVector{$T}, X::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vpoly", suff)))(coeffs,stride(coeffs,1),X,stride(X,1),result,stride(result,1),length(X),length(coeffs) - 1)
             return result
         end
-        function vpoly(coeffs::Vector{$T}, X::Vector{$T})
+        function vpoly(coeffs::StridedVector{$T}, X::StridedVector{$T})
             result = similar(X)
             vpoly!(result, coeffs, X)
         end
@@ -1256,13 +1324,13 @@ Evaluate polynomial at each point in `X`. Coefficients are highest degree first:
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vnormalize!(result::Vector{$T}, X::Vector{$T})
+        function vnormalize!(result::StridedVector{$T}, X::StridedVector{$T})
             mean_out = Ref{$T}(0.0)
             stddev_out = Ref{$T}(0.0)
-            LibAccelerate.$(Symbol(string("vDSP_normalize", suff)))(X,1,result,1,mean_out,stddev_out,length(X))
+            LibAccelerate.$(Symbol(string("vDSP_normalize", suff)))(X,stride(X,1),result,stride(result,1),mean_out,stddev_out,length(X))
             return (result, mean_out[], stddev_out[])
         end
-        function vnormalize(X::Vector{$T})
+        function vnormalize(X::StridedVector{$T})
             result = similar(X)
             vnormalize!(result, X)
         end
@@ -1283,10 +1351,11 @@ Wraps [`vDSP_normalize`](https://developer.apple.com/documentation/accelerate/vd
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function nzcros(X::Vector{$T}, max_crossings::Integer=0)
+        function nzcros(X::StridedVector{$T}, max_crossings::Integer=0)
             if max_crossings <= 0
                 max_crossings = length(X)
             end
+            _check_unit_stride(X, :nzcros)
             indices = Vector{UInt64}(undef, max_crossings)
             count = Ref{UInt64}(0)
             LibAccelerate.$(Symbol(string("vDSP_nzcros", suff)))(X,1,max_crossings,indices,count,length(X))
@@ -1310,12 +1379,12 @@ Wraps [`vDSP_nzcros`](https://developer.apple.com/documentation/accelerate/vdsp_
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vdbcon!(result::Vector{$T}, X::Vector{$T}, ref::$T, power::Bool=true)
+        function vdbcon!(result::StridedVector{$T}, X::StridedVector{$T}, ref::$T, power::Bool=true)
             flag = power ? UInt32(0) : UInt32(1)
-            LibAccelerate.$(Symbol(string("vDSP_vdbcon", suff)))(X,1,Ref(ref),result,1,length(X),flag)
+            LibAccelerate.$(Symbol(string("vDSP_vdbcon", suff)))(X,stride(X,1),Ref(ref),result,stride(result,1),length(X),flag)
             return result
         end
-        function vdbcon(X::Vector{$T}, ref::$T, power::Bool=true)
+        function vdbcon(X::StridedVector{$T}, ref::$T, power::Bool=true)
             result = similar(X)
             vdbcon!(result, X, ref, power)
         end
@@ -1339,16 +1408,16 @@ Wraps [`vDSP_vdbcon`](https://developer.apple.com/documentation/accelerate/vdsp_
 # --- Data fill / clear / swap ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vclr!(C::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vclr", suff)))(C,1,length(C))
+        function vclr!(C::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vclr", suff)))(C,stride(C,1),length(C))
             return C
         end
-        function vfill!(C::Vector{$T}, a::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vfill", suff)))(Ref(a),C,1,length(C))
+        function vfill!(C::StridedVector{$T}, a::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vfill", suff)))(Ref(a),C,stride(C,1),length(C))
             return C
         end
-        function vswap!(A::Vector{$T}, B::Vector{$T})
-            LibAccelerate.$(Symbol(string("vDSP_vswap", suff)))(A,1,B,1,length(A))
+        function vswap!(A::StridedVector{$T}, B::StridedVector{$T})
+            LibAccelerate.$(Symbol(string("vDSP_vswap", suff)))(A,stride(A,1),B,stride(B,1),length(A))
             return (A, B)
         end
     end
@@ -1361,7 +1430,7 @@ end
 # --- Gathering / indexing ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vgathr!(C::Vector{$T}, A::Vector{$T}, B::Vector{UInt})
+        function vgathr!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{UInt})
             length(C) >= length(B) ||
                 throw(DimensionMismatch("C length ($(length(C))) must be at least length(B) ($(length(B)))"))
             n = length(A)
@@ -1369,20 +1438,22 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                 (1 <= B[i] <= n) ||
                     throw(BoundsError(A, Int(B[i])))
             end
-            LibAccelerate.$(Symbol(string("vDSP_vgathr", suff)))(A,B,1,C,1,length(B))
+            _check_unit_stride(A, :vgathr!)
+            LibAccelerate.$(Symbol(string("vDSP_vgathr", suff)))(A,B,stride(B,1),C,stride(C,1),length(B))
             return C
         end
-        function vgathr(A::Vector{$T}, B::Vector{UInt})
+        function vgathr(A::StridedVector{$T}, B::StridedVector{UInt})
             C = Vector{$T}(undef, length(B))
             vgathr!(C, A, B)
         end
-        function vindex!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+        function vindex!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T})
             length(C) >= length(B) ||
                 throw(DimensionMismatch("C length ($(length(C))) must be at least length(B) ($(length(B)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vindex", suff)))(A,B,1,C,1,length(B))
+            _check_unit_stride(A, :vindex!)
+            LibAccelerate.$(Symbol(string("vDSP_vindex", suff)))(A,B,stride(B,1),C,stride(C,1),length(B))
             return C
         end
-        function vindex(A::Vector{$T}, B::Vector{$T})
+        function vindex(A::StridedVector{$T}, B::StridedVector{$T})
             C = Vector{$T}(undef, length(B))
             vindex!(C, A, B)
         end
@@ -1395,21 +1466,21 @@ end
 # --- Generation ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vgen!(C::Vector{$T}, a::$T, b::$T)
-            LibAccelerate.$(Symbol(string("vDSP_vgen", suff)))(Ref(a),Ref(b),C,1,length(C))
+        function vgen!(C::StridedVector{$T}, a::$T, b::$T)
+            LibAccelerate.$(Symbol(string("vDSP_vgen", suff)))(Ref(a),Ref(b),C,stride(C,1),length(C))
             return C
         end
         function vgen(a::$T, b::$T, n::Integer)
             C = Vector{$T}(undef, n)
             vgen!(C, a, b)
         end
-        function vgenp!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T}, n::Integer)
+        function vgenp!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, n::Integer)
             length(C) >= n ||
                 throw(DimensionMismatch("C length ($(length(C))) must be at least n ($n)"))
-            LibAccelerate.$(Symbol(string("vDSP_vgenp", suff)))(A,1,B,1,C,1,n,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vgenp", suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),n,length(A))
             return C
         end
-        function vgenp(A::Vector{$T}, B::Vector{$T}, n::Integer)
+        function vgenp(A::StridedVector{$T}, B::StridedVector{$T}, n::Integer)
             C = Vector{$T}(undef, n)
             vgenp!(C, A, B, n)
         end
@@ -1422,35 +1493,35 @@ end
 # --- Clipping / thresholding variants ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vclipc!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+        function vclipc!(result::StridedVector{$T}, X::StridedVector{$T}, low::$T, high::$T)
             length(result) >= length(X) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             nlow = Ref{UInt64}(0)
             nhigh = Ref{UInt64}(0)
-            LibAccelerate.$(Symbol(string("vDSP_vclipc", suff)))(X,1,Ref(low),Ref(high),result,1,length(X),nlow,nhigh)
+            LibAccelerate.$(Symbol(string("vDSP_vclipc", suff)))(X,stride(X,1),Ref(low),Ref(high),result,stride(result,1),length(X),nlow,nhigh)
             return (result, Int(nlow[]), Int(nhigh[]))
         end
-        function vclipc(X::Vector{$T}, low::$T, high::$T)
+        function vclipc(X::StridedVector{$T}, low::$T, high::$T)
             result = similar(X)
             vclipc!(result, X, low, high)
         end
-        function vlim!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+        function vlim!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, c::$T)
             length(result) >= length(A) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(A) ($(length(A)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vlim", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vlim", suff)))(A,stride(A,1),Ref(b),Ref(c),result,stride(result,1),length(A))
             return result
         end
-        function vlim(A::Vector{$T}, b::$T, c::$T)
+        function vlim(A::StridedVector{$T}, b::$T, c::$T)
             result = similar(A)
             vlim!(result, A, b, c)
         end
-        function vthrsc!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+        function vthrsc!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, c::$T)
             length(result) >= length(A) ||
                 throw(DimensionMismatch("result length ($(length(result))) must be at least length(A) ($(length(A)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vthrsc", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
+            LibAccelerate.$(Symbol(string("vDSP_vthrsc", suff)))(A,stride(A,1),Ref(b),Ref(c),result,stride(result,1),length(A))
             return result
         end
-        function vthrsc(A::Vector{$T}, b::$T, c::$T)
+        function vthrsc(A::StridedVector{$T}, b::$T, c::$T)
             result = similar(A)
             vthrsc!(result, A, b, c)
         end
@@ -1464,17 +1535,20 @@ end
 # --- Sorting ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vsort!(X::Vector{$T}, ascending::Bool=true)
+        function vsort!(X::StridedVector{$T}, ascending::Bool=true)
+            _check_unit_stride(X, :vsort!)
             order = ascending ? Cint(1) : Cint(-1)
             LibAccelerate.$(Symbol(string("vDSP_vsort", suff)))(X,length(X),order)
             return X
         end
-        function vsorti!(indices::Vector{UInt}, X::Vector{$T}, ascending::Bool=true)
+        function vsorti!(indices::StridedVector{UInt}, X::StridedVector{$T}, ascending::Bool=true)
+            _check_unit_stride(X, :vsorti!)
+            _check_unit_stride(indices, :vsorti!)
             order = ascending ? Cint(1) : Cint(-1)
             LibAccelerate.$(Symbol(string("vDSP_vsorti", suff)))(X,indices,C_NULL,length(X),order)
             return indices
         end
-        function vsorti(X::Vector{$T}, ascending::Bool=true)
+        function vsorti(X::StridedVector{$T}, ascending::Bool=true)
             indices = Vector{UInt}(undef, length(X))
             for i in 1:length(X)
                 indices[i] = UInt(i - 1)
@@ -1489,7 +1563,7 @@ end
 @doc "Return sort permutation (1-based indices). Wraps [`vDSP_vsorti`](https://developer.apple.com/documentation/accelerate/vdsp_vsorti)." vsorti
 
 @doc """
-    vsorti!(indices::Vector{UInt}, X::Vector{T}, ascending::Bool=true)
+    vsorti!(indices::StridedVector{UInt}, X::StridedVector{T}, ascending::Bool=true)
 
 In-place index sort. `indices` MUST be pre-filled with the 0-based identity
 permutation `0:length(X)-1` before calling; `vDSP_vsorti` reorders those existing
@@ -1502,13 +1576,14 @@ non-identity buffer yields a silently wrong permutation. Use the allocating
 # --- Table lookup ---
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function vtabi!(D::Vector{$T}, A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
+        function vtabi!(D::StridedVector{$T}, A::StridedVector{$T}, s1::$T, s2::$T, C::StridedVector{$T})
             length(D) >= length(A) ||
                 throw(DimensionMismatch("D length ($(length(D))) must be at least length(A) ($(length(A)))"))
-            LibAccelerate.$(Symbol(string("vDSP_vtabi", suff)))(A,1,Ref(s1),Ref(s2),C,length(C),D,1,length(A))
+            _check_unit_stride(C, :vtabi!)
+            LibAccelerate.$(Symbol(string("vDSP_vtabi", suff)))(A,stride(A,1),Ref(s1),Ref(s2),C,length(C),D,stride(D,1),length(A))
             return D
         end
-        function vtabi(A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
+        function vtabi(A::StridedVector{$T}, s1::$T, s2::$T, C::StridedVector{$T})
             D = Vector{$T}(undef, length(A))
             vtabi!(D, A, s1, s2, C)
         end
@@ -1518,34 +1593,34 @@ end
 @doc "Table lookup with interpolation: `D[i] = C[clamp(s1*A[i]+s2, 0, M-1)]`. Wraps [`vDSP_vtabi`](https://developer.apple.com/documentation/accelerate/vdsp_vtabi)." vtabi
 
 # --- Integer operations (Int32) ---
-function vaddi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
-    LibAccelerate.vDSP_vaddi(A,1,B,1,C,1,length(A))
+function vaddi!(C::StridedVector{Int32}, A::StridedVector{Int32}, B::StridedVector{Int32})
+    LibAccelerate.vDSP_vaddi(A,stride(A,1),B,stride(B,1),C,stride(C,1),length(A))
     return C
 end
-function vaddi(A::Vector{Int32}, B::Vector{Int32})
+function vaddi(A::StridedVector{Int32}, B::StridedVector{Int32})
     C = similar(A)
     vaddi!(C, A, B)
 end
 
-function vabsi!(C::Vector{Int32}, A::Vector{Int32})
-    LibAccelerate.vDSP_vabsi(A,1,C,1,length(A))
+function vabsi!(C::StridedVector{Int32}, A::StridedVector{Int32})
+    LibAccelerate.vDSP_vabsi(A,stride(A,1),C,stride(C,1),length(A))
     return C
 end
-function vabsi(A::Vector{Int32})
+function vabsi(A::StridedVector{Int32})
     C = similar(A)
     vabsi!(C, A)
 end
 
-function vfilli!(C::Vector{Int32}, a::Int32)
-    LibAccelerate.vDSP_vfilli(Ref(a),C,1,length(C))
+function vfilli!(C::StridedVector{Int32}, a::Int32)
+    LibAccelerate.vDSP_vfilli(Ref(a),C,stride(C,1),length(C))
     return C
 end
 
-function veqvi!(C::Vector{Int32}, A::Vector{Int32}, B::Vector{Int32})
-    LibAccelerate.vDSP_veqvi(A,1,B,1,C,1,length(A))
+function veqvi!(C::StridedVector{Int32}, A::StridedVector{Int32}, B::StridedVector{Int32})
+    LibAccelerate.vDSP_veqvi(A,stride(A,1),B,stride(B,1),C,stride(C,1),length(A))
     return C
 end
-function veqvi(A::Vector{Int32}, B::Vector{Int32})
+function veqvi(A::StridedVector{Int32}, B::StridedVector{Int32})
     C = similar(A)
     veqvi!(C, A, B)
 end
@@ -1628,13 +1703,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vfix$(intname)!")
         vdsp_name = string("vDSP_vfix", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+            function ($fname!)(C::StridedVector{$intT}, A::StridedVector{$T})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$T})
+            function ($fname)(A::StridedVector{$T})
                 C = Vector{$intT}(undef, length(A))
                 ($fname!)(C, A)
             end
@@ -1649,13 +1724,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vfixu$(intname)!")
         vdsp_name = string("vDSP_vfixu", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+            function ($fname!)(C::StridedVector{$intT}, A::StridedVector{$T})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$T})
+            function ($fname)(A::StridedVector{$T})
                 C = Vector{$intT}(undef, length(A))
                 ($fname!)(C, A)
             end
@@ -1670,13 +1745,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vfixr$(intname)!")
         vdsp_name = string("vDSP_vfixr", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+            function ($fname!)(C::StridedVector{$intT}, A::StridedVector{$T})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$T})
+            function ($fname)(A::StridedVector{$T})
                 C = Vector{$intT}(undef, length(A))
                 ($fname!)(C, A)
             end
@@ -1691,13 +1766,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vfixru$(intname)!")
         vdsp_name = string("vDSP_vfixru", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+            function ($fname!)(C::StridedVector{$intT}, A::StridedVector{$T})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$T})
+            function ($fname)(A::StridedVector{$T})
                 C = Vector{$intT}(undef, length(A))
                 ($fname!)(C, A)
             end
@@ -1712,13 +1787,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vflt$(intname)!")
         vdsp_name = string("vDSP_vflt", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+            function ($fname!)(C::StridedVector{$T}, A::StridedVector{$intT})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$intT}, ::Type{$T})
+            function ($fname)(A::StridedVector{$intT}, ::Type{$T})
                 C = Vector{$T}(undef, length(A))
                 ($fname!)(C, A)
             end
@@ -1733,13 +1808,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         fname! = Symbol("vfltu$(intname)!")
         vdsp_name = string("vDSP_vfltu", intname, suff)
         @eval begin
-            function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+            function ($fname!)(C::StridedVector{$T}, A::StridedVector{$intT})
                 length(C) >= length(A) ||
                     throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
-                LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
+                LibAccelerate.$(Symbol(vdsp_name))(A,stride(A,1),C,stride(C,1),length(A))
                 return C
             end
-            function ($fname)(A::Vector{$intT}, ::Type{$T})
+            function ($fname)(A::StridedVector{$intT}, ::Type{$T})
                 C = Vector{$T}(undef, length(A))
                 ($fname!)(C, A)
             end
