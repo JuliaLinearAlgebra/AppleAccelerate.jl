@@ -1180,8 +1180,8 @@ end
 @doc "Running sum scaled by `scale`. Wraps [`vDSP_vrsum`](https://developer.apple.com/documentation/accelerate/vdsp_vrsum)." vrsum
 @doc "Simpson's rule integration with step size `step`. Wraps [`vDSP_vsimps`](https://developer.apple.com/documentation/accelerate/vdsp_vsimps)." vsimps
 @doc "Trapezoidal integration with step size `step`. Wraps [`vDSP_vtrapz`](https://developer.apple.com/documentation/accelerate/vdsp_vtrapz)." vtrapz
-@doc "Sliding window sum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswsum`](https://developer.apple.com/documentation/accelerate/vdsp_vswsum)." vswsum
-@doc "Sliding window maximum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswmax`](https://developer.apple.com/documentation/accelerate/vdsp_vswmax)." vswmax
+@doc "Sliding window sum with window size `window`. Returns a vector of length `length(X) - window + 1`. `window` must satisfy `1 ≤ window ≤ length(X)`; for `vswsum!`, `result` must have length `≥ length(X) - window + 1`. Wraps [`vDSP_vswsum`](https://developer.apple.com/documentation/accelerate/vdsp_vswsum)." vswsum
+@doc "Sliding window maximum with window size `window`. Returns a vector of length `length(X) - window + 1`. `window` must satisfy `1 ≤ window ≤ length(X)`; for `vswmax!`, `result` must have length `≥ length(X) - window + 1`. Wraps [`vDSP_vswmax`](https://developer.apple.com/documentation/accelerate/vdsp_vswmax)." vswmax
 
 # ============================================================
 # vDSP Interpolation

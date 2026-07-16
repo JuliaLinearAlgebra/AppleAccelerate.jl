@@ -507,6 +507,9 @@ Every function in this family has an allocating variant and a mutating variant
 bit width (`8`, `16`, `32`), so `vfix32` truncates to `Int32`, `vfltu16` converts
 `UInt16` to float, and so on. Both `Float32` and `Float64` are supported.
 
+For the mutating `f!(C, A)` forms, `C` must satisfy `length(C) ≥ length(A)`;
+otherwise a `DimensionMismatch` is thrown before any elements are written.
+
 The two directions differ in how the output type is chosen. For **float → int** the
 integer type is fixed by the function name, so the allocating form is `f(A)`. For
 **int → float** the float width is ambiguous, so the allocating form takes it
