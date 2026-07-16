@@ -743,27 +743,30 @@ end
 # ============================================================
 # Format conversion (interleaved ↔ split complex)
 # ============================================================
-for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
-                             (Float64, "D", :DSPDoubleSplitComplex))
+for (T, suff, DSPSplit, DSPCplx) in ((Float32, "", :DSPSplitComplex, :DSPComplex),
+                                     (Float64, "D", :DSPDoubleSplitComplex, :DSPDoubleComplex))
     @eval begin
         function ctoz(X::Vector{Complex{$T}})
             n = length(X)
             o_re = Vector{$T}(undef, n)
             o_im = Vector{$T}(undef, n)
-            GC.@preserve X o_re o_im begin
+            # X is passed as a `reinterpret` view (same memory as the interleaved
+            # `Ptr{DSPComplex}` the wrapper wants) so ccall roots it; only the
+            # split-complex backing arrays need an explicit GC.@preserve.
+            GC.@preserve o_re o_im begin
                 osplit = $DSPSplit(o_re, o_im)
                 LibAccelerate.$(Symbol(string("vDSP_ctoz", suff)))(
-                      pointer(X), 2, Ref(osplit), 1, n)
+                      reinterpret(LibAccelerate.$DSPCplx, X), 2, Ref(osplit), 1, n)
             end
             return (o_re, o_im)
         end
         function ztoc(re::Vector{$T}, im::Vector{$T})
             n = length(re)
             result = Vector{Complex{$T}}(undef, n)
-            GC.@preserve re im result begin
+            GC.@preserve re im begin
                 isplit = $DSPSplit(re, im)
                 LibAccelerate.$(Symbol(string("vDSP_ztoc", suff)))(
-                      Ref(isplit), 1, pointer(result), 2, n)
+                      Ref(isplit), 1, reinterpret(LibAccelerate.$DSPCplx, result), 2, n)
             end
             return result
         end
