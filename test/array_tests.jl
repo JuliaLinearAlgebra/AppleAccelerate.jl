@@ -1478,7 +1478,60 @@ for T in (Float32, Float64)
         @test AppleAccelerate.vflt32(Ai, T) ≈ T.(Ai)
         @test_throws DimensionMismatch AppleAccelerate.vflt32!(Vector{T}(undef, 1), Ai)
         @test_throws DimensionMismatch AppleAccelerate.vfltu8!(Vector{T}(undef, 1), UInt8[1, 2, 3, 4])
+
+        # --- unary ops: undersized result must throw ---
+        @test_throws DimensionMismatch AppleAccelerate.vneg!(small, X)
+        @test_throws DimensionMismatch AppleAccelerate.vnabs!(small, X)
+        @test_throws DimensionMismatch AppleAccelerate.vsq!(small, X)
+        @test_throws DimensionMismatch AppleAccelerate.vssq!(small, X)
+        @test_throws DimensionMismatch AppleAccelerate.vfrac!(small, X)
+        @test_throws DimensionMismatch AppleAccelerate.vabs!(small, X)
+
+        # --- vector-scalar ops: result and X must match (count is taken
+        #     from result, so an oversized result would read past X) ---
+        big = Vector{T}(undef, length(X) + 3)
+        c = T(2)
+        @test_throws DimensionMismatch AppleAccelerate.vsadd!(small, X, c)
+        @test_throws DimensionMismatch AppleAccelerate.vsadd!(big, X, c)
+        @test_throws DimensionMismatch AppleAccelerate.vsdiv!(big, X, c)
+        @test_throws DimensionMismatch AppleAccelerate.vsmul!(big, X, c)
+        @test_throws DimensionMismatch AppleAccelerate.vssub!(big, X, c)
+        @test_throws DimensionMismatch AppleAccelerate.svsub!(big, X, c)
+
+        # --- scalar / vector divide ---
+        @test_throws DimensionMismatch AppleAccelerate.svdiv!(small, X, c)
+
+        # --- tapered merge: all three lengths must match ---
+        @test_throws DimensionMismatch AppleAccelerate.vtmerg!(small, X, X)
+        @test_throws DimensionMismatch AppleAccelerate.vtmerg!(ok, X, T[1, 2])
+
+        # --- ramp multiply ---
+        @test_throws DimensionMismatch AppleAccelerate.vrampmul!(small, X, T(0), T(1))
+
+        # --- integration / running ops ---
+        @test_throws DimensionMismatch AppleAccelerate.vrsum!(small, X, T(1))
+        @test_throws DimensionMismatch AppleAccelerate.vsimps!(small, X, T(1))
+        @test_throws DimensionMismatch AppleAccelerate.vtrapz!(small, X, T(1))
+
+        # --- polynomial evaluation ---
+        @test_throws DimensionMismatch AppleAccelerate.vpoly!(small, T[1, 0], X)
+
+        # --- normalization ---
+        @test_throws DimensionMismatch AppleAccelerate.vnormalize!(small, X)
     end
+end
+
+# Int32 mutating ops: mismatched buffers must throw before the C routine
+# reads or writes out of bounds.
+@testset "Bounds-check guards::Int32" begin
+    Ai = Int32[1, -2, 3, -4, 5]
+    Bi = Int32[1, 2, 3, 4, 5]
+    smalli = Vector{Int32}(undef, 2)
+    @test_throws DimensionMismatch AppleAccelerate.vaddi!(smalli, Ai, Bi)
+    @test_throws DimensionMismatch AppleAccelerate.vaddi!(similar(Ai), Ai, Int32[1, 2])
+    @test_throws DimensionMismatch AppleAccelerate.vabsi!(smalli, Ai)
+    @test_throws DimensionMismatch AppleAccelerate.veqvi!(smalli, Ai, Bi)
+    @test_throws DimensionMismatch AppleAccelerate.veqvi!(similar(Ai), Ai, Int32[1, 2])
 end
 
 end # @testset "Array Operations"

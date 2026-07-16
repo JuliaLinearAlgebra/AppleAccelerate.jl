@@ -323,6 +323,10 @@ for T in (Float32, Float64)
         re2, im2 = AppleAccelerate.ctoz(AppleAccelerate.ztoc(re, im))
         @test re2 == re
         @test im2 == im
+
+        # mismatched re/im lengths must throw (count is taken from re, so a
+        # shorter im would be read out of bounds)
+        @test_throws DimensionMismatch AppleAccelerate.ztoc(re, im[1:end-1])
     end
 end
 

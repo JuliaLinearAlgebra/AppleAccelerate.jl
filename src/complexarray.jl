@@ -761,6 +761,8 @@ for (T, suff, DSPSplit, DSPCplx) in ((Float32, "", :DSPSplitComplex, :DSPComplex
             return (o_re, o_im)
         end
         function ztoc(re::Vector{$T}, im::Vector{$T})
+            length(re) == length(im) ||
+                throw(DimensionMismatch("re and im must have the same length"))
             n = length(re)
             result = Vector{Complex{$T}}(undef, n)
             GC.@preserve re im begin
