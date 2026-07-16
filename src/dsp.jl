@@ -70,7 +70,9 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             # to keep reads in-bounds for an oversized `result` buffer. Total
             # padded length = rsize + 2*ksize - 1 (front pad ksize-1).
             xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, rsize + ksize - xsize)]
-            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
+            # `pointer(K, ksize)` is a bare pointer into K's buffer; root K across
+            # the ccall so it cannot be collected mid-call.
+            GC.@preserve K LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
             return result
         end
     end
@@ -118,7 +120,8 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             # from rsize so an oversized `result` buffer stays in-bounds. Total
             # padded length = rsize + 2*ysize - 1 (front pad ysize-1).
             xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, rsize + ysize - xsize)]
-            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
+            # Y backs the kernel argument; root it across the ccall.
+            GC.@preserve Y LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
             return result
         end
     end
