@@ -8,10 +8,10 @@ using AppleAccelerate
 
 ## FFT
 
-The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. All dimensions must be powers of 2.
+The FFT API wraps Apple's [vDSP FFT functions](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) and follows the same naming conventions as [AbstractFFTs.jl](https://github.com/JuliaMath/AbstractFFTs.jl). Both 1D vectors and 2D matrices are supported with `ComplexF64` and `ComplexF32` inputs. A **1D complex** `fft`/`ifft`/`bfft` (called without an explicit `plan_fft` setup) accepts lengths of the form `f * 2^k` with `f ∈ {1, 3, 5, 15}` — powers of two use vDSP's fast FFT path, while other supported lengths transparently use Apple's mixed-radix DFT (see [`is_supported_fft_length`](@ref AppleAccelerate.is_supported_fft_length)). **2D transforms and the real FFT (`rfft`/`brfft`) remain power-of-2 only.** Unsupported 1D lengths throw an `ArgumentError`.
 
 !!! note "Choosing between AppleAccelerate and FFTW"
-    AppleAccelerate's FFT is a direct vDSP binding: all dimensions must be powers of 2, only 1-D vectors and 2-D matrices are supported, and it is reached exclusively through the `AppleAccelerate.` prefix. It does **not** plug into the AbstractFFTs.jl interface — loading AppleAccelerate never changes what `fft`/`plan_fft` do in your session, and will never override FFTW.jl.
+    AppleAccelerate's FFT is a direct vDSP binding: 1-D complex transforms support `f * 2^k` lengths (`f ∈ {1, 3, 5, 15}`), while 2-D transforms and the real FFT are power-of-2 only. Only 1-D vectors and 2-D matrices are supported, and it is reached exclusively through the `AppleAccelerate.` prefix. It does **not** plug into the AbstractFFTs.jl interface — loading AppleAccelerate never changes what `fft`/`plan_fft` do in your session, and will never override FFTW.jl.
 
     For general sizes, 3-D and higher arrays, dimension-selective (`region`) transforms, or the standard Julia FFT interface, use [FFTW.jl](https://github.com/JuliaMath/FFTW.jl). vDSP is mainly competitive at small transform sizes; FFTW is typically faster at larger ones.
 
@@ -66,6 +66,7 @@ AppleAccelerate.bfft
 AppleAccelerate.fft!
 AppleAccelerate.ifft!
 AppleAccelerate.bfft!
+AppleAccelerate.is_supported_fft_length
 ```
 
 ## Real FFT
