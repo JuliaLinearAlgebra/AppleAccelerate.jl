@@ -940,7 +940,9 @@ function Base.transpose(M::AASparseMatrix)
         throw(ArgumentError("cannot transpose an already-adjointed AASparseMatrix " *
             "(libSparse cannot represent the resulting `conj(A)` view; " *
             "apply `conj` to the underlying data instead)"))
-    AASparseMatrix(SparseGetTranspose(M.matrix), M._colptr, M._rowval, M._nzval)
+    # M.matrix carries raw pointers into M's CSC buffers; keep M alive for the call.
+    t = GC.@preserve M SparseGetTranspose(M.matrix)
+    AASparseMatrix(t, M._colptr, M._rowval, M._nzval)
 end
 
 # Real: same as transpose. Complex: flip ct (and toggle t); CSC data shared.
@@ -952,8 +954,8 @@ function Base.adjoint(M::AASparseMatrix{T}) where T<:Complex
         throw(ArgumentError("cannot adjoint an already-transposed AASparseMatrix " *
             "(libSparse cannot represent the resulting `conj(A)` view; " *
             "apply `conj` to the underlying data instead)"))
-    AASparseMatrix(SparseGetConjugateTranspose(M.matrix),
-                   M._colptr, M._rowval, M._nzval)
+    ct = GC.@preserve M SparseGetConjugateTranspose(M.matrix)
+    AASparseMatrix(ct, M._colptr, M._rowval, M._nzval)
 end
 
 function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
@@ -961,7 +963,9 @@ function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
         "Matrix and right-hand side size mismatch: got "
         * "$(size(A)[2]) and $(size(x, 1))"))
     y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
-    SparseMultiply(A.matrix, x, y)
+    # A.matrix is a C value struct holding raw pointers into A's CSC buffers,
+    # which nothing else roots across the ccall; keep A alive for the call.
+    GC.@preserve A SparseMultiply(A.matrix, x, y)
     return y
 end
 
@@ -971,7 +975,7 @@ function Base.:(*)(alpha::T, A::AASparseMatrix{T},
         "Matrix and right-hand side size mismatch: got "
         * "$(size(A)[2]) and $(size(x, 1))"))
     y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
-    SparseMultiply(alpha, A.matrix, x, y)
+    GC.@preserve A SparseMultiply(alpha, A.matrix, x, y)
     return y
 end
 
@@ -984,7 +988,7 @@ function muladd!(A::AASparseMatrix{T}, x::StridedVecOrMat{T},
         size(x)[2:end] == size(y)[2:end]) || throw(DimensionMismatch(
         "Dimension mismatch in y += A*x: A is $(size(A)), "
         * "x is $(size(x)), y is $(size(y))"))
-    SparseMultiplyAdd(A.matrix, x, y)
+    GC.@preserve A SparseMultiplyAdd(A.matrix, x, y)
 end
 
 """
@@ -996,7 +1000,7 @@ function muladd!(alpha::T, A::AASparseMatrix{T},
         size(x)[2:end] == size(y)[2:end]) || throw(DimensionMismatch(
         "Dimension mismatch in y += alpha*A*x: A is $(size(A)), "
         * "x is $(size(x)), y is $(size(y))"))
-    SparseMultiplyAdd(alpha, A.matrix, x, y)
+    GC.@preserve A SparseMultiplyAdd(alpha, A.matrix, x, y)
 end
 
 # ============================================================
@@ -1155,7 +1159,9 @@ function factor!(aa_fact::AAFactorization{T},
                    (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
                                                     SparseFactorizationQR
         end
-        fact = SparseFactor(kind, aa_fact.matrixObj.matrix)
+        # matrixObj.matrix holds raw pointers into the CSC buffers; keep the
+        # owning wrapper alive across the factorization call.
+        fact = GC.@preserve aa_fact SparseFactor(kind, aa_fact.matrixObj.matrix)
         if fact.status == SparseStatusOk
             aa_fact._factorization = fact
         else

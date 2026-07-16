@@ -132,7 +132,7 @@ function set_num_threads(n::Integer)
     elseif n > 1
         retval = ccall((:BLASSetThreading, libacc), Cint, (Cint,), BLAS_THREADING_MULTI_THREADED)
     end
-    @assert retval == 0 "AppleAccelerate: Call to BLASSetThreading failed"
+    retval == 0 || error("AppleAccelerate: Call to BLASSetThreading failed")
     return get_num_threads()
 end
 
