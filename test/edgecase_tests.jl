@@ -1,7 +1,7 @@
 using AppleAccelerate
 using Test
 
-# Edge-case tests: empty inputs, NaN/Inf propagation, and non-contiguous views.
+# Edge-case tests: empty inputs and NaN/Inf propagation.
 
 @testset "Empty arrays" begin
     @testset "Real ops ($T)" for T in (Float32, Float64)
@@ -66,15 +66,4 @@ end
         # Base.sin(Inf) throws DomainError; Accelerate returns NaN instead
         @test isnan(AppleAccelerate.sin(T[Inf])[1])
     end
-end
-
-# Array ops currently require exactly Vector/Matrix, so non-contiguous views
-# are rejected via MethodError. A parallel PR is adding strided support;
-# this testset documents the current restriction and is easy to delete then.
-@testset "Non-contiguous views are unsupported (MethodError)" begin
-    A = rand(Float64, 10)
-    v = view(A, 1:2:9)
-    @test_throws MethodError AppleAccelerate.vadd(v, v)
-    @test_throws MethodError AppleAccelerate.vneg(v)
-    @test_throws MethodError AppleAccelerate.exp(v)
 end
