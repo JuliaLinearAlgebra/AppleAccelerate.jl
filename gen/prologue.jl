@@ -1,6 +1,8 @@
 # Accelerate ships as a macOS *system framework*. Unlike the usual Clang.jl + JLL
 # flow, there is no artifact to load — every Mac already has it. We ccall it by
 # absolute path, mirroring the `libacc` const in the top-level AppleAccelerate module.
+# NOTE: must stay in sync with `ACCELERATE_FRAMEWORK` in gen/generate.jl, which dlopens
+# the same binary for its dead-symbol strip pass and verifies this line at generation time.
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 
 # BNNSGraph opaque handles. In bnns_graph.h these are anonymous structs that all share the

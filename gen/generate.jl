@@ -14,11 +14,34 @@ cd(@__DIR__)
 
 # Resolve the SDK and vecLib header directory from the active toolchain rather
 # than hard-coding a path — this tracks whatever Xcode/CLT the developer has.
-const SDK = readchomp(`xcrun --show-sdk-path`)
+const SDK = try
+    readchomp(`xcrun --show-sdk-path`)
+catch err
+    error("`xcrun --show-sdk-path` failed — the generator needs the macOS SDK headers. " *
+          "Install Xcode or the Command Line Tools (`xcode-select --install`) and, if " *
+          "several toolchains are installed, select one with `xcode-select -s`. " *
+          "Underlying error: $(sprint(showerror, err))")
+end
+isdir(SDK) || error("SDK path reported by `xcrun --show-sdk-path` does not exist: $SDK")
 const VECLIB = joinpath(
     SDK,
     "System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/Headers",
 )
+isdir(VECLIB) || error("vecLib header directory not found in the SDK: $VECLIB\n" *
+                       "The SDK at $SDK appears to lack the Accelerate framework headers; " *
+                       "reinstall/update Xcode or the Command Line Tools.")
+
+# The framework binary we dlopen for the dead-symbol strip pass, and the path the
+# generated bindings ccall at runtime. MUST match `const libacc = ...` in gen/prologue.jl
+# (verified below) — prologue.jl is spliced verbatim into the generated module, so the
+# two would silently diverge otherwise.
+const ACCELERATE_FRAMEWORK = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
+let prologue = read(joinpath(@__DIR__, "prologue.jl"), String)
+    expected = "const libacc = \"$ACCELERATE_FRAMEWORK\""
+    occursin(expected, prologue) || error(
+        "gen/prologue.jl no longer defines `$expected`. The `libacc` path in prologue.jl " *
+        "and `ACCELERATE_FRAMEWORK` in gen/generate.jl must stay in sync; update both.")
+end
 
 options = load_options(joinpath(@__DIR__, "generator.toml"))
 
@@ -34,6 +57,8 @@ push!(args, "-iframework", joinpath(SDK, "System", "Library", "Frameworks"))
 #     → BLAS/LAPACK are forwarded via libblastrampoline, not ccall.
 #   - LinearAlgebra/  → C++ generics, not C-mappable.
 #   - Sparse/BLAS.h   → C++ name-mangled dense×sparse multiply (hand-wrapped in sparse.jl).
+#   - vImage          → a separate Accelerate sub-framework (Accelerate.framework/
+#     Frameworks/vImage.framework), not part of vecLib and not currently in scope.
 # We include Sparse/Solve.h (the C solver API) directly rather than Sparse/Sparse.h so we
 # don't pull in the C++ BLAS.h. Likewise the BNNS umbrella + graph headers pull in the
 # struct/constant headers transitively.
@@ -51,6 +76,12 @@ headers = [
     joinpath(@__DIR__, "shims", "bnns_graph_shim.h"),
     joinpath(VECLIB, "Quadrature", "Quadrature.h"),
 ]
+let missing = filter(!isfile, headers)
+    isempty(missing) || error(
+        "Expected header(s) not found in the SDK at $SDK:\n  " * join(missing, "\n  ") *
+        "\nApple may have moved/renamed them in this SDK version; update the `headers` " *
+        "list in gen/generate.jl accordingly.")
+end
 
 ctx = create_context(headers, args, options)
 build!(ctx)
@@ -101,7 +132,7 @@ end
 # if Apple ever exports one of these, it simply stops being stripped. Wrappers whose symbol
 # resolves (the vast majority, including all the real `_Sparse*` ones) are left untouched.
 function strip_dead_symbol_wrappers!(path)
-    h = dlopen("/System/Library/Frameworks/Accelerate.framework/Accelerate")
+    h = dlopen(ACCELERATE_FRAMEWORK)
     lines = readlines(path)
     out = String[]
     funchead = r"^function\s+[A-Za-z_][A-Za-z0-9_]*\("
@@ -164,10 +195,35 @@ function fix_double_complex_typedefs!(path)
     return fixed
 end
 
+# Each post-pass below is *expected* to match something: cblas wrappers are always pulled
+# in via Sparse/Types.h, the framework always ships some unexported declarations, and
+# Clang.jl (as pinned) always mis-emits the two double-complex typedefs. A zero-match pass
+# therefore means Clang.jl's output format drifted and the pass silently no-oped — which
+# for `fix_double_complex_typedefs!` would silently reintroduce the ComplexF64-truncation
+# bug fixed in PR #158. Fail loudly instead of committing broken bindings.
 out_path = joinpath(@__DIR__, "..", "src", "lib", "LibAccelerate.jl")
+
 removed = strip_out_of_scope_blas!(out_path)
+removed > 0 || error(
+    "strip_out_of_scope_blas! removed no `cblas_*`/`catlas_*`/`clapack_*` wrappers. " *
+    "These are always pulled in transitively via Sparse/Types.h, so a zero count means " *
+    "Clang.jl's emitted wrapper format changed and the pass no-oped. Inspect $out_path " *
+    "and update the pass (or, if BLAS really is no longer pulled in, update this check).")
 @info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"
+
 dead = strip_dead_symbol_wrappers!(out_path)
+isempty(dead) && error(
+    "strip_dead_symbol_wrappers! removed no wrappers. The headers always declare symbols " *
+    "the framework does not export (Sparse/Solve.h overloadable inlines, header-only BNNS " *
+    "graph setters), so a zero count means the `@ccall libacc.<sym>` pattern no longer " *
+    "matches Clang.jl's output and unresolvable wrappers were left in $out_path. " *
+    "Update the pass's regexes to match the new format.")
 @info "Stripped $(length(dead)) wrappers whose ccall symbol does not exist in the framework" dead
+
 fixed = fix_double_complex_typedefs!(out_path)
+fixed == 2 || error(
+    "fix_double_complex_typedefs! rewrote $fixed typedef line(s), expected exactly 2 " *
+    "(`__double_complex_t` and `__SPARSE_double_complex`). If Clang.jl now emits these " *
+    "correctly as ComplexF64, delete this pass; otherwise the emitted form drifted and " *
+    "the double-complex truncation bug (PR #158) is back in $out_path — fix the pass.")
 @info "Corrected $fixed double-precision complex typedef(s) (Clang.jl anonymous-_Complex bug)"
