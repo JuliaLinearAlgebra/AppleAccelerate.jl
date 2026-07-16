@@ -63,6 +63,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
+        @doc """
+            vneg(X::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
+            vneg!(result, X)
+
+        Complex negation: `result[i] = -X[i]`.
+        Wraps [`vDSP_zvneg`](https://developer.apple.com/documentation/accelerate/vdsp_zvneg).
+        """
         function vneg(X::Vector{Complex{$T}})
             result = similar(X)
             vneg!(result, X)
@@ -139,6 +146,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
+        @doc """
+            vmul(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
+            vmul!(result, X, Y)
+
+        Element-wise complex multiplication: `result[i] = X[i] * Y[i]`.
+        Wraps [`vDSP_zvmul`](https://developer.apple.com/documentation/accelerate/vdsp_zvmul).
+        """
         function vmul(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             result = similar(X)
             vmul!(result, X, Y)
@@ -160,6 +174,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
+        @doc """
+            vdiv(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
+            vdiv!(result, X, Y)
+
+        Element-wise complex division: `result[i] = X[i] / Y[i]`.
+        Wraps [`vDSP_zvdiv`](https://developer.apple.com/documentation/accelerate/vdsp_zvdiv).
+        """
         function vdiv(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
             result = similar(X)
             vdiv!(result, X, Y)
@@ -182,6 +203,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
+        @doc """
+            vsmul(X::Vector{Complex{$($T)}}, c::Complex{$($T)}) -> Vector{Complex{$($T)}}
+            vsmul!(result, X, c)
+
+        Complex vector-scalar multiplication: `result[i] = X[i] * c`.
+        Wraps [`vDSP_zvzsml`](https://developer.apple.com/documentation/accelerate/vdsp_zvzsml).
+        """
         function vsmul(X::Vector{Complex{$T}}, c::Complex{$T})
             result = similar(X)
             vsmul!(result, X, c)
@@ -207,6 +235,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
+        @doc """
+            vabs(X::Vector{Complex{$($T)}}) -> Vector{$($T)}
+            vabs!(result, X)
+
+        Complex absolute value (modulus): `result[i] = abs(X[i])`.
+        Wraps [`vDSP_zvabs`](https://developer.apple.com/documentation/accelerate/vdsp_zvabs).
+        """
         function vabs(X::Vector{Complex{$T}})
             result = Vector{$T}(undef, length(X))
             vabs!(result, X)
