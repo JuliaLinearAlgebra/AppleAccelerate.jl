@@ -70,7 +70,9 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             # to keep reads in-bounds for an oversized `result` buffer. Total
             # padded length = rsize + 2*ksize - 1 (front pad ksize-1).
             xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, rsize + ksize - xsize)]
-            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
+            # `pointer(K, ksize)` is a bare pointer into K's buffer; root K across
+            # the ccall so it cannot be collected mid-call.
+            GC.@preserve K LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
             return result
         end
     end
@@ -118,7 +120,8 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             # from rsize so an oversized `result` buffer stays in-bounds. Total
             # padded length = rsize + 2*ysize - 1 (front pad ysize-1).
             xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, rsize + ysize - xsize)]
-            LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
+            # Y backs the kernel argument; root it across the ccall.
+            GC.@preserve Y LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
             return result
         end
     end
@@ -977,6 +980,34 @@ function destroy_fftsetup(setup::FFTSetup{Float32})
     LibAccelerate.vDSP_destroy_fftsetup(setup.plan)
 end
 
+# --- Mixed-radix length support (for non-power-of-2 1D complex FFT) ---
+#
+# Apple's vDSP DFT (vDSP_DFT_zop_CreateSetup) supports lengths of the form
+# `f * 2^n` where `f ∈ {1, 3, 5, 15}`. `fft`/`ifft`/`bfft` on a 1D vector with no
+# explicit `FFTSetup` transparently route to this mixed-radix DFT path when the
+# length is not a power of two but is a supported `f * 2^n`; power-of-2 lengths
+# keep using the (faster, in-place-capable) `vDSP_fft_*` path unchanged.
+
+# Return the odd cofactor `f` of `n` (i.e. `n` with all factors of 2 removed).
+_odd_cofactor(n::Integer) = n >> trailing_zeros(n)
+
+"""
+    is_supported_fft_length(n::Integer) -> Bool
+
+Return `true` if a 1D complex FFT of length `n` is supported by Apple vDSP via the
+idiomatic `fft`/`ifft`/`bfft` API. Supported lengths are `f * 2^k` with
+`f ∈ {1, 3, 5, 15}` (this includes all powers of two).
+"""
+is_supported_fft_length(n::Integer) = n >= 1 && _odd_cofactor(n) in (1, 3, 5, 15)
+
+# Throw an informative error for an unsupported 1D FFT length.
+@noinline function _unsupported_fft_length(n::Integer)
+    throw(ArgumentError(string(
+        "unsupported FFT length $n: AppleAccelerate only supports 1D complex FFT ",
+        "lengths of the form f*2^k with f ∈ {1, 3, 5, 15}. ",
+        "For arbitrary (e.g. prime) lengths, use FFTW.jl instead.")))
+end
+
 # --- Internal 1D FFT (direction-based) ---
 
 function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
@@ -1067,18 +1098,36 @@ end
 
 # --- Public API: fft (forward FFT) ---
 
+# Mixed-radix 1D complex transform via the vDSP DFT (non-power-of-2). `direction` is
+# DFT_FORWARD or DFT_INVERSE. Result is unnormalized (matching bfft/dft conventions).
+function _fft1d_dft(x::Vector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
+    setup = plan_dft(length(x), direction, T)  # DFTSetup registers its own finalizer
+    return dft(x, setup)
+end
+
 """
     fft(x::VecOrMat{Complex{T}}, [setup::FFTSetup{T}])
 
 Compute the forward FFT of `x` via Apple vDSP. Supports 1D vectors and 2D matrices
-with `ComplexF32` or `ComplexF64` elements. All dimensions must be powers of 2.
-If `setup` is omitted, a temporary plan is created automatically.
+with `ComplexF32` or `ComplexF64` elements.
+
+For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
+`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported and transparently use Apple's
+mixed-radix DFT (see [`is_supported_fft_length`](@ref)); an unsupported length throws
+an `ArgumentError`. When a `setup::FFTSetup` is supplied, or for 2D inputs, all
+dimensions must be powers of 2. If `setup` is omitted, a temporary plan is created
+automatically.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
 fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
-fft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x))
+function fft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+    n = length(x)
+    ispow2(n) && return fft(x, plan_fft(x))
+    is_supported_fft_length(n) || _unsupported_fft_length(n)
+    return _fft1d_dft(x, DFT_FORWARD)
+end
 fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x))
 
 # --- Public API: bfft (backward/unnormalized inverse FFT) ---
@@ -1088,12 +1137,22 @@ fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, plan_fft(x
 
 Compute the unnormalized inverse (backward) FFT of `x` via Apple vDSP.
 The result is *not* divided by `length(x)`; use [`ifft`](@ref) for the normalized version.
+
+For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
+`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported (via Apple's mixed-radix DFT);
+an unsupported length throws an `ArgumentError`. With an explicit `setup::FFTSetup`,
+or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
 bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
-bfft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft(x))
+function bfft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+    n = length(x)
+    ispow2(n) && return bfft(x, plan_fft(x))
+    is_supported_fft_length(n) || _unsupported_fft_length(n)
+    return _fft1d_dft(x, DFT_INVERSE)
+end
 bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft(x))
 
 # --- Public API: ifft (normalized inverse FFT) ---
@@ -1103,12 +1162,18 @@ bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, plan_fft
 
 Compute the normalized inverse FFT of `x` via Apple vDSP.
 Equivalent to `bfft(x) / length(x)`. Satisfies `ifft(fft(x)) ≈ x`.
+
+For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
+`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported (via Apple's mixed-radix DFT);
+an unsupported length throws an `ArgumentError`. With an explicit `setup::FFTSetup`,
+or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
-ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
+# No-setup 1D routes through bfft, which handles both power-of-2 and mixed-radix lengths.
+ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x) ./ length(x)
 ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, plan_fft(x))
 
 # --- Internal in-place 1D complex FFT ---

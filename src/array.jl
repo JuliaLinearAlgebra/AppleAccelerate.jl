@@ -966,6 +966,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
             return result
         end
@@ -974,6 +976,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vclip!(result, X, low, high)
         end
         function viclip!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_viclip", suff)))(X,1,Ref(low),Ref(high),result,1,length(X))
             return result
         end
@@ -982,6 +986,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             viclip!(result, X, low, high)
         end
         function vthr!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vthr", suff)))(X,1,Ref(threshold),result,1,length(X))
             return result
         end
@@ -990,6 +996,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vthr!(result, X, threshold)
         end
         function vthres!(result::Vector{$T}, X::Vector{$T}, threshold::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vthres", suff)))(X,1,Ref(threshold),result,1,length(X))
             return result
         end
@@ -1135,21 +1143,33 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vtrapz!(result, X, step)
         end
         function vswsum!(result::Vector{$T}, X::Vector{$T}, window::Integer)
+            (1 <= window <= length(X)) ||
+                throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
+            length(result) >= n_out ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) - window + 1 ($n_out)"))
             LibAccelerate.$(Symbol(string("vDSP_vswsum", suff)))(X,1,result,1,n_out,window)
             return result
         end
         function vswsum(X::Vector{$T}, window::Integer)
+            (1 <= window <= length(X)) ||
+                throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
             result = Vector{$T}(undef, n_out)
             vswsum!(result, X, window)
         end
         function vswmax!(result::Vector{$T}, X::Vector{$T}, window::Integer)
+            (1 <= window <= length(X)) ||
+                throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
+            length(result) >= n_out ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) - window + 1 ($n_out)"))
             LibAccelerate.$(Symbol(string("vDSP_vswmax", suff)))(X,1,result,1,n_out,window)
             return result
         end
         function vswmax(X::Vector{$T}, window::Integer)
+            (1 <= window <= length(X)) ||
+                throw(ArgumentError("window ($window) must satisfy 1 <= window <= length(X) ($(length(X)))"))
             n_out = length(X) - window + 1
             result = Vector{$T}(undef, n_out)
             vswmax!(result, X, window)
@@ -1160,8 +1180,8 @@ end
 @doc "Running sum scaled by `scale`. Wraps [`vDSP_vrsum`](https://developer.apple.com/documentation/accelerate/vdsp_vrsum)." vrsum
 @doc "Simpson's rule integration with step size `step`. Wraps [`vDSP_vsimps`](https://developer.apple.com/documentation/accelerate/vdsp_vsimps)." vsimps
 @doc "Trapezoidal integration with step size `step`. Wraps [`vDSP_vtrapz`](https://developer.apple.com/documentation/accelerate/vdsp_vtrapz)." vtrapz
-@doc "Sliding window sum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswsum`](https://developer.apple.com/documentation/accelerate/vdsp_vswsum)." vswsum
-@doc "Sliding window maximum with window size `window`. Returns a vector of length `length(X) - window + 1`. Wraps [`vDSP_vswmax`](https://developer.apple.com/documentation/accelerate/vdsp_vswmax)." vswmax
+@doc "Sliding window sum with window size `window`. Returns a vector of length `length(X) - window + 1`. `window` must satisfy `1 ≤ window ≤ length(X)`; for `vswsum!`, `result` must have length `≥ length(X) - window + 1`. Wraps [`vDSP_vswsum`](https://developer.apple.com/documentation/accelerate/vdsp_vswsum)." vswsum
+@doc "Sliding window maximum with window size `window`. Returns a vector of length `length(X) - window + 1`. `window` must satisfy `1 ≤ window ≤ length(X)`; for `vswmax!`, `result` must have length `≥ length(X) - window + 1`. Wraps [`vDSP_vswmax`](https://developer.apple.com/documentation/accelerate/vdsp_vswmax)." vswmax
 
 # ============================================================
 # vDSP Interpolation
@@ -1180,6 +1200,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vintb!(result, A, B, t)
         end
         function vlint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
+            length(result) >= length(indices) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(indices) ($(length(indices)))"))
             LibAccelerate.$(Symbol(string("vDSP_vlint", suff)))(table,indices,1,result,1,length(indices),length(table))
             return result
         end
@@ -1188,6 +1210,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vlint!(result, table, indices)
         end
         function vqint!(result::Vector{$T}, table::Vector{$T}, indices::Vector{$T})
+            length(result) >= length(indices) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(indices) ($(length(indices)))"))
             LibAccelerate.$(Symbol(string("vDSP_vqint", suff)))(table,indices,1,result,1,length(indices),length(table))
             return result
         end
@@ -1338,6 +1362,13 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vgathr!(C::Vector{$T}, A::Vector{$T}, B::Vector{UInt})
+            length(C) >= length(B) ||
+                throw(DimensionMismatch("C length ($(length(C))) must be at least length(B) ($(length(B)))"))
+            n = length(A)
+            @inbounds for i in eachindex(B)
+                (1 <= B[i] <= n) ||
+                    throw(BoundsError(A, Int(B[i])))
+            end
             LibAccelerate.$(Symbol(string("vDSP_vgathr", suff)))(A,B,1,C,1,length(B))
             return C
         end
@@ -1346,6 +1377,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vgathr!(C, A, B)
         end
         function vindex!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+            length(C) >= length(B) ||
+                throw(DimensionMismatch("C length ($(length(C))) must be at least length(B) ($(length(B)))"))
             LibAccelerate.$(Symbol(string("vDSP_vindex", suff)))(A,B,1,C,1,length(B))
             return C
         end
@@ -1356,7 +1389,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
-@doc "Gather elements by index: `C[i] = A[B[i]]` where B contains 1-based UInt indices. Wraps [`vDSP_vgathr`](https://developer.apple.com/documentation/accelerate/vdsp_vgathr)." vgathr
+@doc "Gather elements by index: `C[i] = A[B[i]]` where B contains 1-based UInt indices in `1:length(A)` (a `BoundsError` is thrown otherwise). Wraps [`vDSP_vgathr`](https://developer.apple.com/documentation/accelerate/vdsp_vgathr)." vgathr
 @doc "Index with float indices: `C[i] = A[trunc(B[i])]` where B contains 0-based float indices. Wraps [`vDSP_vindex`](https://developer.apple.com/documentation/accelerate/vdsp_vindex)." vindex
 
 # --- Generation ---
@@ -1371,6 +1404,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vgen!(C, a, b)
         end
         function vgenp!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T}, n::Integer)
+            length(C) >= n ||
+                throw(DimensionMismatch("C length ($(length(C))) must be at least n ($n)"))
             LibAccelerate.$(Symbol(string("vDSP_vgenp", suff)))(A,1,B,1,C,1,n,length(A))
             return C
         end
@@ -1388,6 +1423,8 @@ end
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vclipc!(result::Vector{$T}, X::Vector{$T}, low::$T, high::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             nlow = Ref{UInt64}(0)
             nhigh = Ref{UInt64}(0)
             LibAccelerate.$(Symbol(string("vDSP_vclipc", suff)))(X,1,Ref(low),Ref(high),result,1,length(X),nlow,nhigh)
@@ -1398,6 +1435,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vclipc!(result, X, low, high)
         end
         function vlim!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+            length(result) >= length(A) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vlim", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
             return result
         end
@@ -1406,6 +1445,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vlim!(result, A, b, c)
         end
         function vthrsc!(result::Vector{$T}, A::Vector{$T}, b::$T, c::$T)
+            length(result) >= length(A) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vthrsc", suff)))(A,1,Ref(b),Ref(c),result,1,length(A))
             return result
         end
@@ -1462,6 +1503,8 @@ non-identity buffer yields a silently wrong permutation. Use the allocating
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vtabi!(D::Vector{$T}, A::Vector{$T}, s1::$T, s2::$T, C::Vector{$T})
+            length(D) >= length(A) ||
+                throw(DimensionMismatch("D length ($(length(D))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vtabi", suff)))(A,1,Ref(s1),Ref(s2),C,length(C),D,1,length(A))
             return D
         end
@@ -1586,6 +1629,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfix", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
@@ -1605,6 +1650,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixu", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
@@ -1624,6 +1671,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixr", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
@@ -1643,6 +1692,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfixru", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$intT}, A::Vector{$T})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
@@ -1662,6 +1713,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vflt", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end
@@ -1681,6 +1734,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         vdsp_name = string("vDSP_vfltu", intname, suff)
         @eval begin
             function ($fname!)(C::Vector{$T}, A::Vector{$intT})
+                length(C) >= length(A) ||
+                    throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
                 LibAccelerate.$(Symbol(vdsp_name))(A,1,C,1,length(A))
                 return C
             end

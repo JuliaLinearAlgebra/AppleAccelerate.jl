@@ -1407,4 +1407,78 @@ for T in (Float32, Float64)
     end
 end
 
+# Out-of-bounds-write guards on single-input / interpolation / conversion
+# mutating `!` methods: undersized `result`/`C` buffers must throw before the
+# C routine writes past the end of the buffer.
+for T in (Float32, Float64)
+    @testset "Bounds-check guards::$T" begin
+        X = T[1, 2, 3, 4, 5]
+        small = Vector{T}(undef, 2)   # deliberately too small
+        ok = similar(X)
+
+        # --- sliding window (A2): window range + result length ---
+        # valid call still works
+        @test AppleAccelerate.vswsum(X, 2) ≈ [X[i] + X[i+1] for i in 1:length(X)-1]
+        @test AppleAccelerate.vswmax(X, 2) ≈ [max(X[i], X[i+1]) for i in 1:length(X)-1]
+        # invalid window (allocating + mutating, sum + max)
+        @test_throws ArgumentError AppleAccelerate.vswsum(X, 0)
+        @test_throws ArgumentError AppleAccelerate.vswsum(X, length(X) + 1)
+        @test_throws ArgumentError AppleAccelerate.vswmax(X, 0)
+        @test_throws ArgumentError AppleAccelerate.vswmax(X, length(X) + 1)
+        @test_throws ArgumentError AppleAccelerate.vswsum!(Vector{T}(undef, 4), X, 0)
+        @test_throws ArgumentError AppleAccelerate.vswmax!(Vector{T}(undef, 4), X, 0)
+        # undersized result for a valid window (n_out = 4)
+        @test_throws DimensionMismatch AppleAccelerate.vswsum!(small, X, 2)
+        @test_throws DimensionMismatch AppleAccelerate.vswmax!(small, X, 2)
+
+        # --- clipping / thresholding (A1) ---
+        lo = T(2); hi = T(4); thr = T(3)
+        @test AppleAccelerate.vclip!(similar(X), X, lo, hi) ≈ clamp.(X, lo, hi)
+        @test_throws DimensionMismatch AppleAccelerate.vclip!(small, X, lo, hi)
+        @test_throws DimensionMismatch AppleAccelerate.viclip!(small, X, lo, hi)
+        @test_throws DimensionMismatch AppleAccelerate.vthr!(small, X, thr)
+        @test_throws DimensionMismatch AppleAccelerate.vthres!(small, X, thr)
+        @test_throws DimensionMismatch AppleAccelerate.vlim!(small, X, T(0), T(1))
+        @test_throws DimensionMismatch AppleAccelerate.vthrsc!(small, X, T(0), T(1))
+        @test_throws DimensionMismatch AppleAccelerate.vclipc!(small, X, lo, hi)
+
+        # --- interpolation (A1): result vs length(indices) ---
+        table = T[10, 20, 30, 40]
+        idx = T[0.0, 0.5, 1.5, 2.5]  # 4 fractional indices
+        @test length(AppleAccelerate.vlint(table, idx)) == length(idx)
+        @test_throws DimensionMismatch AppleAccelerate.vlint!(small, table, idx)
+        @test_throws DimensionMismatch AppleAccelerate.vqint!(small, table, idx)
+
+        # --- gather / index (A1 + A3): result length + index bounds ---
+        Bidx = UInt[1, 3, 5]
+        @test AppleAccelerate.vgathr(X, Bidx) ≈ T[1, 3, 5]
+        @test_throws DimensionMismatch AppleAccelerate.vgathr!(Vector{T}(undef, 1), X, Bidx)
+        @test_throws DimensionMismatch AppleAccelerate.vindex!(Vector{T}(undef, 1), X, T[0, 2, 4])
+        # A3: out-of-range 1-based index (0 and length+1) must throw
+        @test_throws BoundsError AppleAccelerate.vgathr(X, UInt[1, UInt(length(X) + 1)])
+        @test_throws BoundsError AppleAccelerate.vgathr(X, UInt[0])
+
+        # --- table lookup (A1): D vs length(A) ---
+        tab = T[1, 2, 3, 4]
+        idxA = T[0, 1, 2, 3]
+        @test AppleAccelerate.vtabi(idxA, T(1), T(0), tab) ≈ tab
+        @test_throws DimensionMismatch AppleAccelerate.vtabi!(Vector{T}(undef, 1), idxA, T(1), T(0), tab)
+
+        # --- piecewise generation (A1): C vs n ---
+        @test_throws DimensionMismatch AppleAccelerate.vgenp!(Vector{T}(undef, 2), T[1, 2], T[0, 10], 5)
+
+        # --- type conversion (A1): C vs length(A) ---
+        Xf = T[1.2, 2.7, 3.1, 4.9]
+        @test AppleAccelerate.vfix32(Xf) == Int32.(trunc.(Xf))
+        @test_throws DimensionMismatch AppleAccelerate.vfix32!(Vector{Int32}(undef, 1), Xf)
+        @test_throws DimensionMismatch AppleAccelerate.vfixu8!(Vector{UInt8}(undef, 1), Xf)
+        @test_throws DimensionMismatch AppleAccelerate.vfixr16!(Vector{Int16}(undef, 1), Xf)
+        @test_throws DimensionMismatch AppleAccelerate.vfixru32!(Vector{UInt32}(undef, 1), Xf)
+        Ai = Int32[1, 2, 3, 4]
+        @test AppleAccelerate.vflt32(Ai, T) ≈ T.(Ai)
+        @test_throws DimensionMismatch AppleAccelerate.vflt32!(Vector{T}(undef, 1), Ai)
+        @test_throws DimensionMismatch AppleAccelerate.vfltu8!(Vector{T}(undef, 1), UInt8[1, 2, 3, 4])
+    end
+end
+
 end # @testset "Array Operations"
