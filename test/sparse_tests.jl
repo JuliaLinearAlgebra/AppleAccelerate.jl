@@ -941,4 +941,25 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         end
         @test dense ≈ Mref
     end
+
+    # COO -> CSC constructor built on the workspace SparseConvertFromCoord.
+    @testset "AASparseMatrix from COO triplets::$T" for T in (Float32, Float64)
+        # Random reference via SparseArrays.sparse, then rebuild from its triplets.
+        ref = sprandn(T, 12, 9, 0.3)
+        I, J, Vv = findnz(ref)
+        A = AASparseMatrix(I, J, Vv, 12, 9)
+        @test Matrix(A) ≈ Matrix(ref)
+        # Functional check: matches a dense multiply.
+        x = randn(T, 9)
+        @test A * x ≈ Matrix(ref) * x rtol = sqrt(eps(T))
+
+        # Duplicate coordinates are summed (like SparseArrays.sparse).
+        Ad = AASparseMatrix(Int[1, 1, 2], Int[1, 1, 2], T[2, 3, 5], 2, 2)
+        @test Matrix(Ad) ≈ T[5 0; 0 5]
+
+        # Input validation.
+        @test_throws DimensionMismatch AASparseMatrix(Int[1, 2], Int[1], T[1, 2], 2, 2)
+        @test_throws ArgumentError AASparseMatrix(Int[1, 3], Int[1, 1], T[1, 2], 2, 2)  # row OOR
+        @test_throws ArgumentError AASparseMatrix(Int[1, 1], Int[1, 3], T[1, 2], 2, 2)  # col OOR
+    end
 end

@@ -523,7 +523,10 @@ end
     :_Z27SparseGetConjugateTranspose40SparseOpaqueFactorization_Complex_Double,
     ComplexF64, SparseOpaqueFactorization, SparseOpaqueFactorization)
 
-# TODO: these 4 SparseConvertFromCoord functions are unused and untested.
+# SparseConvertFromCoordinate: non-workspace variant (Apple allocates internally) and
+# workspace variant `SparseConvertFromCoord` (caller-owned storage). The workspace
+# variant backs the COO->CSC `AASparseMatrix(I, J, V, m, n)` constructor below; the
+# non-workspace pair remains available but currently has no idiomatic caller.
 # (Float32/Float64 dispatch on the two workspace-taking variants below was corrected
 #  so Cfloat binds the PKf symbol and Cdouble the PKd symbol.)
 @generateDemangled(SparseConvertFromCoordinate,
@@ -868,6 +871,64 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
     return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
+end
+
+"""
+    AASparseMatrix(I, J, V, m, n, attributes = ATT_ORDINARY)
+
+Build an `m`×`n` `AASparseMatrix` from coordinate (COO) triplets: `V[k]` is the
+value at row `I[k]`, column `J[k]`, with 1-based indices as in
+`SparseArrays.sparse(I, J, V, m, n)`. Duplicate coordinates are summed. Uses
+Accelerate's [`SparseConvertFromCoordinate`](https://developer.apple.com/documentation/accelerate/sparseconvertfromcoordinate).
+
+`V` must be `Float32` or `Float64`. Pass `attributes` (e.g. `ATT_SYMMETRIC | ATT_LOWER_TRIANGLE`)
+to build a matrix with symmetry/triangle structure; Accelerate coerces the input to conform.
+"""
+function AASparseMatrix(I::AbstractVector{<:Integer}, J::AbstractVector{<:Integer},
+                        V::AbstractVector{T}, m::Integer, n::Integer,
+                        attributes::att_type = ATT_ORDINARY) where T<:Union{Cfloat,Cdouble}
+    length(I) == length(J) == length(V) ||
+        throw(DimensionMismatch("I, J, and V must have equal lengths " *
+                                "($(length(I)), $(length(J)), $(length(V)))"))
+    nnz_in = length(V)
+    # Accelerate takes 0-based Cint coordinate indices.
+    rows0 = Vector{Cint}(undef, nnz_in)
+    cols0 = Vector{Cint}(undef, nnz_in)
+    @inbounds for k in 1:nnz_in
+        1 <= I[k] <= m || throw(ArgumentError("row index I[$k] = $(I[k]) out of range 1:$m"))
+        1 <= J[k] <= n || throw(ArgumentError("column index J[$k] = $(J[k]) out of range 1:$n"))
+        rows0[k] = Cint(I[k] - 1)
+        cols0[k] = Cint(J[k] - 1)
+    end
+    vals = collect(V)::Vector{T}
+    blockSize = 1
+
+    # Caller-owned storage/workspace, sized per Accelerate's Solve.h contract
+    # (blockCount = number of input entries, an upper bound on the deduplicated result).
+    storage_bytes = 48 + (Int(n) + 1) * sizeof(Clong) + nnz_in * sizeof(Cint) +
+                    nnz_in * blockSize * blockSize * sizeof(T)
+    storage   = Vector{UInt8}(undef, storage_bytes)
+    workspace = Vector{UInt8}(undef, Int(m) * sizeof(Cint))
+
+    colptr = Vector{Clong}(undef, Int(n) + 1)
+    local rowval::Vector{Cint}
+    local nzval::Vector{T}
+    GC.@preserve rows0 cols0 vals storage workspace begin
+        sm = SparseConvertFromCoord(Cint(m), Cint(n), Clong(nnz_in), Cuchar(blockSize),
+                                    attributes, pointer(rows0), pointer(cols0), pointer(vals),
+                                    Ptr{Cvoid}(pointer(storage)), Ptr{Cvoid}(pointer(workspace)))
+        # The returned CSC arrays point into `storage`; copy them into owned Vectors
+        # so the AASparseMatrix follows the standard lifetime model and `storage`
+        # (and its scratch) can be collected. Indices come back 0-based, which is
+        # exactly what the advanced AASparseMatrix constructor expects.
+        copyto!(colptr, unsafe_wrap(Array, sm.structure.columnStarts, Int(n) + 1))
+        nnz_out = Int(colptr[end])
+        rowval = Vector{Cint}(undef, nnz_out)
+        nzval  = Vector{T}(undef, nnz_out)
+        copyto!(rowval, unsafe_wrap(Array, sm.structure.rowIndices, nnz_out))
+        copyto!(nzval,  unsafe_wrap(Array, sm.data, nnz_out))
+    end
+    return AASparseMatrix(Int(m), Int(n), colptr, rowval, nzval, attributes)
 end
 
 # Apple stores the underlying CSC dimensions and uses the transpose attribute
