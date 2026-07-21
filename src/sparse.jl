@@ -878,8 +878,9 @@ end
 
 Build an `m`×`n` `AASparseMatrix` from coordinate (COO) triplets: `V[k]` is the
 value at row `I[k]`, column `J[k]`, with 1-based indices as in
-`SparseArrays.sparse(I, J, V, m, n)`. Duplicate coordinates are summed. Uses
-Accelerate's [`SparseConvertFromCoordinate`](https://developer.apple.com/documentation/accelerate/sparseconvertfromcoordinate).
+`SparseArrays.sparse(I, J, V, m, n)`. Triplets may be given in any order (they are
+sorted internally) and duplicate coordinates are summed. Uses Accelerate's
+[`SparseConvertFromCoordinate`](https://developer.apple.com/documentation/accelerate/sparseconvertfromcoordinate).
 
 `V` must be `Float32` or `Float64`. Pass `attributes` (e.g. `ATT_SYMMETRIC | ATT_LOWER_TRIANGLE`)
 to build a matrix with symmetry/triangle structure; Accelerate coerces the input to conform.
@@ -891,16 +892,22 @@ function AASparseMatrix(I::AbstractVector{<:Integer}, J::AbstractVector{<:Intege
         throw(DimensionMismatch("I, J, and V must have equal lengths " *
                                 "($(length(I)), $(length(J)), $(length(V)))"))
     nnz_in = length(V)
+    # Accelerate's workspace SparseConvertFromCoordinate expects the coordinates in
+    # column-major order (its rowCount-sized workspace only supports a single
+    # column-ordered pass); sort by (column, row) so any input order works, matching
+    # `SparseArrays.sparse`. Duplicate coordinates end up adjacent and Accelerate sums them.
+    perm = sortperm(collect(zip(J, I)))
     # Accelerate takes 0-based Cint coordinate indices.
     rows0 = Vector{Cint}(undef, nnz_in)
     cols0 = Vector{Cint}(undef, nnz_in)
-    @inbounds for k in 1:nnz_in
+    vals  = Vector{T}(undef, nnz_in)
+    @inbounds for (dst, k) in enumerate(perm)
         1 <= I[k] <= m || throw(ArgumentError("row index I[$k] = $(I[k]) out of range 1:$m"))
         1 <= J[k] <= n || throw(ArgumentError("column index J[$k] = $(J[k]) out of range 1:$n"))
-        rows0[k] = Cint(I[k] - 1)
-        cols0[k] = Cint(J[k] - 1)
+        rows0[dst] = Cint(I[k] - 1)
+        cols0[dst] = Cint(J[k] - 1)
+        vals[dst]  = V[k]
     end
-    vals = collect(V)::Vector{T}
     blockSize = 1
 
     # Caller-owned storage/workspace, sized per Accelerate's Solve.h contract

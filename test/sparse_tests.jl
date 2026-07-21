@@ -957,6 +957,13 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         Ad = AASparseMatrix(Int[1, 1, 2], Int[1, 1, 2], T[2, 3, 5], 2, 2)
         @test Matrix(Ad) ≈ T[5 0; 0 5]
 
+        # Unsorted triplets (Accelerate's workspace variant needs column-sorted
+        # input; the constructor sorts internally) with a duplicate that must sum.
+        Iu = [3, 1, 2, 3, 1]; Ju = [3, 1, 2, 3, 3]; Vu = T[7, 10, 20, 23, 5]  # (3,3): 7+23
+        Au = AASparseMatrix(Iu, Ju, Vu, 3, 3)
+        @test Matrix(Au) ≈ Matrix(sparse(Iu, Ju, Vu, 3, 3))
+        @test SparseMatrixCSC(Au) ≈ sparse(Iu, Ju, Vu, 3, 3)
+
         # Input validation.
         @test_throws DimensionMismatch AASparseMatrix(Int[1, 2], Int[1], T[1, 2], 2, 2)
         @test_throws ArgumentError AASparseMatrix(Int[1, 3], Int[1, 1], T[1, 2], 2, 2)  # row OOR
