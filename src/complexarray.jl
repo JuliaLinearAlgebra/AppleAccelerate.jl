@@ -524,7 +524,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         end
     end
 
-    # zrvdiv: C = A / B (complex / real) — NOTE: vDSP_zrvdiv computes B/A, swap
+    # zrvdiv: C = A / B (complex / real). vDSP_zrvdiv computes A/B directly (no operand swap, unlike vDSP_zvdiv).
     @eval begin
         function zrvdiv!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvdiv!: A, B, and result must have equal lengths"))
@@ -562,7 +562,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         end
     end
 
-    # zrvsub: C = A - B (complex - real) — NOTE: vDSP_zrvsub computes B - A, swap
+    # zrvsub: C = A - B (complex - real). vDSP_zrvsub computes A-B directly (no operand swap).
     @eval begin
         function zrvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvsub!: A, B, and result must have equal lengths"))
@@ -757,6 +757,37 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             zmmul!(C, A, B)
         end
     end
+
+    # zmma: complex matrix multiply-add D = A*B + C   (C, D are size(A,1)×size(B,2))
+    # zmms: complex matrix multiply-subtract D = A*B - C
+    # Both reuse the zmmul col-major→row-major operand swap: passing (B, A) with dims
+    # (n, m, p) makes vDSP's row-major product land as the col-major A*B, and the
+    # additive term C (same shape as D) aligns element-wise in the same buffer layout.
+    for (fname, vname) in ((:zmma, "zmma"), (:zmms, "zmms"))
+        @eval begin
+            function $(Symbol(fname, :!))(D::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+                m, p = size(A)
+                p2, n = size(B)
+                p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
+                size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n, got $(size(C))"))
+                size(D) == (m, n) || throw(DimensionMismatch("D must be $m×$n, got $(size(D))"))
+                GC.@preserve A B C D begin
+                    asplit = _split_view($DSPSplit, pointer(A))
+                    bsplit = _split_view($DSPSplit, pointer(B))
+                    csplit = _split_view($DSPSplit, pointer(C))
+                    dsplit = _split_view($DSPSplit, pointer(D))
+                    LibAccelerate.$(Symbol(string("vDSP_", vname, suff)))(
+                          Ref(bsplit), _CSTRIDE, Ref(asplit), _CSTRIDE, Ref(csplit), _CSTRIDE,
+                          Ref(dsplit), _CSTRIDE, UInt64(n), UInt64(m), UInt64(p))
+                end
+                return D
+            end
+            function $fname(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+                D = Matrix{Complex{$T}}(undef, size(A, 1), size(B, 2))
+                $(Symbol(fname, :!))(D, A, B, C)
+            end
+        end
+    end
 end
 
 @doc "Complex vector addition: `C = A + B`. Wraps [`vDSP_zvadd`](https://developer.apple.com/documentation/accelerate/vdsp_zvadd)." zvadd
@@ -774,6 +805,8 @@ end
 @doc "Fill complex vector with complex scalar. Wraps [`vDSP_zvfill`](https://developer.apple.com/documentation/accelerate/vdsp_zvfill)." zvfill!
 @doc "Complex convolution. Wraps [`vDSP_zconv`](https://developer.apple.com/documentation/accelerate/vdsp_zconv)." zconv
 @doc "Complex matrix multiply: `C = A * B`. Wraps [`vDSP_zmmul`](https://developer.apple.com/documentation/accelerate/vdsp_zmmul)." zmmul
+@doc "Complex matrix multiply-add: `D = A * B + C`. `C` and `D` are `size(A,1)×size(B,2)`. The `zmma!(D, A, B, C)` form writes into `D`. Wraps [`vDSP_zmma`](https://developer.apple.com/documentation/accelerate/vdsp_zmma)." zmma
+@doc "Complex matrix multiply-subtract: `D = A * B - C`. `C` and `D` are `size(A,1)×size(B,2)`. The `zmms!(D, A, B, C)` form writes into `D`. Wraps [`vDSP_zmms`](https://developer.apple.com/documentation/accelerate/vdsp_zmms)." zmms
 
 # ============================================================
 # Format conversion (interleaved ↔ split complex)

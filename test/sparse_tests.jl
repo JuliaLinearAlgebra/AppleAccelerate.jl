@@ -898,4 +898,47 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test parentmodule(m) !== AppleAccelerate
         end
     end
+
+    # Regression for the workspace-taking SparseConvertFromCoord dispatch: the
+    # Float32 method must call the `float` C symbol and Float64 the `double` one.
+    # A swap (the bug that was fixed) would make the Float32 path read 8 bytes per
+    # element from a Float32 array — garbage values and an out-of-bounds read — so
+    # a functional coordinate→CSC round-trip catches it for both element types.
+    @testset "SparseConvertFromCoord workspace dispatch::$T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        Mref = T[10 0 30; 0 20 0; 40 0 50]
+        rows, cols = size(Mref)
+        # Coordinate (COO) triplets, 0-based indices as Accelerate expects.
+        rowidx = Cint[0, 2, 1, 0, 2]
+        colidx = Cint[0, 0, 1, 2, 2]
+        vals   = T[10, 40, 20, 30, 50]
+        nnz = length(vals)
+        blockSize = 1
+
+        # Caller-owned storage/workspace, sized per Accelerate's Solve.h contract.
+        storage_bytes = 48 + (cols + 1) * sizeof(Clong) + nnz * sizeof(Cint) +
+                        nnz * blockSize * blockSize * sizeof(T)
+        storage   = Vector{UInt8}(undef, storage_bytes)
+        workspace = Vector{UInt8}(undef, rows * sizeof(Cint))
+
+        dense = GC.@preserve rowidx colidx vals storage workspace begin
+            sm = AA.SparseConvertFromCoord(
+                Cint(rows), Cint(cols), Clong(nnz), Cuchar(blockSize),
+                AA.ATT_ORDINARY,
+                pointer(rowidx), pointer(colidx), pointer(vals),
+                Ptr{Cvoid}(pointer(storage)), Ptr{Cvoid}(pointer(workspace)))
+            # The returned CSC arrays point into `storage`; keep it alive while reading.
+            colStarts = unsafe_wrap(Array, sm.structure.columnStarts, cols + 1)
+            rowInds   = unsafe_wrap(Array, sm.structure.rowIndices, nnz)
+            dataOut   = unsafe_wrap(Array, sm.data, nnz)
+            D = zeros(T, rows, cols)
+            for c in 1:cols
+                for k in (colStarts[c] + 1):colStarts[c + 1]   # colStarts are 0-based
+                    D[rowInds[k] + 1, c] += dataOut[k]
+                end
+            end
+            D
+        end
+        @test dense ≈ Mref
+    end
 end

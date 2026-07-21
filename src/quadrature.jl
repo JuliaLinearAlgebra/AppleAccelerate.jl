@@ -105,6 +105,13 @@ function integrate(f, a::Real, b::Real;
         throw(ArgumentError("qag_points must be one of 0 (default), 15, 21, 31, 41, " *
                             "51, 61; got $(qag_points)"))
 
+    # Only QAGS handles infinite/semi-infinite intervals; QNG and QAG operate on
+    # finite intervals and would otherwise silently return a meaningless result.
+    if (isinf(a) || isinf(b)) && intg != QUADRATURE_INTEGRATE_QAGS
+        throw(ArgumentError("infinite bounds (±Inf) require integrator=:qags; " *
+                            "got integrator=$(repr(integrator))"))
+    end
+
     # Pass the integrand to the top-level trampoline via the C user-pointer. `fbox` boxes a
     # mutable `_QuadratureBox` in a Ref so we can take its address (pointer_from_objref needs a
     # mutable object); GC.@preserve keeps it alive across the ccall. The box also carries back

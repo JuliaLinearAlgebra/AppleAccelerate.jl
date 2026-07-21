@@ -158,6 +158,32 @@ for T in (Float32, Float64)
         AppleAccelerate.zmmul!(C2, A, B)
         @test C2 ≈ A * B atol=T(1e-3)
     end
+
+    @testset "Complex Matrix Multiply-Add/Subtract::$T" begin
+        m, p, n = 4, 3, 5
+        A = complex.(randn(T, m, p), randn(T, m, p))
+        B = complex.(randn(T, p, n), randn(T, p, n))
+        C = complex.(randn(T, m, n), randn(T, m, n))
+
+        # zmma: D = A*B + C
+        D = AppleAccelerate.zmma(A, B, C)
+        @test D ≈ A * B + C atol=T(1e-3)
+        Dm = Matrix{Complex{T}}(undef, m, n)
+        AppleAccelerate.zmma!(Dm, A, B, C)
+        @test Dm ≈ A * B + C atol=T(1e-3)
+
+        # zmms: D = A*B - C
+        E = AppleAccelerate.zmms(A, B, C)
+        @test E ≈ A * B - C atol=T(1e-3)
+        Em = Matrix{Complex{T}}(undef, m, n)
+        AppleAccelerate.zmms!(Em, A, B, C)
+        @test Em ≈ A * B - C atol=T(1e-3)
+
+        # dimension mismatches
+        @test_throws DimensionMismatch AppleAccelerate.zmma(A, complex.(randn(T, p+1, n), randn(T, p+1, n)), C)
+        @test_throws DimensionMismatch AppleAccelerate.zmma!(Matrix{Complex{T}}(undef, m, n), A, B, complex.(randn(T, m, n+1), randn(T, m, n+1)))
+        @test_throws DimensionMismatch AppleAccelerate.zmms!(Matrix{Complex{T}}(undef, m+1, n), A, B, C)
+    end
 end
 
 # ============================================================

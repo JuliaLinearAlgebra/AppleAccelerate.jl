@@ -1353,6 +1353,15 @@ for T in (Float32, Float64)
         @test AppleAccelerate.dot(X, Y)  ≈ LinearAlgebra.dot(X, Y)
         @test AppleAccelerate.rmsqv(X)   ≈ sqrt(mean(abs2, X))
 
+        # mean-family reductions divide by length and would return NaN for an
+        # empty input; match Base.mean and throw ArgumentError instead. Sum-type
+        # reductions correctly return 0 and are left unguarded.
+        @test_throws ArgumentError AppleAccelerate.mean(T[])
+        @test_throws ArgumentError AppleAccelerate.meanmag(T[])
+        @test_throws ArgumentError AppleAccelerate.meansqr(T[])
+        @test_throws ArgumentError AppleAccelerate.meanssqr(T[])
+        @test AppleAccelerate.sum(T[]) == 0
+
         # vnormalize stddev/mean vs Statistics (population, corrected=false)
         (norm, m, s) = AppleAccelerate.vnormalize(X)
         @test m ≈ mean(X) atol=T(1e-4)
@@ -1518,6 +1527,32 @@ for T in (Float32, Float64)
 
         # --- normalization ---
         @test_throws DimensionMismatch AppleAccelerate.vnormalize!(small, X)
+
+        # --- scalar-multiply-scalar-add: result vs A ---
+        @test_throws DimensionMismatch AppleAccelerate.vsmsa!(small, X, T(2), T(1))
+
+        # --- compress (vcmprs): gate and result must each cover length(X) ---
+        gate = T[1, 0, 1, 0, 1]
+        @test AppleAccelerate.vcmprs(X, gate) ≈ T[1, 3, 5]
+        @test_throws DimensionMismatch AppleAccelerate.vcmprs!(ok, X, T[1, 0])          # short gate
+        @test_throws DimensionMismatch AppleAccelerate.vcmprs!(small, X, gate)          # short result
+
+        # --- swap: B must cover length(A) (in-place read + write) ---
+        @test_throws DimensionMismatch AppleAccelerate.vswap!(X, T[1, 2])
+
+        # --- stereo ramp multiply: I1/O0/O1 must each cover length(I0) ---
+        I0 = T[1, 2, 3, 4]; I1 = T[1, 1, 1, 1]
+        @test_throws DimensionMismatch AppleAccelerate.vrampmul2!(similar(I0), similar(I0), I0, T[1, 1], T(0), T(1))          # short I1
+        @test_throws DimensionMismatch AppleAccelerate.vrampmul2!(Vector{T}(undef, 2), similar(I0), I0, I1, T(0), T(1))       # short O0
+        @test_throws DimensionMismatch AppleAccelerate.vrampmul2!(similar(I0), Vector{T}(undef, 2), I0, I1, T(0), T(1))       # short O1
+
+        # --- piecewise generation: B (locations) must cover length(A) (values) ---
+        # vDSP_vgenp: A holds the values, B the (increasing) locations, M = length(A).
+        @test_throws DimensionMismatch AppleAccelerate.vgenp!(Vector{T}(undef, 5), T[0, 10, 30], T[0, 2], 5)  # short B
+        # positive: mutating vgenp! fills C for matching lengths
+        Cgen = Vector{T}(undef, 5)
+        AppleAccelerate.vgenp!(Cgen, T[0, 10, 30], T[0, 2, 4], 5)
+        @test Cgen ≈ T[0, 5, 10, 20, 30]
     end
 end
 

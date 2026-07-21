@@ -17,6 +17,12 @@
 # either require substantial stateful plumbing or are hard to verify generically;
 # they are out of scope for this idiomatic core.
 #
+# NOTE: The BNNS filter/matmul/activation and descriptor API wrapped here is
+# DEPRECATED by Apple as of macOS 15.0 / iOS 18.0 in favor of the newer BNNS
+# Graph API (`bnns_graph.h`, left to the raw `LibAccelerate` layer). These
+# wrappers still function but emit C-level deprecation warnings and may be
+# removed in a future macOS; new code should target the BNNS Graph API.
+#
 # Apple docs: https://developer.apple.com/documentation/accelerate/bnns
 
 using .LibAccelerate:
@@ -64,6 +70,9 @@ element types or strided/transposed arrays should use the raw `LibAccelerate`
 layer directly.
 
 See also [`bnns_matmul`](@ref), [`bnns_activation`](@ref).
+
+!!! warning
+    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 struct BNNSArray{T,N}
     desc::BNNSNDArrayDescriptor
@@ -116,6 +125,9 @@ Compute `alpha * (A * B)` using BNNS (`BNNSMatMul`). `A` is `m×k`, `B` is `k×n
 and the result is `m×n`. Equivalent to `alpha .* (A * B)`.
 
 See also [`bnns_matmul!`](@ref).
+
+!!! warning
+    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 function bnns_matmul(A::AbstractMatrix{BNNSFloat}, B::AbstractMatrix{BNNSFloat};
                      alpha::Real = 1.0f0)
@@ -130,6 +142,9 @@ end
 
 In-place matrix multiply: `C .= alpha .* (A * B)`. All arguments are `Float32`
 matrices with conforming dimensions. Returns `C`.
+
+!!! warning
+    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 function bnns_matmul!(C::AbstractMatrix{BNNSFloat}, A::AbstractMatrix{BNNSFloat},
                       B::AbstractMatrix{BNNSFloat}; alpha::Real = 1.0f0)
@@ -182,6 +197,9 @@ activation-layer filter API, returning a new array. Supported `f`:
 variants); they are ignored by the activations listed above.
 
 See also [`bnns_activation!`](@ref).
+
+!!! warning
+    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 function bnns_activation(f::Symbol, X::AbstractArray{BNNSFloat};
                          alpha::Real = 0.0f0, beta::Real = 0.0f0)
@@ -202,6 +220,9 @@ const _BNNS_ACT = Dict(
 
 In-place pointwise activation: `Y .= f.(X)`. See [`bnns_activation`](@ref) for the
 list of supported `f`. `X` and `Y` must have the same shape. Returns `Y`.
+
+!!! warning
+    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 function bnns_activation!(f::Symbol, Y::AbstractArray{BNNSFloat}, X::AbstractArray{BNNSFloat};
                           alpha::Real = 0.0f0, beta::Real = 0.0f0)

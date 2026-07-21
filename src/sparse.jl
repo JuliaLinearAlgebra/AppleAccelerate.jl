@@ -524,6 +524,8 @@ end
     ComplexF64, SparseOpaqueFactorization, SparseOpaqueFactorization)
 
 # TODO: these 4 SparseConvertFromCoord functions are unused and untested.
+# (Float32/Float64 dispatch on the two workspace-taking variants below was corrected
+#  so Cfloat binds the PKf symbol and Cdouble the PKd symbol.)
 @generateDemangled(SparseConvertFromCoordinate,
     :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf,
     Cfloat,
@@ -538,13 +540,13 @@ end
 
 @generateDemangled(SparseConvertFromCoord,
     :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKdPvS4_,
-    Cfloat,
+    Cdouble,
     SparseMatrix,
     Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
 
 @generateDemangled(SparseConvertFromCoord,
     :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKfPvS4_,
-    Cdouble,
+    Cfloat,
     SparseMatrix,
     Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
 
