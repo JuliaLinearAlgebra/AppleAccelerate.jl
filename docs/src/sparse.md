@@ -8,7 +8,7 @@ using AppleAccelerate, SparseArrays, LinearAlgebra
 
 ## AASparseMatrix
 
-A wrapper around Apple's [`SparseMatrix`](https://developer.apple.com/documentation/accelerate/sparsematrix_double) format, constructed from Julia's `SparseMatrixCSC`.
+A wrapper around Apple's [`SparseMatrix`](https://developer.apple.com/documentation/accelerate/sparsematrix_double) format. Construct it either from Julia's `SparseMatrixCSC` or directly from coordinate (COO) triplets.
 
 ```@example sparse
 using AppleAccelerate, SparseArrays
@@ -22,14 +22,28 @@ y = A * x  # Sparse matrix-vector multiply
 nothing # hide
 ```
 
-The constructor automatically detects symmetric and triangular structure and sets
-the appropriate Apple Accelerate attributes.
+You can also build straight from coordinate (COO) triplets with 1-based indices,
+like `SparseArrays.sparse(I, J, V, m, n)` (duplicate coordinates are summed):
+
+```@example sparse_coo
+using AppleAccelerate, SparseArrays
+import AppleAccelerate: AASparseMatrix
+
+I = [1, 2, 3, 1]; J = [1, 2, 3, 3]; V = [10.0, 20.0, 30.0, 5.0]
+B = AASparseMatrix(I, J, V, 3, 3)
+@assert SparseMatrixCSC(B) ≈ sparse(I, J, V, 3, 3)
+nothing # hide
+```
+
+The `SparseMatrixCSC` constructor automatically detects symmetric and triangular
+structure and sets the appropriate Apple Accelerate attributes. The COO constructor
+uses Accelerate's `SparseConvertFromCoordinate` and accepts `Float32`/`Float64` values.
 
 ### Matrix operations
 
 | Function | Description |
 |----------|-------------|
-| [`AASparseMatrix`](@ref AppleAccelerate.AASparseMatrix) | Construct from Julia sparse matrix |
+| [`AASparseMatrix`](@ref AppleAccelerate.AASparseMatrix) | Construct from a `SparseMatrixCSC` or from COO triplets `(I, J, V, m, n)` |
 | `A * x` | Sparse matrix-vector or matrix-matrix multiply |
 | `alpha * A * x` | Scaled sparse multiply |
 | [`muladd!`](@ref AppleAccelerate.muladd!) | Multiply-add: `y += A * x` or `y += alpha * A * x` |
