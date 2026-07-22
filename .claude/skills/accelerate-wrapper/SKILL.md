@@ -96,6 +96,17 @@ surface and what users reach for — not everything that exists. Register-width 
 (rationale in `vmath.jl` `VMATH_COVERAGE`); document any such intentional exclusion
 so the next person doesn't re-investigate it.
 
+**Do NOT wrap deprecated API.** Check each candidate's availability attribute in the SDK
+header (`__API_DEPRECATED(...)`, `API_DEPRECATED`, "deprecated" in the doc comment) and
+skip anything Apple has retired — wrapping it just to pad a coverage number is a net
+negative: it adds maintenance burden against something Apple is removing and steers users
+onto the wrong path. Wrap the **modern replacement** instead (e.g. the whole `BNNSFilter*`
+layer create/apply API is deprecated as of macOS 15 in favor of the **BNNS Graph** API — wrap
+Graph, not the legacy filters; the CoreGraphics/CoreVideo-interop vImage functions similarly).
+When you compute a coverage %, measure it against the *worth-wrapping* surface (excluding
+deprecated + design-excluded families), and state that denominator — don't let a raw
+symbol count pressure you into shipping deprecated wrappers.
+
 ## Phase 2 — Generate / extend the FFI bindings
 
 The symbol is usually already generated. Regenerate only when it's genuinely absent
