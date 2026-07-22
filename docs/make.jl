@@ -13,6 +13,7 @@ makedocs(;
         "FFT & Transforms" => "fft.md",
         "Filtering & Spectral" => "filtering.md",
         "Neural Network Primitives (BNNS)" => "bnns.md",
+        "Image Processing (vImage)" => "vimage.md",
         "Numerical Integration" => "quadrature.md",
         "Benchmarks" => "benchmarks.md",
         "Architecture" => "extensions.md",
