@@ -3,3 +3,6 @@ Manifest.toml
 docs/build/
 .DS_Store
 **/.DS_Store
+# Claude Code local/agent state (not for version control)
+.claude/worktrees/
+.claude/settings.local.json
