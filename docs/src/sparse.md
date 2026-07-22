@@ -1,4 +1,4 @@
-# Sparse Linear Algebra
+# Sparse Linear Algebra (libSparse)
 
 AppleAccelerate wraps Apple's [Sparse Solvers](https://developer.apple.com/documentation/accelerate/sparse_solvers) library for sparse matrix operations and direct solvers.
 
