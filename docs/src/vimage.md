@@ -168,3 +168,58 @@ AppleAccelerate.convert_ARGB16UToARGB8888!
 AppleAccelerate.convert_ARGB8888ToARGB2101010!
 AppleAccelerate.convert_XRGB2101010ToARGB8888!
 ```
+
+## Y′CbCr ⇄ ARGB conversion
+
+Convert between RGB/ARGB and 4:4:4 Y′CbCr chroma layouts (8- and 16-bit). A conversion
+`matrix`, a `pixelRange`, and the input/output format codes are baked once into a reusable
+opaque info blob by a `GenerateConversion` call, then handed to the per-image convert
+routines. Standard ITU-R BT.601-4 / BT.709-2 matrices are provided as constants.
+
+```@docs
+AppleAccelerate.vImage_YpCbCrToARGBMatrix
+AppleAccelerate.vImage_ARGBToYpCbCrMatrix
+AppleAccelerate.vImage_YpCbCrPixelRange
+AppleAccelerate.vImage_YpCbCrToARGB
+AppleAccelerate.vImage_ARGBToYpCbCr
+AppleAccelerate.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4
+AppleAccelerate.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4
+AppleAccelerate.convert_YpCbCrToARGB_GenerateConversion
+AppleAccelerate.convert_ARGBToYpCbCr_GenerateConversion
+AppleAccelerate.convert_444CrYpCb8ToARGB8888!
+```
+
+## Multi-kernel & float-kernel convolution
+
+Convolution with a separate kernel per channel, and single-kernel float convolution of an
+8-bit image.
+
+```@docs
+AppleAccelerate.convolveMultiKernel_ARGB8888!
+AppleAccelerate.convolveMultiKernel_ARGBFFFF!
+AppleAccelerate.convolveFloatKernel_ARGB8888!
+```
+
+## Multi-plane matrix multiply
+
+Multiply `M` source planes by an `M×N` matrix to produce `N` destination planes.
+
+```@docs
+AppleAccelerate.matrixMultiply_Planar8
+```
+
+## Additional compositing, histogram and conversion
+
+Extra alpha-compositing operators, float/interleaved histogram specification and ends-in
+contrast stretch, plane⇄interleaved conversions and `Planar16Q12` fixed-point conversions.
+
+```@docs
+AppleAccelerate.premultipliedAlphaBlend_Planar8
+AppleAccelerate.alphaBlend_PlanarF
+AppleAccelerate.premultipliedAlphaBlendWithPermute_ARGB8888
+AppleAccelerate.histogramSpecification_PlanarF
+AppleAccelerate.endsInContrastStretch_PlanarF
+AppleAccelerate.convert_XRGB8888ToPlanar8
+AppleAccelerate.convert_Planar8ToARGBFFFF!
+AppleAccelerate.convert_Planar16Q12toARGB8888!
+```

@@ -247,4 +247,177 @@ end
     @test_throws DimensionMismatch V.tableLookUp_Planar8(planar8(), UInt8[1, 2, 3])
 end
 
+@testset "YpCbCr <-> ARGB 4:4:4" begin
+    pr = V.kvImageYpCbCrPixelRange_FullRange_8bit_Clamped
+    toYpCbCr = V.convert_ARGBToYpCbCr_GenerateConversion(
+        V.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4, pr, V.kvImageARGB8888, V.kvImage444CrYpCb8)
+    toARGB = V.convert_YpCbCrToARGB_GenerateConversion(
+        V.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4, pr, V.kvImage444CrYpCb8, V.kvImageARGB8888)
+    @test toYpCbCr isa V.vImage_ARGBToYpCbCr
+    @test toARGB isa V.vImage_YpCbCrToARGB
+
+    # Round-trip through v308 (3-channel Cr,Y,Cb; no chroma subsampling => near-exact RGB)
+    src = argb8(9, 6)
+    ycc = Array{UInt8,3}(undef, 3, 9, 6)
+    back = Array{UInt8,3}(undef, 4, 9, 6)
+    @test V.convert_ARGB8888To444CrYpCb8!(ycc, src, toYpCbCr) === ycc
+    V.convert_444CrYpCb8ToARGB8888!(back, ycc, toARGB; alpha = 0xff)
+    @test size(ycc) == (3, 9, 6)
+    @test maximum(abs.(Int.(src[2:4, :, :]) .- Int.(back[2:4, :, :]))) <= 3
+
+    # 4-channel v408 (Cb,Y,Cr,A) round trip carries alpha through
+    from408 = V.convert_ARGBToYpCbCr_GenerateConversion(
+        V.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4, pr, V.kvImageARGB8888, V.kvImage444CbYpCrA8)
+    to408 = V.convert_YpCbCrToARGB_GenerateConversion(
+        V.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4, pr, V.kvImage444CbYpCrA8, V.kvImageARGB8888)
+    y408 = Array{UInt8,3}(undef, 4, 9, 6)
+    b408 = Array{UInt8,3}(undef, 4, 9, 6)
+    V.convert_ARGB8888To444CbYpCrA8!(y408, src, from408)
+    V.convert_444CbYpCrA8ToARGB8888!(b408, y408, to408)
+    @test maximum(abs.(Int.(src[2:4, :, :]) .- Int.(b408[2:4, :, :]))) <= 3
+    @test b408[1, :, :] == src[1, :, :]           # alpha preserved exactly
+
+    # 16-bit y416 conversions run and produce the right shape
+    from16 = V.convert_ARGBToYpCbCr_GenerateConversion(
+        V.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4, pr, V.kvImageARGB8888, V.kvImage444AYpCbCr16)
+    y416 = Array{UInt16,3}(undef, 4, 9, 6)
+    V.convert_ARGB8888To444AYpCbCr16!(y416, src, from16)
+    @test size(y416) == (4, 9, 6)
+    pr16 = V.vImage_YpCbCrPixelRange(0, 32768, 65535, 65535, 65535, 1, 65535, 0)  # full-range 16-bit
+    to16 = V.convert_YpCbCrToARGB_GenerateConversion(
+        V.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4, pr16, V.kvImage444AYpCbCr16, V.kvImageARGB16U)
+    argb16 = Array{UInt16,3}(undef, 4, 9, 6)
+    V.convert_444AYpCbCr16ToARGB16U!(argb16, y416, to16)
+    @test size(argb16) == (4, 9, 6)
+end
+
+@testset "multi-kernel convolution" begin
+    src = argb8(9, 6)
+    k = Int16[0 1 0; 1 4 1; 0 1 0]
+    # identical kernel per channel == single-kernel convolve (same divisor, edging)
+    single = V.convolve_ARGB8888(src, k; divisor = 8, flags = V.kvImageEdgeExtend)
+    multi = V.convolveMultiKernel_ARGB8888(src, (k, k, k, k);
+        divisors = (8, 8, 8, 8), biases = (0, 0, 0, 0), flags = V.kvImageEdgeExtend)
+    @test size(multi) == size(src)
+    # identical per-channel kernels reproduce the single-kernel result (up to a ±1 rounding
+    # difference in the two code paths' final divide)
+    @test maximum(abs.(Int.(multi) .- Int.(single))) <= 1
+
+    # float multi-kernel runs and matches the float single-kernel convolve
+    srcF = argbF(9, 6)
+    kf = Float32[0 1 0; 1 4 1; 0 1 0] ./ 8
+    singleF = V.convolve_ARGBFFFF(srcF, kf; flags = V.kvImageEdgeExtend)
+    multiF = V.convolveMultiKernel_ARGBFFFF(srcF, (kf, kf, kf, kf); flags = V.kvImageEdgeExtend)
+    @test multiF ≈ singleF rtol = 1e-4
+
+    # float-kernel ARGB8888 runs and gives correct shape
+    fk = V.convolveFloatKernel_ARGB8888(src, kf; flags = V.kvImageEdgeExtend)
+    @test size(fk) == size(src)
+
+    @test_throws DimensionMismatch V.convolveMultiKernel_ARGB8888(src, (k, k, k))
+end
+
+@testset "multi-plane matrix multiply" begin
+    # RGB planes -> single luminance plane: out = 0.25 R + 0.5 G + 0.25 B
+    r = rand(UInt8, 8, 5); g = rand(UInt8, 8, 5); b = rand(UInt8, 8, 5)
+    y = Matrix{UInt8}(undef, 8, 5)
+    M = reshape(Int16[64, 128, 64], 3, 1)          # (src_planes=3, dest_planes=1)
+    V.matrixMultiply_Planar8([r, g, b], [y], M; divisor = 256)
+    ref = round.(UInt8, (64 .* Int.(r) .+ 128 .* Int.(g) .+ 64 .* Int.(b) .+ 128) .÷ 256)
+    @test maximum(abs.(Int.(y) .- Int.(ref))) <= 1
+
+    # float form: exact matmul. out[j] = Σ_i in[i]·M[i,j]
+    rf = rand(Float32, 8, 5); gf = rand(Float32, 8, 5)
+    o1 = Matrix{Float32}(undef, 8, 5); o2 = Matrix{Float32}(undef, 8, 5)
+    Mf = Float32[1.0 0.0; 0.5 0.5]                  # (2 src, 2 dest); in1->{o1}, in2->{o1/2,o2/2}
+    V.matrixMultiply_PlanarF([rf, gf], [o1, o2], Mf)
+    @test o1 ≈ (rf .+ 0.5f0 .* gf) rtol = 1e-5
+    @test o2 ≈ (0.5f0 .* gf) rtol = 1e-5
+    @test_throws DimensionMismatch V.matrixMultiply_PlanarF([rf, gf], [o1], Float32[1 0 0; 0 1 0])
+end
+
+@testset "additional alpha compositing" begin
+    # premultiplied planar source-over: dest = top + (1-topA)*bottom.
+    # With a zero bottom the result is just the (premultiplied) top.
+    top = planar8(8, 5); topA = planar8(8, 5); bot = planar8(8, 5)
+    out0 = V.premultipliedAlphaBlend_Planar8(top, topA, zeros(UInt8, 8, 5))
+    @test out0 == top
+    # With an opaque top (alpha 255) the bottom contributes nothing either.
+    outO = V.premultipliedAlphaBlend_Planar8(top, fill(0xff, 8, 5), planar8(8, 5))
+    @test outO == top
+    @test size(out0) == (8, 5)
+
+    # const-alpha interleaved blend runs and returns correct shape
+    ct = argb8(8, 5); cb = argb8(8, 5)
+    co = V.premultipliedConstAlphaBlend_ARGB8888(ct, 0x80, cb)
+    @test size(co) == (4, 8, 5)
+
+    # const-alpha planar blend
+    cpo = V.premultipliedConstAlphaBlend_Planar8(top, 0x80, topA, bot)
+    @test size(cpo) == (8, 5)
+
+    # nonpremultiplied->premultiplied planar
+    npo = V.alphaBlend_NonpremultipliedToPremultiplied_Planar8(top, topA, bot)
+    @test size(npo) == (8, 5)
+
+    # float planar 6-buffer blend
+    fo = V.alphaBlend_PlanarF(planarF(8, 5), planarF(8, 5), planarF(8, 5), planarF(8, 5), planarF(8, 5))
+    @test size(fo) == (8, 5)
+
+    # with-permute premultiplied blend
+    wp = V.premultipliedAlphaBlendWithPermute_ARGB8888(argb8(8, 5), argb8(8, 5); makeDestAlphaOpaque = true)
+    @test size(wp) == (4, 8, 5)
+    @test all(wp[1, :, :] .== 0xff)               # dest alpha forced opaque
+end
+
+@testset "histogram specification (float / interleaved)" begin
+    src = planarF(8, 5)
+    flat = fill(1, 256)                            # uniform desired histogram
+    out = V.histogramSpecification_PlanarF(src, flat; entries = 256, minVal = 0f0, maxVal = 1f0)
+    @test size(out) == (8, 5)
+
+    srcA = argb8(8, 5)
+    hists = [fill(Csize_t(1), 256) for _ in 1:4]
+    outA = V.histogramSpecification_ARGB8888(srcA, hists)
+    @test size(outA) == (4, 8, 5)
+
+    srcAF = argbF(8, 5)
+    histsF = [fill(Csize_t(1), 256) for _ in 1:4]
+    outAF = V.histogramSpecification_ARGBFFFF(srcAF, histsF; entries = 256, minVal = 0f0, maxVal = 1f0)
+    @test size(outAF) == (4, 8, 5)
+
+    # ends-in contrast stretch, float forms
+    es = V.endsInContrastStretch_PlanarF(planarF(8, 5); percentLow = 1, percentHigh = 1)
+    @test size(es) == (8, 5)
+    esA = V.endsInContrastStretch_ARGBFFFF(argbF(8, 5); percentLow = (1, 1, 1, 1), percentHigh = (1, 1, 1, 1))
+    @test size(esA) == (4, 8, 5)
+end
+
+@testset "additional plane <-> interleaved conversions" begin
+    # deinterleave 4-channel -> 3 planes dropping X. XRGB: src channels [X,R,G,B]
+    src = argb8(8, 5)
+    r = Matrix{UInt8}(undef, 8, 5); g = similar(r); b = similar(r)
+    V.convert_XRGB8888ToPlanar8(src, r, g, b)
+    @test r == src[2, :, :] && g == src[3, :, :] && b == src[4, :, :]
+    # BGRX: dest order is (blue, green, red); src channels [B,G,R,X]
+    rb = similar(r); gb = similar(r); bb = similar(r)
+    V.convert_BGRX8888ToPlanar8(src, bb, gb, rb)
+    @test bb == src[1, :, :] && gb == src[2, :, :] && rb == src[3, :, :]
+
+    # 4 planes -> ARGBFFFF interleave (identity [0,1] mapping)
+    a = planar8(8, 5); rr = planar8(8, 5); gg = planar8(8, 5); bb2 = planar8(8, 5)
+    dst = Array{Float32,3}(undef, 4, 8, 5)
+    V.convert_Planar8ToARGBFFFF!(dst, a, rr, gg, bb2; maxFloat = (255f0, 255f0, 255f0, 255f0))
+    @test dst[1, :, :] ≈ Float32.(a) rtol = 1e-4
+    @test dst[2, :, :] ≈ Float32.(rr) rtol = 1e-4
+
+    # Planar16Q12 <-> ARGB8888 round trip through Int16 Q4.12 planes
+    src8 = argb8(8, 5)
+    aq = Matrix{Int16}(undef, 8, 5); rq = similar(aq); gq = similar(aq); bq = similar(aq)
+    V.convert_ARGB8888toPlanar16Q12!(aq, rq, gq, bq, src8)
+    back = Array{UInt8,3}(undef, 4, 8, 5)
+    V.convert_Planar16Q12toARGB8888!(back, aq, rq, gq, bq)
+    @test maximum(abs.(Int.(back) .- Int.(src8))) <= 1
+end
+
 end # testset vImage

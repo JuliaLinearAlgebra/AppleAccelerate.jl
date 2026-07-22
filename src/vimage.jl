@@ -2363,3 +2363,774 @@ Expand a packed XRGB2101010 image (planar `Matrix{UInt32}`) into a 4-channel ima
 supplying the alpha channel from the scalar `alpha`. `!`-only.
 """
 convert_XRGB2101010ToARGB8888!
+
+# =====================================================================================
+# Y'CbCr ⇄ ARGB CONVERSION  (4:4:4 chroma layouts, 8- and 16-bit)
+# =====================================================================================
+#
+# Y'CbCr conversion is a "setup + execute" family: a *matrix* + *pixel range* + input
+# and output *format codes* are baked once into an opaque info struct by a
+# `GenerateConversion` call, and that info struct is then handed to the per-pixel
+# convert routines. See the struct byte-layouts (verified against vImage_Types.h and
+# empirically):
+#   * vImage_YpCbCrToARGBMatrix : 5 × Float32           (20 bytes)
+#   * vImage_ARGBToYpCbCrMatrix : 8 × Float32           (32 bytes)
+#   * vImage_YpCbCrPixelRange   : 8 × Int32             (32 bytes)
+#   * vImage_YpCbCrToARGB / vImage_ARGBToYpCbCr : opaque[128], 16-byte aligned.
+# The opaque info blobs are represented as NTuple{8,UInt128} (128 bytes, 16-aligned).
+
+"""
+    vImage_YpCbCrToARGBMatrix(Yp, Cr_R, Cr_G, Cb_G, Cb_B)
+
+Sparse 3×3 Y'CbCr→RGB conversion matrix (5 non-trivial Float32 coefficients). Feed to
+[`convert_YpCbCrToARGB_GenerateConversion`](@ref AppleAccelerate.convert_YpCbCrToARGB_GenerateConversion).
+The standard ITU matrices are available as
+[`kvImage_YpCbCrToARGBMatrix_ITU_R_601_4`](@ref AppleAccelerate.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4)
+and `…_709_2`.
+"""
+struct vImage_YpCbCrToARGBMatrix
+    Yp::Cfloat; Cr_R::Cfloat; Cr_G::Cfloat; Cb_G::Cfloat; Cb_B::Cfloat
+end
+
+"""
+    vImage_ARGBToYpCbCrMatrix(R_Yp, G_Yp, B_Yp, R_Cb, G_Cb, B_Cb_R_Cr, G_Cr, B_Cr)
+
+3×3 RGB→Y'CbCr conversion matrix (8 Float32 coefficients). Inverse of
+[`vImage_YpCbCrToARGBMatrix`](@ref). Standard matrices:
+[`kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4`](@ref AppleAccelerate.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4)
+and `…_709_2`.
+"""
+struct vImage_ARGBToYpCbCrMatrix
+    R_Yp::Cfloat; G_Yp::Cfloat; B_Yp::Cfloat; R_Cb::Cfloat
+    G_Cb::Cfloat; B_Cb_R_Cr::Cfloat; G_Cr::Cfloat; B_Cr::Cfloat
+end
+
+"""
+    vImage_YpCbCrPixelRange(Yp_bias, CbCr_bias, YpRangeMax, CbCrRangeMax, YpMax, YpMin, CbCrMax, CbCrMin)
+
+Range and clamping information for a Y'CbCr pixel format (8 × `Int32`). Handy presets:
+`kvImageYpCbCrPixelRange_VideoRange_8bit_Clamped`,
+`kvImageYpCbCrPixelRange_FullRange_8bit_Clamped`.
+"""
+struct vImage_YpCbCrPixelRange
+    Yp_bias::Int32; CbCr_bias::Int32; YpRangeMax::Int32; CbCrRangeMax::Int32
+    YpMax::Int32; YpMin::Int32; CbCrMax::Int32; CbCrMin::Int32
+end
+
+"""
+    vImage_YpCbCrToARGB
+
+Opaque 128-byte (16-byte-aligned) info blob produced by
+[`convert_YpCbCrToARGB_GenerateConversion`](@ref AppleAccelerate.convert_YpCbCrToARGB_GenerateConversion)
+and consumed by the `convert_*ToARGB*` Y'CbCr routines.
+"""
+struct vImage_YpCbCrToARGB
+    opaque::NTuple{8,UInt128}
+end
+
+"""
+    vImage_ARGBToYpCbCr
+
+Opaque 128-byte info blob produced by
+[`convert_ARGBToYpCbCr_GenerateConversion`](@ref AppleAccelerate.convert_ARGBToYpCbCr_GenerateConversion)
+and consumed by the `convert_ARGB*To444*` Y'CbCr routines.
+"""
+struct vImage_ARGBToYpCbCr
+    opaque::NTuple{8,UInt128}
+end
+
+# --- vImageARGBType / vImageYpCbCrType format codes --------------------------
+const kvImageARGB8888   = Cint(0)
+const kvImageARGB16U    = Cint(1)
+const kvImageARGB16Q12  = Cint(2)
+
+const kvImage422CbYpCrYp8                  = Cint(0)
+const kvImage422YpCbYpCr8                  = Cint(1)
+const kvImage422CbYpCrYp8_AA8              = Cint(2)
+const kvImage420Yp8_Cb8_Cr8                = Cint(3)
+const kvImage420Yp8_CbCr8                  = Cint(4)
+const kvImage444AYpCbCr8                   = Cint(5)
+const kvImage444CrYpCb8                    = Cint(6)
+const kvImage444CbYpCrA8                   = Cint(7)
+const kvImage444CrYpCb10                   = Cint(8)
+const kvImage422CrYpCbYpCbYpCbYpCrYpCrYp10 = Cint(9)
+const kvImage422CbYpCrYp16                 = Cint(13)
+const kvImage444AYpCbCr16                  = Cint(14)
+
+# --- Standard conversion matrix constants (loaded from the framework) --------
+@inline function _load_const(::Type{T}, name::Symbol) where {T}
+    pp = cglobal((name, vimage_lib), Ptr{T})   # symbol is a `const T *` variable
+    return unsafe_load(unsafe_load(pp))
+end
+
+"""
+    kvImage_YpCbCrToARGBMatrix_ITU_R_601_4 :: vImage_YpCbCrToARGBMatrix
+
+ITU-R BT.601-4 Y'CbCr→RGB conversion matrix (standard-definition video). `…_709_2` is
+the BT.709-2 (high-definition) variant.
+"""
+const kvImage_YpCbCrToARGBMatrix_ITU_R_601_4 = _load_const(vImage_YpCbCrToARGBMatrix, :kvImage_YpCbCrToARGBMatrix_ITU_R_601_4)
+const kvImage_YpCbCrToARGBMatrix_ITU_R_709_2 = _load_const(vImage_YpCbCrToARGBMatrix, :kvImage_YpCbCrToARGBMatrix_ITU_R_709_2)
+
+"""
+    kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4 :: vImage_ARGBToYpCbCrMatrix
+
+ITU-R BT.601-4 RGB→Y'CbCr conversion matrix. `…_709_2` is the BT.709-2 variant.
+"""
+const kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4 = _load_const(vImage_ARGBToYpCbCrMatrix, :kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4)
+const kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2 = _load_const(vImage_ARGBToYpCbCrMatrix, :kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2)
+
+# Convenience pixel-range presets (8-bit).
+const kvImageYpCbCrPixelRange_VideoRange_8bit_Clamped = vImage_YpCbCrPixelRange(16, 128, 235, 240, 235, 16, 240, 16)
+const kvImageYpCbCrPixelRange_FullRange_8bit_Clamped  = vImage_YpCbCrPixelRange(0, 128, 255, 255, 255, 1, 255, 0)
+
+"""
+    convert_YpCbCrToARGB_GenerateConversion(matrix, pixelRange, ypCbCrType, argbType; flags) -> vImage_YpCbCrToARGB
+
+Bake a `matrix::vImage_YpCbCrToARGBMatrix` + `pixelRange::vImage_YpCbCrPixelRange` and
+the input `ypCbCrType` / output `argbType` format codes into a reusable
+[`vImage_YpCbCrToARGB`](@ref) info blob for the `convert_*ToARGB*` routines. Reuse the
+returned info across many conversions rather than regenerating it.
+"""
+function convert_YpCbCrToARGB_GenerateConversion(matrix::vImage_YpCbCrToARGBMatrix,
+        pixelRange::vImage_YpCbCrPixelRange, ypCbCrType::Integer, argbType::Integer;
+        flags::Integer = kvImageNoFlags)
+    out = Ref{vImage_YpCbCrToARGB}(); rm = Ref(matrix); rp = Ref(pixelRange)
+    GC.@preserve out rm rp begin
+        err = ccall((:vImageConvert_YpCbCrToARGB_GenerateConversion, vimage_lib), vImage_Error,
+            (Ptr{vImage_YpCbCrToARGBMatrix}, Ptr{vImage_YpCbCrPixelRange}, Ptr{vImage_YpCbCrToARGB}, Cint, Cint, vImage_Flags),
+            rm, rp, out, Cint(ypCbCrType), Cint(argbType), vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_YpCbCrToARGB_GenerateConversion")
+    return out[]
+end
+
+"""
+    convert_ARGBToYpCbCr_GenerateConversion(matrix, pixelRange, argbType, ypCbCrType; flags) -> vImage_ARGBToYpCbCr
+
+Bake a `matrix::vImage_ARGBToYpCbCrMatrix` + `pixelRange` and the input `argbType` /
+output `ypCbCrType` format codes into a reusable [`vImage_ARGBToYpCbCr`](@ref) info blob
+for the `convert_ARGB*To444*` routines.
+"""
+function convert_ARGBToYpCbCr_GenerateConversion(matrix::vImage_ARGBToYpCbCrMatrix,
+        pixelRange::vImage_YpCbCrPixelRange, argbType::Integer, ypCbCrType::Integer;
+        flags::Integer = kvImageNoFlags)
+    out = Ref{vImage_ARGBToYpCbCr}(); rm = Ref(matrix); rp = Ref(pixelRange)
+    GC.@preserve out rm rp begin
+        err = ccall((:vImageConvert_ARGBToYpCbCr_GenerateConversion, vimage_lib), vImage_Error,
+            (Ptr{vImage_ARGBToYpCbCrMatrix}, Ptr{vImage_YpCbCrPixelRange}, Ptr{vImage_ARGBToYpCbCr}, Cint, Cint, vImage_Flags),
+            rm, rp, out, Cint(argbType), Cint(ypCbCrType), vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_ARGBToYpCbCr_GenerateConversion")
+    return out[]
+end
+
+# ---- Y'CbCr -> ARGB conversions (info::vImage_YpCbCrToARGB) --------------------------
+# (sym, hasAlphaArg, alphaJuliaType)
+for (sym, hasA, AT) in ((:vImageConvert_444AYpCbCr8ToARGB8888,  false, UInt8),
+                        (:vImageConvert_444CbYpCrA8ToARGB8888,  false, UInt8),
+                        (:vImageConvert_444CrYpCb8ToARGB8888,   true,  UInt8),
+                        (:vImageConvert_444AYpCbCr16ToARGB8888, false, UInt8),
+                        (:vImageConvert_444AYpCbCr16ToARGB16U,  false, UInt16))
+    bang = Symbol(_jlname(sym), "!")
+    if hasA
+        @eval function $bang(dest::AbstractArray, src::AbstractArray, info::vImage_YpCbCrToARGB;
+                             permuteMap = (0, 1, 2, 3), alpha = zero($AT), flags::Integer = kvImageNoFlags)
+            pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
+            GC.@preserve src dest pm ri begin
+                sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_YpCbCrToARGB}, Ptr{UInt8}, $AT, vImage_Flags),
+                    sb, db, ri, pointer(pm), $AT(alpha), vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+    else
+        @eval function $bang(dest::AbstractArray, src::AbstractArray, info::vImage_YpCbCrToARGB;
+                             permuteMap = (0, 1, 2, 3), flags::Integer = kvImageNoFlags)
+            pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
+            GC.@preserve src dest pm ri begin
+                sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_YpCbCrToARGB}, Ptr{UInt8}, vImage_Flags),
+                    sb, db, ri, pointer(pm), vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+    end
+end
+
+# ---- ARGB -> Y'CbCr conversions (info::vImage_ARGBToYpCbCr) --------------------------
+for sym in (:vImageConvert_ARGB8888To444AYpCbCr8, :vImageConvert_ARGB8888To444CbYpCrA8,
+            :vImageConvert_ARGB8888To444CrYpCb8, :vImageConvert_ARGB8888To444AYpCbCr16,
+            :vImageConvert_ARGB16UTo444AYpCbCr16)
+    bang = Symbol(_jlname(sym), "!")
+    @eval function $bang(dest::AbstractArray, src::AbstractArray, info::vImage_ARGBToYpCbCr;
+                         permuteMap = (0, 1, 2, 3), flags::Integer = kvImageNoFlags)
+        pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
+        GC.@preserve src dest pm ri begin
+            sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_ARGBToYpCbCr}, Ptr{UInt8}, vImage_Flags),
+                sb, db, ri, pointer(pm), vImage_Flags(flags))
+        end
+        _check(err, $(String(sym))); return dest
+    end
+end
+
+"""
+    convert_444CrYpCb8ToARGB8888!(dest, src, info; permuteMap=(0,1,2,3), alpha=0, flags)
+    convert_ARGB8888To444CrYpCb8!(dest, src, info; permuteMap=(0,1,2,3), flags)
+
+4:4:4 Y'CbCr ⇄ ARGB conversions. Build `info` once with
+[`convert_YpCbCrToARGB_GenerateConversion`](@ref AppleAccelerate.convert_YpCbCrToARGB_GenerateConversion)
+(for `*ToARGB*`) or
+[`convert_ARGBToYpCbCr_GenerateConversion`](@ref AppleAccelerate.convert_ARGBToYpCbCr_GenerateConversion)
+(for `ARGB*To444*`), then reuse it. Images are interleaved `Array{T,3}` sized
+`(channels, width, height)`: 3-channel `v308` (`444CrYpCb8`), 4-channel `v408`/`y408`
+(`444CbYpCrA8` / `444AYpCbCr8`) and 4-channel 16-bit `y416` (`444AYpCbCr16`). `permuteMap`
+reorders the ARGB channels; `alpha` supplies the constant alpha when the Y'CbCr side has
+none. `!`-only. Wrapped: `convert_444AYpCbCr8ToARGB8888!`, `convert_444CbYpCrA8ToARGB8888!`,
+`convert_444CrYpCb8ToARGB8888!`, `convert_444AYpCbCr16ToARGB8888!`,
+`convert_444AYpCbCr16ToARGB16U!`, and the five `convert_ARGB*To444*!` inverses.
+"""
+convert_444CrYpCb8ToARGB8888!
+
+# =====================================================================================
+# MULTI-KERNEL / FLOAT-KERNEL CONVOLUTION
+# =====================================================================================
+
+"""
+    convolveMultiKernel_ARGB8888!(dest, src, kernels; divisors, biases, backgroundColor,
+                                  srcOffsetX=0, srcOffsetY=0, flags=kvImageEdgeExtend) -> dest
+
+Convolve a 4-channel ARGB8888 image applying a **separate** integer `kernel` to each
+channel. `kernels` is a length-4 collection of equal-size `(kernelHeight, kernelWidth)`
+integer matrices (both dims odd); `divisors` and `biases` are length-4. One edging-mode
+flag is required (`kvImageEdgeExtend`, `kvImageBackgroundColorFill`, `kvImageCopyInPlace`
+or `kvImageTruncateKernel`). Allocating and `!` variants. With four identical kernels this
+matches [`convolve_Planar8`](@ref).
+"""
+function convolveMultiKernel_ARGB8888!(dest::AbstractArray{UInt8,3}, src::AbstractArray{UInt8,3},
+        kernels; divisors = (1, 1, 1, 1), biases = (0, 0, 0, 0),
+        backgroundColor = (0, 0, 0, 0), srcOffsetX::Integer = 0, srcOffsetY::Integer = 0,
+        flags::Integer = kvImageEdgeExtend)
+    ks = [convert(Matrix{Int16}, k) for k in kernels]
+    length(ks) == 4 || throw(DimensionMismatch("need 4 kernels"))
+    kh, kw = size(ks[1])
+    all(size(k) == (kh, kw) for k in ks) || throw(DimensionMismatch("all kernels must match in size"))
+    div = convert(Vector{Int32}, collect(divisors)); bia = convert(Vector{Int32}, collect(biases))
+    bc = convert(Vector{UInt8}, collect(backgroundColor))
+    GC.@preserve src dest ks div bia bc begin
+        kptrs = Ptr{Int16}[pointer(k) for k in ks]
+        GC.@preserve kptrs begin
+            sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+            err = ccall((:vImageConvolveMultiKernel_ARGB8888, vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
+                 Ptr{Ptr{Int16}}, UInt32, UInt32, Ptr{Int32}, Ptr{Int32}, Ptr{UInt8}, vImage_Flags),
+                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                pointer(kptrs), UInt32(kh), UInt32(kw), pointer(div), pointer(bia), pointer(bc), vImage_Flags(flags))
+        end
+    end
+    _check(err, "vImageConvolveMultiKernel_ARGB8888"); return dest
+end
+convolveMultiKernel_ARGB8888(src::AbstractArray{UInt8,3}, kernels; kw...) =
+    convolveMultiKernel_ARGB8888!(similar(src), src, kernels; kw...)
+
+"""
+    convolveMultiKernel_ARGBFFFF!(dest, src, kernels; biases, backgroundColor,
+                                  srcOffsetX=0, srcOffsetY=0, flags=kvImageEdgeExtend) -> dest
+
+Float per-channel convolution of an ARGBFFFF image: `kernels` is a length-4 collection of
+equal-size float matrices, `biases` length-4 (no divisor). See
+[`convolveMultiKernel_ARGB8888!`](@ref). Allocating and `!` variants.
+"""
+function convolveMultiKernel_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::AbstractArray{Float32,3},
+        kernels; biases = (0f0, 0f0, 0f0, 0f0), backgroundColor = (0f0, 0f0, 0f0, 0f0),
+        srcOffsetX::Integer = 0, srcOffsetY::Integer = 0, flags::Integer = kvImageEdgeExtend)
+    ks = [convert(Matrix{Cfloat}, k) for k in kernels]
+    length(ks) == 4 || throw(DimensionMismatch("need 4 kernels"))
+    kh, kw = size(ks[1])
+    all(size(k) == (kh, kw) for k in ks) || throw(DimensionMismatch("all kernels must match in size"))
+    bia = convert(Vector{Cfloat}, collect(biases)); bc = convert(Vector{Cfloat}, collect(backgroundColor))
+    GC.@preserve src dest ks bia bc begin
+        kptrs = Ptr{Cfloat}[pointer(k) for k in ks]
+        GC.@preserve kptrs begin
+            sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+            err = ccall((:vImageConvolveMultiKernel_ARGBFFFF, vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
+                 Ptr{Ptr{Cfloat}}, UInt32, UInt32, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
+                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                pointer(kptrs), UInt32(kh), UInt32(kw), pointer(bia), pointer(bc), vImage_Flags(flags))
+        end
+    end
+    _check(err, "vImageConvolveMultiKernel_ARGBFFFF"); return dest
+end
+convolveMultiKernel_ARGBFFFF(src::AbstractArray{Float32,3}, kernels; kw...) =
+    convolveMultiKernel_ARGBFFFF!(similar(src), src, kernels; kw...)
+
+"""
+    convolveFloatKernel_ARGB8888!(dest, src, kernel; bias=0, backColor=(0,0,0,0),
+                                  srcOffsetX=0, srcOffsetY=0, flags) -> dest
+
+Convolve an ARGB8888 image with a single **floating-point** `kernel` (higher precision
+than the integer-kernel [`convolve_Planar8`](@ref)). `kernel` is
+`(kernelHeight, kernelWidth)`. Allocating and `!` variants.
+"""
+function convolveFloatKernel_ARGB8888!(dest::AbstractArray{UInt8,3}, src::AbstractArray{UInt8,3},
+        kernel::AbstractMatrix{<:Real}; bias::Real = 0, backColor = (0, 0, 0, 0),
+        srcOffsetX::Integer = 0, srcOffsetY::Integer = 0, flags::Integer = kvImageNoFlags)
+    k = convert(Matrix{Cfloat}, kernel); kh, kw = size(k)
+    bc = convert(Vector{UInt8}, collect(backColor))
+    GC.@preserve src dest k bc begin
+        sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageConvolveFloatKernel_ARGB8888, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
+             Ptr{Cfloat}, UInt32, UInt32, Cfloat, Ptr{UInt8}, vImage_Flags),
+            sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            pointer(k), UInt32(kh), UInt32(kw), Cfloat(bias), pointer(bc), vImage_Flags(flags))
+    end
+    _check(err, "vImageConvolveFloatKernel_ARGB8888"); return dest
+end
+convolveFloatKernel_ARGB8888(src::AbstractArray{UInt8,3}, kernel::AbstractMatrix{<:Real}; kw...) =
+    convolveFloatKernel_ARGB8888!(similar(src), src, kernel; kw...)
+
+# =====================================================================================
+# MULTI-PLANE MATRIX MULTIPLY
+# =====================================================================================
+# srcs[]/dests[] are C arrays of pointers-to-vImage_Buffer; matrix is (src_planes ×
+# dest_planes) with out[j] = Σ_i in[i]·matrix[i,j], flattened row-major.
+
+for (sym, T, KT, integer) in ((:vImageMatrixMultiply_Planar8,  UInt8, Int16,   true),
+                              (:vImageMatrixMultiply_Planar16S, Int16, Int16,   true),
+                              (:vImageMatrixMultiply_PlanarF,   Float32, Cfloat, false))
+    fn = _jlname(sym)
+    if integer
+        @eval function $fn(srcs::AbstractVector{<:AbstractMatrix{$T}}, dests::AbstractVector{<:AbstractMatrix{$T}},
+                           matrix::AbstractMatrix{<:Integer}; divisor::Integer = 1,
+                           preBias = nothing, postBias = nothing, flags::Integer = kvImageNoFlags)
+            sp = length(srcs); dp = length(dests)
+            size(matrix) == (sp, dp) || throw(DimensionMismatch("matrix must be (src_planes, dest_planes)"))
+            m = convert(Vector{$KT}, vec(permutedims(convert(Matrix{$KT}, matrix))))
+            prev = preBias === nothing ? $KT[] : convert(Vector{$KT}, collect(preBias))
+            postv = postBias === nothing ? Int32[] : convert(Vector{Int32}, collect(postBias))
+            srefs = [Ref(vimage_buffer(s)) for s in srcs]; drefs = [Ref(vimage_buffer(d)) for d in dests]
+            GC.@preserve srcs dests m prev postv srefs drefs begin
+                sptrs = Ptr{vImage_Buffer}[Base.unsafe_convert(Ptr{vImage_Buffer}, r) for r in srefs]
+                dptrs = Ptr{vImage_Buffer}[Base.unsafe_convert(Ptr{vImage_Buffer}, r) for r in drefs]
+                prep = isempty(prev) ? Ptr{$KT}(C_NULL) : pointer(prev)
+                postp = isempty(postv) ? Ptr{Int32}(C_NULL) : pointer(postv)
+                GC.@preserve sptrs dptrs begin
+                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                        (Ptr{Ptr{vImage_Buffer}}, Ptr{Ptr{vImage_Buffer}}, UInt32, UInt32,
+                         Ptr{$KT}, Int32, Ptr{$KT}, Ptr{Int32}, vImage_Flags),
+                        pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
+                        pointer(m), Int32(divisor), prep, postp, vImage_Flags(flags))
+                end
+            end
+            _check(err, $(String(sym))); return dests
+        end
+    else
+        @eval function $fn(srcs::AbstractVector{<:AbstractMatrix{$T}}, dests::AbstractVector{<:AbstractMatrix{$T}},
+                           matrix::AbstractMatrix{<:Real}; preBias = nothing, postBias = nothing,
+                           flags::Integer = kvImageNoFlags)
+            sp = length(srcs); dp = length(dests)
+            size(matrix) == (sp, dp) || throw(DimensionMismatch("matrix must be (src_planes, dest_planes)"))
+            m = convert(Vector{Cfloat}, vec(permutedims(convert(Matrix{Cfloat}, matrix))))
+            prev = preBias === nothing ? Cfloat[] : convert(Vector{Cfloat}, collect(preBias))
+            postv = postBias === nothing ? Cfloat[] : convert(Vector{Cfloat}, collect(postBias))
+            srefs = [Ref(vimage_buffer(s)) for s in srcs]; drefs = [Ref(vimage_buffer(d)) for d in dests]
+            GC.@preserve srcs dests m prev postv srefs drefs begin
+                sptrs = Ptr{vImage_Buffer}[Base.unsafe_convert(Ptr{vImage_Buffer}, r) for r in srefs]
+                dptrs = Ptr{vImage_Buffer}[Base.unsafe_convert(Ptr{vImage_Buffer}, r) for r in drefs]
+                prep = isempty(prev) ? Ptr{Cfloat}(C_NULL) : pointer(prev)
+                postp = isempty(postv) ? Ptr{Cfloat}(C_NULL) : pointer(postv)
+                GC.@preserve sptrs dptrs begin
+                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                        (Ptr{Ptr{vImage_Buffer}}, Ptr{Ptr{vImage_Buffer}}, UInt32, UInt32,
+                         Ptr{Cfloat}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
+                        pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
+                        pointer(m), prep, postp, vImage_Flags(flags))
+                end
+            end
+            _check(err, $(String(sym))); return dests
+        end
+    end
+end
+
+"""
+    matrixMultiply_Planar8(srcs, dests, matrix; divisor=1, preBias, postBias, flags) -> dests
+    matrixMultiply_PlanarF(srcs, dests, matrix; preBias, postBias, flags) -> dests
+
+Multiply the `M` source planes by an `M×N` `matrix` to produce the `N` destination
+planes: `out[j] = Σ_i (in[i]+preBias[i])·matrix[i,j]` (then `+postBias[j]`, and `/divisor`
+for the integer forms `Planar8`/`Planar16S`). `srcs`/`dests` are vectors of equally-sized
+planar matrices. Writes into `dests`.
+"""
+matrixMultiply_Planar8
+
+# =====================================================================================
+# ADDITIONAL ALPHA / COMPOSITING
+# =====================================================================================
+
+# Premultiplied planar blend: (srcTop, srcTopAlpha, srcBottom, dest, flags)
+for sfx in (:Planar8, :PlanarF)
+    sym  = Symbol("vImagePremultipliedAlphaBlend_", sfx)
+    bang = Symbol(_jlname(sym), "!")
+    @eval begin
+        function $bang(dest::AbstractMatrix, srcTop::AbstractMatrix, srcTopAlpha::AbstractMatrix,
+                       srcBottom::AbstractMatrix; flags::Integer = kvImageNoFlags)
+            GC.@preserve srcTop srcTopAlpha srcBottom dest begin
+                t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
+                b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+                    t, ta, b, db, vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+        $(_jlname(sym))(srcTop::AbstractMatrix, srcTopAlpha::AbstractMatrix, srcBottom::AbstractMatrix; kw...) =
+            $bang(similar(srcTop), srcTop, srcTopAlpha, srcBottom; kw...)
+    end
+end
+
+# Nonpremultiplied-to-premultiplied planar blend: same 4-buffer shape
+for sfx in (:Planar8, :PlanarF)
+    sym  = Symbol("vImageAlphaBlend_NonpremultipliedToPremultiplied_", sfx)
+    bang = Symbol(_jlname(sym), "!")
+    @eval begin
+        function $bang(dest::AbstractMatrix, srcTop::AbstractMatrix, srcTopAlpha::AbstractMatrix,
+                       srcBottom::AbstractMatrix; flags::Integer = kvImageNoFlags)
+            GC.@preserve srcTop srcTopAlpha srcBottom dest begin
+                t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
+                b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+                    t, ta, b, db, vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+        $(_jlname(sym))(srcTop::AbstractMatrix, srcTopAlpha::AbstractMatrix, srcBottom::AbstractMatrix; kw...) =
+            $bang(similar(srcTop), srcTop, srcTopAlpha, srcBottom; kw...)
+    end
+end
+
+# Const-alpha premultiplied blend. Planar: (srcTop, constAlpha, srcTopAlpha, srcBottom, dest);
+# interleaved: (srcTop, constAlpha, srcBottom, dest).
+for (sfx, T, AT) in ((:Planar8, UInt8, UInt8), (:PlanarF, Float32, Cfloat))
+    sym  = Symbol("vImagePremultipliedConstAlphaBlend_", sfx)
+    bang = Symbol(_jlname(sym), "!")
+    @eval begin
+        function $bang(dest::AbstractMatrix{$T}, srcTop::AbstractMatrix{$T}, constAlpha,
+                       srcTopAlpha::AbstractMatrix{$T}, srcBottom::AbstractMatrix{$T}; flags::Integer = kvImageNoFlags)
+            GC.@preserve srcTop srcTopAlpha srcBottom dest begin
+                t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
+                b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+                    t, $AT(constAlpha), ta, b, db, vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+        $(_jlname(sym))(srcTop::AbstractMatrix{$T}, constAlpha, srcTopAlpha::AbstractMatrix{$T}, srcBottom::AbstractMatrix{$T}; kw...) =
+            $bang(similar(srcTop), srcTop, constAlpha, srcTopAlpha, srcBottom; kw...)
+    end
+end
+for (sfx, T, AT) in ((:ARGB8888, UInt8, UInt8), (:ARGBFFFF, Float32, Cfloat))
+    sym  = Symbol("vImagePremultipliedConstAlphaBlend_", sfx)
+    bang = Symbol(_jlname(sym), "!")
+    @eval begin
+        function $bang(dest::AbstractArray{$T,3}, srcTop::AbstractArray{$T,3}, constAlpha,
+                       srcBottom::AbstractArray{$T,3}; flags::Integer = kvImageNoFlags)
+            GC.@preserve srcTop srcBottom dest begin
+                t = Ref(vimage_buffer(srcTop)); b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+                    t, $AT(constAlpha), b, db, vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+        $(_jlname(sym))(srcTop::AbstractArray{$T,3}, constAlpha, srcBottom::AbstractArray{$T,3}; kw...) =
+            $bang(similar(srcTop), srcTop, constAlpha, srcBottom; kw...)
+    end
+end
+
+"""
+    premultipliedAlphaBlend_Planar8(srcTop, srcTopAlpha, srcBottom; flags) -> plane
+    premultipliedConstAlphaBlend_ARGB8888(srcTop, constAlpha, srcBottom; flags) -> array
+
+Additional alpha-compositing operators. `premultipliedAlphaBlend_Planar8/PlanarF` blend a
+premultiplied planar top (with its alpha plane) over a premultiplied bottom;
+`alphaBlend_NonpremultipliedToPremultiplied_Planar8/PlanarF` do the same from a
+non-premultiplied top; `premultipliedConstAlphaBlend_*` scale the top's alpha by a scalar
+`constAlpha` (planar forms take a separate `srcTopAlpha` plane, interleaved
+`ARGB8888/FFFF` forms use the in-pixel alpha). Allocating and `!` variants.
+"""
+premultipliedAlphaBlend_Planar8
+
+# AlphaBlend_PlanarF: (srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha, dest, flags)
+function alphaBlend_PlanarF!(dest::AbstractMatrix{Float32}, srcTop::AbstractMatrix{Float32}, srcTopAlpha::AbstractMatrix{Float32},
+                            srcBottom::AbstractMatrix{Float32}, srcBottomAlpha::AbstractMatrix{Float32},
+                            alpha::AbstractMatrix{Float32}; flags::Integer = kvImageNoFlags)
+    GC.@preserve srcTop srcTopAlpha srcBottom srcBottomAlpha alpha dest begin
+        t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
+        b = Ref(vimage_buffer(srcBottom)); ba = Ref(vimage_buffer(srcBottomAlpha))
+        al = Ref(vimage_buffer(alpha)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageAlphaBlend_PlanarF, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer},
+             Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+            t, ta, b, ba, al, db, vImage_Flags(flags))
+    end
+    _check(err, "vImageAlphaBlend_PlanarF"); return dest
+end
+"""
+    alphaBlend_PlanarF(srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha; flags) -> plane
+
+Float non-premultiplied planar alpha blend (float analogue of
+[`alphaBlend_Planar8`](@ref)). Allocating and `!` variants.
+"""
+alphaBlend_PlanarF(srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha; kw...) =
+    alphaBlend_PlanarF!(similar(srcTop), srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha; kw...)
+
+# PremultipliedAlphaBlendWithPermute: (srcTop, srcBottom, dest, permuteMap[4], makeDestAlphaOpaque, flags)
+for sfx in (:ARGB8888, :RGBA8888)
+    sym  = Symbol("vImagePremultipliedAlphaBlendWithPermute_", sfx)
+    bang = Symbol(_jlname(sym), "!")
+    @eval begin
+        function $bang(dest::AbstractArray{UInt8,3}, srcTop::AbstractArray{UInt8,3}, srcBottom::AbstractArray{UInt8,3};
+                       permuteMap = (0, 1, 2, 3), makeDestAlphaOpaque::Bool = false, flags::Integer = kvImageNoFlags)
+            pm = convert(Vector{UInt8}, collect(permuteMap))
+            GC.@preserve srcTop srcBottom dest pm begin
+                t = Ref(vimage_buffer(srcTop)); b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
+                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, Bool, vImage_Flags),
+                    t, b, db, pointer(pm), makeDestAlphaOpaque, vImage_Flags(flags))
+            end
+            _check(err, $(String(sym))); return dest
+        end
+        $(_jlname(sym))(srcTop::AbstractArray{UInt8,3}, srcBottom::AbstractArray{UInt8,3}; kw...) =
+            $bang(similar(srcTop), srcTop, srcBottom; kw...)
+    end
+end
+"""
+    premultipliedAlphaBlendWithPermute_ARGB8888(srcTop, srcBottom; permuteMap=(0,1,2,3),
+                                                makeDestAlphaOpaque=false, flags) -> array
+
+Source-over premultiplied blend that first permutes the top image's channels by
+`permuteMap`; set `makeDestAlphaOpaque` to force the result alpha to opaque. Variants for
+`ARGB8888` and `RGBA8888`. Allocating and `!` variants.
+"""
+premultipliedAlphaBlendWithPermute_ARGB8888
+
+# =====================================================================================
+# HISTOGRAM SPECIFICATION (float + interleaved)
+# =====================================================================================
+
+function histogramSpecification_PlanarF!(dest::AbstractMatrix{Float32}, src::AbstractMatrix{Float32},
+        desiredHistogram::AbstractVector; entries::Integer = length(desiredHistogram),
+        minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
+    dh = convert(Vector{Csize_t}, collect(desiredHistogram))
+    GC.@preserve src dest dh begin
+        sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageHistogramSpecification_PlanarF, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Csize_t}, Cuint, Cfloat, Cfloat, vImage_Flags),
+            sb, db, C_NULL, pointer(dh), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+    end
+    _check(err, "vImageHistogramSpecification_PlanarF"); return dest
+end
+histogramSpecification_PlanarF(src::AbstractMatrix{Float32}, dh::AbstractVector; kw...) =
+    histogramSpecification_PlanarF!(similar(src), src, dh; kw...)
+
+function histogramSpecification_ARGB8888!(dest::AbstractArray{UInt8,3}, src::AbstractArray{UInt8,3},
+        desiredHistogram; flags::Integer = kvImageNoFlags)
+    hs = [convert(Vector{Csize_t}, collect(h)) for h in desiredHistogram]
+    length(hs) == 4 || throw(DimensionMismatch("need 4 desired histograms"))
+    GC.@preserve src dest hs begin
+        hptrs = Ptr{Csize_t}[pointer(h) for h in hs]
+        GC.@preserve hptrs begin
+            sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+            err = ccall((:vImageHistogramSpecification_ARGB8888, vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Ptr{Csize_t}}, vImage_Flags),
+                sb, db, pointer(hptrs), vImage_Flags(flags))
+        end
+    end
+    _check(err, "vImageHistogramSpecification_ARGB8888"); return dest
+end
+histogramSpecification_ARGB8888(src::AbstractArray{UInt8,3}, dh; kw...) =
+    histogramSpecification_ARGB8888!(similar(src), src, dh; kw...)
+
+function histogramSpecification_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::AbstractArray{Float32,3},
+        desiredHistogram; entries::Integer = length(first(desiredHistogram)),
+        minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
+    hs = [convert(Vector{Csize_t}, collect(h)) for h in desiredHistogram]
+    length(hs) == 4 || throw(DimensionMismatch("need 4 desired histograms"))
+    GC.@preserve src dest hs begin
+        hptrs = Ptr{Csize_t}[pointer(h) for h in hs]
+        GC.@preserve hptrs begin
+            sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+            err = ccall((:vImageHistogramSpecification_ARGBFFFF, vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Ptr{Csize_t}}, Cuint, Cfloat, Cfloat, vImage_Flags),
+                sb, db, C_NULL, pointer(hptrs), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+        end
+    end
+    _check(err, "vImageHistogramSpecification_ARGBFFFF"); return dest
+end
+histogramSpecification_ARGBFFFF(src::AbstractArray{Float32,3}, dh; kw...) =
+    histogramSpecification_ARGBFFFF!(similar(src), src, dh; kw...)
+
+"""
+    histogramSpecification_PlanarF(src, desiredHistogram; entries, minVal=0, maxVal=1, flags) -> plane
+    histogramSpecification_ARGB8888(src, desiredHistogram; flags) -> array
+
+Remap an image so its histogram matches `desiredHistogram`. `PlanarF`/`ARGBFFFF` take the
+histogram bin count `entries` and value range `[minVal, maxVal]` (the `ARGB*` forms take a
+length-4 collection of per-channel histograms). Allocating and `!` variants; see also
+[`histogramSpecification_Planar8`](@ref).
+"""
+histogramSpecification_PlanarF
+
+function endsInContrastStretch_PlanarF!(dest::AbstractMatrix{Float32}, src::AbstractMatrix{Float32};
+        percentLow::Integer = 0, percentHigh::Integer = 0, entries::Integer = 4096,
+        minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
+    GC.@preserve src dest begin
+        sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageEndsInContrastStretch_PlanarF, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Cuint, Cuint, Cuint, Cfloat, Cfloat, vImage_Flags),
+            sb, db, C_NULL, Cuint(percentLow), Cuint(percentHigh), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+    end
+    _check(err, "vImageEndsInContrastStretch_PlanarF"); return dest
+end
+endsInContrastStretch_PlanarF(src::AbstractMatrix{Float32}; kw...) =
+    endsInContrastStretch_PlanarF!(similar(src), src; kw...)
+
+function endsInContrastStretch_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::AbstractArray{Float32,3};
+        percentLow = (0, 0, 0, 0), percentHigh = (0, 0, 0, 0), entries::Integer = 4096,
+        minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
+    pl = convert(Vector{Cuint}, collect(percentLow)); ph = convert(Vector{Cuint}, collect(percentHigh))
+    GC.@preserve src dest pl ph begin
+        sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageEndsInContrastStretch_ARGBFFFF, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Cuint}, Ptr{Cuint}, Cuint, Cfloat, Cfloat, vImage_Flags),
+            sb, db, C_NULL, pointer(pl), pointer(ph), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+    end
+    _check(err, "vImageEndsInContrastStretch_ARGBFFFF"); return dest
+end
+endsInContrastStretch_ARGBFFFF(src::AbstractArray{Float32,3}; kw...) =
+    endsInContrastStretch_ARGBFFFF!(similar(src), src; kw...)
+
+"""
+    endsInContrastStretch_PlanarF(src; percentLow=0, percentHigh=0, entries=4096, minVal, maxVal, flags) -> plane
+
+Float ends-in contrast stretch (clip `percentLow`%/`percentHigh`% of the darkest/brightest
+pixels, then rescale). `endsInContrastStretch_ARGBFFFF` takes length-4 percentages. See the
+integer [`endsInContrastStretch_Planar8`](@ref). Allocating and `!` variants.
+"""
+endsInContrastStretch_PlanarF
+
+# =====================================================================================
+# ADDITIONAL PLANE ⇄ INTERLEAVED CONVERSIONS
+# =====================================================================================
+
+# 4-channel interleaved -> 3 planes (drop the X channel): (src, r, g, b, flags) with
+# XRGB order (dest planes r,g,b) and BGRX order (dest planes b,g,r).
+for (sym, T) in ((:vImageConvert_XRGB8888ToPlanar8, UInt8), (:vImageConvert_BGRX8888ToPlanar8, UInt8),
+                 (:vImageConvert_XRGBFFFFToPlanarF, Float32), (:vImageConvert_BGRXFFFFToPlanarF, Float32))
+    fn = _jlname(sym)
+    @eval function $fn(src::AbstractArray{$T,3}, c1::AbstractMatrix{$T}, c2::AbstractMatrix{$T},
+                       c3::AbstractMatrix{$T}; flags::Integer = kvImageNoFlags)
+        GC.@preserve src c1 c2 c3 begin
+            sb = Ref(vimage_buffer(src)); p1 = Ref(vimage_buffer(c1)); p2 = Ref(vimage_buffer(c2)); p3 = Ref(vimage_buffer(c3))
+            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+                sb, p1, p2, p3, vImage_Flags(flags))
+        end
+        _check(err, $(String(sym))); return (c1, c2, c3)
+    end
+end
+"""
+    convert_XRGB8888ToPlanar8(src, red, green, blue) -> (red, green, blue)
+    convert_BGRX8888ToPlanar8(src, blue, green, red) -> (blue, green, red)
+
+Deinterleave a 4-channel image into three planes, discarding the padding (X) channel.
+`XRGB*` writes planes in `r,g,b` order, `BGRX*` in `b,g,r` order (`Planar8`/`PlanarF`).
+"""
+convert_XRGB8888ToPlanar8
+
+# 4 planes (A,R,G,B) -> 4-channel float, mapping [0,255]/[0,1] to [minFloat,maxFloat] per channel.
+for (sym, DT, T) in ((:vImageConvert_Planar8ToARGBFFFF, Float32, UInt8),
+                     (:vImageConvert_PlanarFToARGB8888, UInt8, Float32))
+    bang = Symbol(_jlname(sym), "!")
+    @eval function $bang(dest::AbstractArray{$DT,3}, alpha::AbstractMatrix{$T}, red::AbstractMatrix{$T},
+                         green::AbstractMatrix{$T}, blue::AbstractMatrix{$T};
+                         maxFloat = (1f0, 1f0, 1f0, 1f0), minFloat = (0f0, 0f0, 0f0, 0f0), flags::Integer = kvImageNoFlags)
+        mx = convert(Vector{Cfloat}, collect(maxFloat)); mn = convert(Vector{Cfloat}, collect(minFloat))
+        GC.@preserve dest alpha red green blue mx mn begin
+            ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
+            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
+                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
+                ab, rb, gb, bb, db, pointer(mx), pointer(mn), vImage_Flags(flags))
+        end
+        _check(err, $(String(sym))); return dest
+    end
+end
+"""
+    convert_Planar8ToARGBFFFF!(dest, alpha, red, green, blue; maxFloat, minFloat, flags) -> dest
+    convert_PlanarFToARGB8888!(dest, alpha, red, green, blue; maxFloat, minFloat, flags) -> dest
+
+Interleave four planes `(alpha, red, green, blue)` into a 4-channel image, rescaling each
+channel between `minFloat` and `maxFloat` (length-4 collections). `Planar8ToARGBFFFF`
+produces float output from 8-bit planes; `PlanarFToARGB8888` produces 8-bit output from
+float planes. `!`-only.
+"""
+convert_Planar8ToARGBFFFF!
+
+# Planar16Q12 (Q4.12 fixed-point) <-> 8-bit interleaved, via separate planes.
+function convert_Planar16Q12toARGB8888!(dest::AbstractArray{UInt8,3}, alpha::AbstractMatrix{Int16},
+        red::AbstractMatrix{Int16}, green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}; flags::Integer = kvImageNoFlags)
+    GC.@preserve dest alpha red green blue begin
+        ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageConvert_Planar16Q12toARGB8888, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+            ab, rb, gb, bb, db, vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_Planar16Q12toARGB8888"); return dest
+end
+function convert_Planar16Q12toRGB888!(dest::AbstractArray{UInt8,3}, red::AbstractMatrix{Int16},
+        green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}; flags::Integer = kvImageNoFlags)
+    GC.@preserve dest red green blue begin
+        rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
+        err = ccall((:vImageConvert_Planar16Q12toRGB888, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+            rb, gb, bb, db, vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_Planar16Q12toRGB888"); return dest
+end
+function convert_ARGB8888toPlanar16Q12!(alpha::AbstractMatrix{Int16}, red::AbstractMatrix{Int16},
+        green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}, src::AbstractArray{UInt8,3}; flags::Integer = kvImageNoFlags)
+    GC.@preserve src alpha red green blue begin
+        sb = Ref(vimage_buffer(src)); ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue))
+        err = ccall((:vImageConvert_ARGB8888toPlanar16Q12, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+            sb, ab, rb, gb, bb, vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_ARGB8888toPlanar16Q12"); return (alpha, red, green, blue)
+end
+function convert_RGB888toPlanar16Q12!(red::AbstractMatrix{Int16}, green::AbstractMatrix{Int16},
+        blue::AbstractMatrix{Int16}, src::AbstractArray{UInt8,3}; flags::Integer = kvImageNoFlags)
+    GC.@preserve src red green blue begin
+        sb = Ref(vimage_buffer(src)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue))
+        err = ccall((:vImageConvert_RGB888toPlanar16Q12, vimage_lib), vImage_Error,
+            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
+            sb, rb, gb, bb, vImage_Flags(flags))
+    end
+    _check(err, "vImageConvert_RGB888toPlanar16Q12"); return (red, green, blue)
+end
+"""
+    convert_Planar16Q12toARGB8888!(dest, alpha, red, green, blue) -> dest
+    convert_ARGB8888toPlanar16Q12!(alpha, red, green, blue, src) -> (alpha,red,green,blue)
+
+Convert between 8-bit interleaved images and `Planar16Q12` (signed Q4.12 fixed-point, where
+`4096 == 1.0`) held as separate `Int16` planes. `!`-only; the `RGB888` variants omit the
+alpha plane.
+"""
+convert_Planar16Q12toARGB8888!
