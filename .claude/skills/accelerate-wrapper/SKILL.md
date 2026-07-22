@@ -117,9 +117,18 @@ is full of "Harden FFI/GC safety", "Guard against OOB writes", "Add length guard
 3. **Confirm operand order and sign** from the raw signature + header, never from
    intuition or a copied comment (some vDSP ops reverse subtract/divide operands,
    some don't; comments claiming a swap are often wrong — the test is truth).
-4. **Match the length/stride argument *kind*.** vDSP strides/lengths are Int64/UInt64
-   (Julia `Int` auto-converts); but vForce `vv*` take the length as a **pointer**
-   (`Ref{Cint}(n)`). Read the raw-layer arg types; don't assume by-value.
+4. **Match the length/stride argument *kind*, and support strided inputs.** vDSP
+   strides/lengths are Int64/UInt64 (Julia `Int` auto-converts); vForce `vv*` take
+   the length as a **pointer** (`Ref{Cint}(n)`). Read the raw-layer arg types; don't
+   assume by-value. Where the C call takes a stride, accept `StridedVector`/
+   `StridedMatrix` (not just `Vector`) and pass `stride(X, dim)` — never a hard-coded
+   `1` — so column views, reshapes, and slices work copy-free (see #191); the length
+   arg stays the *logical* element count. Guard the ops that can't take an arbitrary
+   stride: split-complex packing, matrix/FFT paths, and index-returning reductions
+   (vDSP returns a stride-scaled *memory offset*, so require a positive stride via
+   `_check_positive_stride` and recover the index with `div(offset, stride)+1`).
+   Still `GC.@preserve` across the ccall when passing a view's `pointer` — it roots
+   the parent buffer.
 5. **Respect layout.** vDSP matrices are **row-major**, Julia is **col-major** — many
    matrix ops need operands and dims passed swapped (see `zmmul`/`zmma`). If an op
    can't be expressed under the transpose without an extra copy, leave it unwrapped
