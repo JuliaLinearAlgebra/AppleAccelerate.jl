@@ -108,6 +108,7 @@ Wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) reductio
 | `sumsqr(X)` | Sum of squares | [`vDSP_svesq`](https://developer.apple.com/documentation/accelerate/vdsp_svesq) |
 | `sumssqr(X)` | Sum of signed squares | [`vDSP_svs`](https://developer.apple.com/documentation/accelerate/vdsp_svs) |
 | [`dot`](@ref AppleAccelerate.dot) | Dot product: `sum(X .* Y)` | [`vDSP_dotpr`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr) |
+| [`dotpr2`](@ref AppleAccelerate.dotpr2) | Dual dot product: one `B` dotted against two `A0`/`A1` | [`vDSP_dotpr2`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr2) |
 | [`distancesq`](@ref AppleAccelerate.distancesq) | Squared Euclidean distance: `sum((X .- Y).^2)` | [`vDSP_distancesq`](https://developer.apple.com/documentation/accelerate/vdsp_distancesq) |
 | [`rmsqv`](@ref AppleAccelerate.rmsqv) | Root mean square: `sqrt(sum(X.^2)/N)` |
 | [`sve_svesq`](@ref AppleAccelerate.sve_svesq) | Simultaneous sum and sum-of-squares |
@@ -141,6 +142,7 @@ AppleAccelerate.summag
 AppleAccelerate.sumsqr
 AppleAccelerate.sumssqr
 AppleAccelerate.dot
+AppleAccelerate.dotpr2
 AppleAccelerate.distancesq
 AppleAccelerate.rmsqv
 AppleAccelerate.sve_svesq
@@ -336,11 +338,15 @@ AppleAccelerate.vsingle
 | [`vramp`](@ref AppleAccelerate.vramp) | Generate a ramp: `start + i * step` |
 | [`vrampmul`](@ref AppleAccelerate.vrampmul) | Multiply vector by a generated ramp |
 | [`vrampmul2`](@ref AppleAccelerate.vrampmul2) | Stereo ramp multiply (two outputs) |
+| [`vrampmuladd`](@ref AppleAccelerate.vrampmuladd) | Ramp-multiply then accumulate into an existing vector |
+| [`vrampmuladd2`](@ref AppleAccelerate.vrampmuladd2) | Stereo ramp-multiply then accumulate (two outputs) |
 
 ```@docs
 AppleAccelerate.vramp
 AppleAccelerate.vrampmul
 AppleAccelerate.vrampmul2
+AppleAccelerate.vrampmuladd
+AppleAccelerate.vrampmuladd2
 ```
 
 ## Linear Average
@@ -448,6 +454,7 @@ AppleAccelerate.vsorti
 | Function | Description |
 |----------|-------------|
 | [`vgathr`](@ref AppleAccelerate.vgathr) | Gather by index: `C[i] = A[B[i]]` |
+| [`vgathra`](@ref AppleAccelerate.vgathra) | Gather via an array of pointers: `C[i] = A[i][1]` |
 | [`vindex`](@ref AppleAccelerate.vindex) | Index with float indices |
 | [`vgen`](@ref AppleAccelerate.vgen) | Generate linear ramp between two values |
 | [`vgenp`](@ref AppleAccelerate.vgenp) | Piecewise linear interpolation from breakpoints |
@@ -455,6 +462,7 @@ AppleAccelerate.vsorti
 
 ```@docs
 AppleAccelerate.vgathr
+AppleAccelerate.vgathra
 AppleAccelerate.vindex
 AppleAccelerate.vgen
 AppleAccelerate.vgenp
@@ -483,12 +491,80 @@ AppleAccelerate.mmov
 | [`vabsi`](@ref AppleAccelerate.vabsi) | Int32 absolute value |
 | [`vfilli!`](@ref AppleAccelerate.vfilli!) | Fill Int32 vector with scalar |
 | [`veqvi`](@ref AppleAccelerate.veqvi) | Int32 bitwise XNOR |
+| [`vdivi`](@ref AppleAccelerate.vdivi) | Int32 vector divide: `C[i] = div(A[i], B[i])` |
+| [`vsaddi`](@ref AppleAccelerate.vsaddi) | Int32 scalar add: `C[i] = A[i] + b` |
+| [`vsdivi`](@ref AppleAccelerate.vsdivi) | Int32 scalar divide: `C[i] = div(A[i], b)` |
 
 ```@docs
 AppleAccelerate.vaddi
 AppleAccelerate.vabsi
 AppleAccelerate.vfilli!
 AppleAccelerate.veqvi
+AppleAccelerate.vdivi
+AppleAccelerate.vsaddi
+AppleAccelerate.vsdivi
+```
+
+## Fixed-Point (Q1.15 / Q8.24) Operations
+
+vDSP fixed-point kernels operate directly on integer storage: an `Int16` Q1.15
+value `v` represents the real number `v / 32768`, and an `Int32` Q8.24 value `v`
+represents `v / 2^24`. Results are computed and re-encoded at the same scale.
+
+| Function | Description |
+|----------|-------------|
+| [`dotpr_s1_15`](@ref AppleAccelerate.dotpr_s1_15) / [`dotpr_s8_24`](@ref AppleAccelerate.dotpr_s8_24) | Fixed-point dot product |
+| [`dotpr2_s1_15`](@ref AppleAccelerate.dotpr2_s1_15) / [`dotpr2_s8_24`](@ref AppleAccelerate.dotpr2_s8_24) | Fixed-point dual dot product |
+| [`vrampmul_s1_15`](@ref AppleAccelerate.vrampmul_s1_15) / [`vrampmul_s8_24`](@ref AppleAccelerate.vrampmul_s8_24) | Fixed-point ramp multiply |
+| [`vrampmul2_s1_15`](@ref AppleAccelerate.vrampmul2_s1_15) / [`vrampmul2_s8_24`](@ref AppleAccelerate.vrampmul2_s8_24) | Fixed-point stereo ramp multiply |
+| [`vrampmuladd_s1_15`](@ref AppleAccelerate.vrampmuladd_s1_15) / [`vrampmuladd_s8_24`](@ref AppleAccelerate.vrampmuladd_s8_24) | Fixed-point ramp-multiply then accumulate |
+| [`vrampmuladd2_s1_15`](@ref AppleAccelerate.vrampmuladd2_s1_15) / [`vrampmuladd2_s8_24`](@ref AppleAccelerate.vrampmuladd2_s8_24) | Fixed-point stereo ramp-multiply then accumulate |
+
+```@example array
+A = Int16[16384, -8192, 4096]   # 0.5, -0.25, 0.125 in Q1.15
+B = Int16[8192, 16384, -16384]  # 0.25, 0.5, -0.5 in Q1.15
+c = AppleAccelerate.dotpr_s1_15(A, B)  # fixed-point dot product, Q1.15-encoded
+nothing # hide
+```
+
+```@docs
+AppleAccelerate.dotpr_s1_15
+AppleAccelerate.dotpr_s8_24
+AppleAccelerate.dotpr2_s1_15
+AppleAccelerate.dotpr2_s8_24
+AppleAccelerate.vrampmul_s1_15
+AppleAccelerate.vrampmul_s8_24
+AppleAccelerate.vrampmul2_s1_15
+AppleAccelerate.vrampmul2_s8_24
+AppleAccelerate.vrampmuladd_s1_15
+AppleAccelerate.vrampmuladd_s8_24
+AppleAccelerate.vrampmuladd2_s1_15
+AppleAccelerate.vrampmuladd2_s8_24
+```
+
+## 24-bit Packed Integer Conversion
+
+vDSP represents packed 24-bit integers with a 3-byte, unaligned in-memory layout.
+These wrappers surface that as ordinary `Int32`/`UInt32` Julia vectors holding
+values in the 24-bit range (`-8388608:8388607` signed, `0:16777215` unsigned),
+packing/unpacking around each call.
+
+| Function | Description |
+|----------|-------------|
+| [`vflt24`](@ref AppleAccelerate.vflt24) | Packed 24-bit signed int → `Float32` |
+| [`vfltu24`](@ref AppleAccelerate.vfltu24) | Packed 24-bit unsigned int → `Float32` |
+| [`vfltsm24`](@ref AppleAccelerate.vfltsm24) | Packed 24-bit signed int → `Float32`, scaled by `b` |
+| [`vfltsmu24`](@ref AppleAccelerate.vfltsmu24) | Packed 24-bit unsigned int → `Float32`, scaled by `b` |
+| [`vsmfix24`](@ref AppleAccelerate.vsmfix24) | `Float32` scaled by `b`, truncated to packed 24-bit signed int |
+| [`vsmfixu24`](@ref AppleAccelerate.vsmfixu24) | `Float32` scaled by `b`, truncated to packed 24-bit unsigned int |
+
+```@docs
+AppleAccelerate.vflt24
+AppleAccelerate.vfltu24
+AppleAccelerate.vfltsm24
+AppleAccelerate.vfltsmu24
+AppleAccelerate.vsmfix24
+AppleAccelerate.vsmfixu24
 ```
 
 ## Type Conversion (int ↔ float)

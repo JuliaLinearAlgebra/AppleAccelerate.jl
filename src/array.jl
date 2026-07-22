@@ -1935,3 +1935,377 @@ end
 @doc "2D convolution with a 3×3 filter. Border elements are set to zero. Wraps [`vDSP_f3x3`](https://developer.apple.com/documentation/accelerate/vdsp_f3x3)." f3x3
 @doc "2D convolution with a 5×5 filter. Border elements are set to zero. Wraps [`vDSP_f5x5`](https://developer.apple.com/documentation/accelerate/vdsp_f5x5)." f5x5
 @doc "General 2D image convolution with a P×Q filter. Border elements are set to zero. Wraps [`vDSP_imgfir`](https://developer.apple.com/documentation/accelerate/vdsp_imgfir)." imgfir
+
+# ============================================================
+# Batch 9: dotpr2, vrampmuladd, fixed-point (Q1.15 / Q8.24) kernels,
+# 24-bit packed conversions, and misc integer vector ops
+# See: https://developer.apple.com/documentation/accelerate/vdsp
+# ============================================================
+
+# --- vDSP_dotpr2: one X vector dotted against two Y vectors ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function dotpr2(A0::StridedVector{$T}, A1::StridedVector{$T}, B::StridedVector{$T})
+            length(A0) == length(A1) == length(B) ||
+                throw(DimensionMismatch("A0, A1, and B must all have the same length"))
+            c0 = Ref{$T}(0)
+            c1 = Ref{$T}(0)
+            LibAccelerate.$(Symbol(string("vDSP_dotpr2", suff)))(A0,stride(A0,1),A1,stride(A1,1),B,stride(B,1),c0,c1,length(B))
+            return (c0[], c1[])
+        end
+    end
+end
+
+@doc "Dual dot product: `(sum(A0 .* B), sum(A1 .* B))` — one vector `B` dotted against both `A0` and `A1`. Wraps [`vDSP_dotpr2`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr2)." dotpr2
+
+# --- vDSP_vrampmuladd / vrampmuladd2: ramp-multiply then accumulate ---
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vrampmuladd!(result::StridedVector{$T}, X::StridedVector{$T}, start::$T, step::$T)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
+            s = Ref{$T}(start)
+            LibAccelerate.$(Symbol(string("vDSP_vrampmuladd", suff)))(X,stride(X,1),s,Ref(step),result,stride(result,1),length(X))
+            return result
+        end
+        function vrampmuladd(X::StridedVector{$T}, start::$T, step::$T, C::StridedVector{$T})
+            length(C) == length(X) ||
+                throw(DimensionMismatch("C and X must have the same length"))
+            result = copy(C)
+            vrampmuladd!(result, X, start, step)
+        end
+        function vrampmuladd2!(O0::StridedVector{$T}, O1::StridedVector{$T}, I0::StridedVector{$T}, I1::StridedVector{$T}, start::$T, step::$T)
+            n = length(I0)
+            length(I1) == n ||
+                throw(DimensionMismatch("I0 and I1 must have the same length"))
+            length(O0) >= n && length(O1) >= n ||
+                throw(DimensionMismatch("O0 and O1 must be at least length(I0)/length(I1)"))
+            stride(I0,1) == stride(I1,1) ||
+                throw(ArgumentError("vrampmuladd2!: I0 and I1 must have the same stride (vDSP shares one input stride)"))
+            stride(O0,1) == stride(O1,1) ||
+                throw(ArgumentError("vrampmuladd2!: O0 and O1 must have the same stride (vDSP shares one output stride)"))
+            s = Ref{$T}(start)
+            LibAccelerate.$(Symbol(string("vDSP_vrampmuladd2", suff)))(I0,I1,stride(I0,1),s,Ref(step),O0,O1,stride(O0,1),n)
+            return (O0, O1)
+        end
+        function vrampmuladd2(I0::StridedVector{$T}, I1::StridedVector{$T}, start::$T, step::$T, C0::StridedVector{$T}, C1::StridedVector{$T})
+            length(C0) == length(I0) && length(C1) == length(I1) ||
+                throw(DimensionMismatch("C0/C1 must match I0/I1 in length"))
+            O0 = copy(C0)
+            O1 = copy(C1)
+            vrampmuladd2!(O0, O1, I0, I1, start, step)
+        end
+    end
+end
+
+@doc """
+Ramp-multiply then accumulate: `result[i] = C[i] + X[i] * (start + i*step)` for `i = 0, ..., length(X)-1`.
+The mutating `vrampmuladd!(result, X, start, step)` reads/writes `result` in place as the accumulator
+(i.e. `result[i] += X[i] * ramp[i]`). Wraps [`vDSP_vrampmuladd`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmuladd).
+""" vrampmuladd
+@doc """
+Stereo ramp-multiply then accumulate: multiplies `I0`/`I1` by the same generated ramp and accumulates
+into `C0`/`C1`. Wraps [`vDSP_vrampmuladd2`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmuladd2).
+""" vrampmuladd2
+
+# --- Fixed-point Q-format kernels (Q1.15 on Int16, Q8.24 on Int32) ---
+#
+# These operate directly on the raw integer storage: a Q1.15 value `v::Int16`
+# represents the real number `v / 32768`, and a Q8.24 value `v::Int32`
+# represents `v / 2^24`. Empirically verified (Jul 2026): the intrinsics
+# compute exactly the same result as the floating-point analog applied to the
+# decoded fractional values, then re-encoded at the *same* scale (no extra
+# shift) — e.g. `dotpr_s1_15(A, B) == round(Int16, 32768 * dot(A/32768, B/32768))`
+# for in-range results (out-of-range accumulation saturates/wraps per vDSP's
+# fixed-point semantics; keep inputs small enough to avoid that in tests).
+# One function per Q-format suffix (rather than a runtime `Val` flag) so the
+# element type alone fully determines the format.
+for (intT, qsuff) in ((Int16, "s1_15"), (Int32, "s8_24"))
+    dotprname = Symbol("dotpr_", qsuff)
+    dotpr2name = Symbol("dotpr2_", qsuff)
+    vrampmulname! = Symbol("vrampmul_", qsuff, "!")
+    vrampmulname = Symbol("vrampmul_", qsuff)
+    vrampmul2name! = Symbol("vrampmul2_", qsuff, "!")
+    vrampmul2name = Symbol("vrampmul2_", qsuff)
+    vrampmuladdname! = Symbol("vrampmuladd_", qsuff, "!")
+    vrampmuladdname = Symbol("vrampmuladd_", qsuff)
+    vrampmuladd2name! = Symbol("vrampmuladd2_", qsuff, "!")
+    vrampmuladd2name = Symbol("vrampmuladd2_", qsuff)
+    @eval begin
+        function ($dotprname)(A::StridedVector{$intT}, B::StridedVector{$intT})
+            length(A) == length(B) ||
+                throw(DimensionMismatch("A and B must have the same length"))
+            c = Ref{$intT}(0)
+            LibAccelerate.$(Symbol(string("vDSP_dotpr_", qsuff)))(A,stride(A,1),B,stride(B,1),c,length(A))
+            return c[]
+        end
+        function ($dotpr2name)(A0::StridedVector{$intT}, A1::StridedVector{$intT}, B::StridedVector{$intT})
+            length(A0) == length(A1) == length(B) ||
+                throw(DimensionMismatch("A0, A1, and B must all have the same length"))
+            c0 = Ref{$intT}(0)
+            c1 = Ref{$intT}(0)
+            LibAccelerate.$(Symbol(string("vDSP_dotpr2_", qsuff)))(A0,stride(A0,1),A1,stride(A1,1),B,stride(B,1),c0,c1,length(B))
+            return (c0[], c1[])
+        end
+        function ($vrampmulname!)(result::StridedVector{$intT}, X::StridedVector{$intT}, start::$intT, step::$intT)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul_", qsuff)))(X,stride(X,1),Ref(start),Ref(step),result,stride(result,1),length(X))
+            return result
+        end
+        function ($vrampmulname)(X::StridedVector{$intT}, start::$intT, step::$intT)
+            result = similar(X)
+            ($vrampmulname!)(result, X, start, step)
+        end
+        function ($vrampmul2name!)(O0::StridedVector{$intT}, O1::StridedVector{$intT}, I0::StridedVector{$intT}, I1::StridedVector{$intT}, start::$intT, step::$intT)
+            n = length(I0)
+            length(I1) == n ||
+                throw(DimensionMismatch("I0 and I1 must have the same length"))
+            length(O0) >= n && length(O1) >= n ||
+                throw(DimensionMismatch("O0 and O1 must be at least length(I0)/length(I1)"))
+            stride(I0,1) == stride(I1,1) ||
+                throw(ArgumentError("$($(QuoteNode(vrampmul2name!))): I0 and I1 must have the same stride (vDSP shares one input stride)"))
+            stride(O0,1) == stride(O1,1) ||
+                throw(ArgumentError("$($(QuoteNode(vrampmul2name!))): O0 and O1 must have the same stride (vDSP shares one output stride)"))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmul2_", qsuff)))(I0,I1,stride(I0,1),Ref(start),Ref(step),O0,O1,stride(O0,1),n)
+            return (O0, O1)
+        end
+        function ($vrampmul2name)(I0::StridedVector{$intT}, I1::StridedVector{$intT}, start::$intT, step::$intT)
+            O0 = similar(I0)
+            O1 = similar(I1)
+            ($vrampmul2name!)(O0, O1, I0, I1, start, step)
+        end
+        function ($vrampmuladdname!)(result::StridedVector{$intT}, X::StridedVector{$intT}, start::$intT, step::$intT)
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmuladd_", qsuff)))(X,stride(X,1),Ref(start),Ref(step),result,stride(result,1),length(X))
+            return result
+        end
+        function ($vrampmuladdname)(X::StridedVector{$intT}, start::$intT, step::$intT, C::StridedVector{$intT})
+            length(C) == length(X) ||
+                throw(DimensionMismatch("C and X must have the same length"))
+            result = copy(C)
+            ($vrampmuladdname!)(result, X, start, step)
+        end
+        function ($vrampmuladd2name!)(O0::StridedVector{$intT}, O1::StridedVector{$intT}, I0::StridedVector{$intT}, I1::StridedVector{$intT}, start::$intT, step::$intT)
+            n = length(I0)
+            length(I1) == n ||
+                throw(DimensionMismatch("I0 and I1 must have the same length"))
+            length(O0) >= n && length(O1) >= n ||
+                throw(DimensionMismatch("O0 and O1 must be at least length(I0)/length(I1)"))
+            stride(I0,1) == stride(I1,1) ||
+                throw(ArgumentError("$($(QuoteNode(vrampmuladd2name!))): I0 and I1 must have the same stride (vDSP shares one input stride)"))
+            stride(O0,1) == stride(O1,1) ||
+                throw(ArgumentError("$($(QuoteNode(vrampmuladd2name!))): O0 and O1 must have the same stride (vDSP shares one output stride)"))
+            LibAccelerate.$(Symbol(string("vDSP_vrampmuladd2_", qsuff)))(I0,I1,stride(I0,1),Ref(start),Ref(step),O0,O1,stride(O0,1),n)
+            return (O0, O1)
+        end
+        function ($vrampmuladd2name)(I0::StridedVector{$intT}, I1::StridedVector{$intT}, start::$intT, step::$intT, C0::StridedVector{$intT}, C1::StridedVector{$intT})
+            length(C0) == length(I0) && length(C1) == length(I1) ||
+                throw(DimensionMismatch("C0/C1 must match I0/I1 in length"))
+            O0 = copy(C0)
+            O1 = copy(C1)
+            ($vrampmuladd2name!)(O0, O1, I0, I1, start, step)
+        end
+    end
+    @eval @doc "Fixed-point ($($qsuff)) dot product: `sum(A .* B)` computed and stored in Q-format. Wraps [`vDSP_dotpr_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr_$($qsuff))." $dotprname
+    @eval @doc "Fixed-point ($($qsuff)) dual dot product: `B` dotted against both `A0` and `A1`. Wraps [`vDSP_dotpr2_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_dotpr2_$($qsuff))." $dotpr2name
+    @eval @doc "Fixed-point ($($qsuff)) ramp multiply. Wraps [`vDSP_vrampmul_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmul_$($qsuff))." $vrampmulname
+    @eval @doc "Fixed-point ($($qsuff)) stereo ramp multiply. Wraps [`vDSP_vrampmul2_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmul2_$($qsuff))." $vrampmul2name
+    @eval @doc "Fixed-point ($($qsuff)) ramp-multiply then accumulate. Wraps [`vDSP_vrampmuladd_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmuladd_$($qsuff))." $vrampmuladdname
+    @eval @doc "Fixed-point ($($qsuff)) stereo ramp-multiply then accumulate. Wraps [`vDSP_vrampmuladd2_$($qsuff)`](https://developer.apple.com/documentation/accelerate/vdsp_vrampmuladd2_$($qsuff))." $vrampmuladd2name
+end
+
+# --- 24-bit packed integer conversions ---
+#
+# vDSP represents packed 24-bit integers as a 3-byte struct
+# (`LibAccelerate.vDSP_int24`/`vDSP_uint24`, no padding). We surface these to
+# users as ordinary `Int32`/`UInt32` vectors holding values in the 24-bit
+# range, packing/unpacking to the 3-byte layout around each ccall.
+@inline function _pack_int24(x::Integer)
+    (-8388608 <= x <= 8388607) ||
+        throw(ArgumentError("value $x out of range for a 24-bit signed integer (-8388608:8388607)"))
+    u = reinterpret(UInt32, Int32(x)) & 0x00ffffff
+    return LibAccelerate.vDSP_int24((UInt8(u & 0xff), UInt8((u >> 8) & 0xff), UInt8((u >> 16) & 0xff)))
+end
+@inline function _unpack_int24(v)
+    b0, b1, b2 = v.bytes
+    u = UInt32(b0) | (UInt32(b1) << 8) | (UInt32(b2) << 16)
+    (u & 0x800000) != 0 && (u |= 0xff000000)
+    return reinterpret(Int32, u)
+end
+@inline function _pack_uint24(x::Integer)
+    (0 <= x <= 16777215) ||
+        throw(ArgumentError("value $x out of range for a 24-bit unsigned integer (0:16777215)"))
+    u = UInt32(x)
+    return LibAccelerate.vDSP_uint24((UInt8(u & 0xff), UInt8((u >> 8) & 0xff), UInt8((u >> 16) & 0xff)))
+end
+@inline function _unpack_uint24(v)
+    b0, b1, b2 = v.bytes
+    return UInt32(b0) | (UInt32(b1) << 8) | (UInt32(b2) << 16)
+end
+
+function vflt24!(C::StridedVector{Float32}, A::AbstractVector{<:Integer})
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_int24}(undef, n)
+    @inbounds for i in 1:n
+        packed[i] = _pack_int24(A[i])
+    end
+    LibAccelerate.vDSP_vflt24(packed, 1, C, stride(C,1), n)
+    return C
+end
+vflt24(A::AbstractVector{<:Integer}) = vflt24!(Vector{Float32}(undef, length(A)), A)
+
+function vfltu24!(C::StridedVector{Float32}, A::AbstractVector{<:Integer})
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_uint24}(undef, n)
+    @inbounds for i in 1:n
+        packed[i] = _pack_uint24(A[i])
+    end
+    LibAccelerate.vDSP_vfltu24(packed, 1, C, stride(C,1), n)
+    return C
+end
+vfltu24(A::AbstractVector{<:Integer}) = vfltu24!(Vector{Float32}(undef, length(A)), A)
+
+function vfltsm24!(C::StridedVector{Float32}, A::AbstractVector{<:Integer}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_int24}(undef, n)
+    @inbounds for i in 1:n
+        packed[i] = _pack_int24(A[i])
+    end
+    LibAccelerate.vDSP_vfltsm24(packed, 1, Ref(b), C, stride(C,1), n)
+    return C
+end
+vfltsm24(A::AbstractVector{<:Integer}, b::Float32) = vfltsm24!(Vector{Float32}(undef, length(A)), A, b)
+
+function vfltsmu24!(C::StridedVector{Float32}, A::AbstractVector{<:Integer}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_uint24}(undef, n)
+    @inbounds for i in 1:n
+        packed[i] = _pack_uint24(A[i])
+    end
+    LibAccelerate.vDSP_vfltsmu24(packed, 1, Ref(b), C, stride(C,1), n)
+    return C
+end
+vfltsmu24(A::AbstractVector{<:Integer}, b::Float32) = vfltsmu24!(Vector{Float32}(undef, length(A)), A, b)
+
+function vsmfix24!(C::AbstractVector{<:Integer}, A::StridedVector{Float32}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_int24}(undef, n)
+    LibAccelerate.vDSP_vsmfix24(A, stride(A,1), Ref(b), packed, 1, n)
+    @inbounds for i in 1:n
+        C[i] = _unpack_int24(packed[i])
+    end
+    return C
+end
+vsmfix24(A::StridedVector{Float32}, b::Float32) = vsmfix24!(Vector{Int32}(undef, length(A)), A, b)
+
+function vsmfixu24!(C::AbstractVector{<:Integer}, A::StridedVector{Float32}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    packed = Vector{LibAccelerate.vDSP_uint24}(undef, n)
+    LibAccelerate.vDSP_vsmfixu24(A, stride(A,1), Ref(b), packed, 1, n)
+    @inbounds for i in 1:n
+        C[i] = _unpack_uint24(packed[i])
+    end
+    return C
+end
+vsmfixu24(A::StridedVector{Float32}, b::Float32) = vsmfixu24!(Vector{UInt32}(undef, length(A)), A, b)
+
+@doc "Convert packed 24-bit signed integers (given as `Int32` values in `-8388608:8388607`) to `Float32`. Wraps [`vDSP_vflt24`](https://developer.apple.com/documentation/accelerate/vdsp_vflt24)." vflt24
+@doc "Convert packed 24-bit unsigned integers (given as `UInt32`/`Integer` values in `0:16777215`) to `Float32`. Wraps [`vDSP_vfltu24`](https://developer.apple.com/documentation/accelerate/vdsp_vfltu24)." vfltu24
+@doc "Convert packed 24-bit signed integers to `Float32`, then scale by `b`: `C[i] = Float32(A[i]) * b`. Wraps [`vDSP_vfltsm24`](https://developer.apple.com/documentation/accelerate/vdsp_vfltsm24)." vfltsm24
+@doc "Convert packed 24-bit unsigned integers to `Float32`, then scale by `b`: `C[i] = Float32(A[i]) * b`. Wraps [`vDSP_vfltsmu24`](https://developer.apple.com/documentation/accelerate/vdsp_vfltsmu24)." vfltsmu24
+@doc "Scale `A` by `b` and truncate to packed 24-bit signed integers (returned as `Int32`): `C[i] = trunc(Int32, A[i] * b)`. Wraps [`vDSP_vsmfix24`](https://developer.apple.com/documentation/accelerate/vdsp_vsmfix24)." vsmfix24
+@doc "Scale `A` by `b` and truncate to packed 24-bit unsigned integers (returned as `UInt32`): `C[i] = trunc(UInt32, A[i] * b)`. Wraps [`vDSP_vsmfixu24`](https://developer.apple.com/documentation/accelerate/vdsp_vsmfixu24)." vsmfixu24
+
+# --- Integer vector ops ---
+function vdivi!(C::StridedVector{Cint}, A::StridedVector{Cint}, B::StridedVector{Cint})
+    length(A) == length(B) ||
+        throw(DimensionMismatch("A and B must have the same length"))
+    length(C) >= length(A) ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
+    LibAccelerate.vDSP_vdivi(B, stride(B,1), A, stride(A,1), C, stride(C,1), length(A))
+    return C
+end
+vdivi(A::StridedVector{Cint}, B::StridedVector{Cint}) = vdivi!(similar(A), A, B)
+
+function vsaddi!(C::StridedVector{Cint}, A::StridedVector{Cint}, b::Cint)
+    length(C) >= length(A) ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
+    LibAccelerate.vDSP_vsaddi(A, stride(A,1), Ref(b), C, stride(C,1), length(A))
+    return C
+end
+vsaddi(A::StridedVector{Cint}, b::Cint) = vsaddi!(similar(A), A, b)
+
+function vsdivi!(C::StridedVector{Cint}, A::StridedVector{Cint}, b::Cint)
+    length(C) >= length(A) ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($(length(A)))"))
+    LibAccelerate.vDSP_vsdivi(A, stride(A,1), Ref(b), C, stride(C,1), length(A))
+    return C
+end
+vsdivi(A::StridedVector{Cint}, b::Cint) = vsdivi!(similar(A), A, b)
+
+@doc "Integer vector divide: `C[i] = div(A[i], B[i])` (truncating). Wraps [`vDSP_vdivi`](https://developer.apple.com/documentation/accelerate/vdsp_vdivi)." vdivi
+@doc "Integer scalar add: `C[i] = A[i] + b`. Wraps [`vDSP_vsaddi`](https://developer.apple.com/documentation/accelerate/vdsp_vsaddi)." vsaddi
+@doc "Integer scalar divide: `C[i] = div(A[i], b)` (truncating). Wraps [`vDSP_vsdivi`](https://developer.apple.com/documentation/accelerate/vdsp_vsdivi)." vsdivi
+
+# --- vDSP_vgathra: gather via an array of pointers ---
+#
+# `A` is the caller-owned pointer-source array (its full extent, including any
+# entries skipped by `ptrstride`); `C` determines how many outputs (`N`) are
+# gathered. vDSP reads pointer entries `1, 1+ptrstride, 1+2*ptrstride, ...` (one
+# per output), so `A` must contain at least `(length(C)-1)*ptrstride + 1` entries
+# or the call reads past the end of the (GC-owned) pointer buffer.
+for (T, suff) in ((Float32, ""), (Float64, "D"))
+    @eval begin
+        function vgathra!(C::StridedVector{$T}, A::AbstractVector{<:StridedVector{$T}}, ptrstride::Integer=1)
+            ptrstride >= 1 ||
+                throw(ArgumentError("vgathra!: pointer-array stride must be positive"))
+            n = length(C)
+            needed = n == 0 ? 0 : (n - 1) * ptrstride + 1
+            length(A) >= needed ||
+                throw(DimensionMismatch("A must contain at least $needed pointer entries for $n outputs at stride $ptrstride, got $(length(A))"))
+            GC.@preserve A begin
+                ptrs = Vector{Ptr{$T}}(undef, length(A))
+                @inbounds for i in 1:length(A)
+                    _check_unit_stride(A[i], :vgathra!)
+                    isempty(A[i]) && throw(BoundsError(A[i], 1))
+                    ptrs[i] = pointer(A[i])
+                end
+                LibAccelerate.$(Symbol(string("vDSP_vgathra", suff)))(ptrs, ptrstride, C, stride(C,1), n)
+            end
+            return C
+        end
+        function vgathra(A::AbstractVector{<:StridedVector{$T}}, ptrstride::Integer=1)
+            n = (ptrstride < 1 || isempty(A)) ? 0 : div(length(A) - 1, ptrstride) + 1
+            C = Vector{$T}(undef, n)
+            vgathra!(C, A, ptrstride)
+        end
+    end
+end
+
+@doc """
+    vgathra(A::AbstractVector{<:StridedVector{T}}, ptrstride::Integer=1) -> Vector{T}
+
+Gather the first element of each source vector in `A` into a contiguous result:
+`C[i] = A[1 + (i-1)*ptrstride][1]`. `A` is a caller-owned array of unit-stride
+vectors; internally an array of their pointers is built and passed to vDSP
+(`GC.@preserve`d for the duration of the call). `ptrstride` selects every
+`ptrstride`-th pointer from that array (must be positive); the allocating form
+derives the output length from `length(A)` and `ptrstride`, while `vgathra!`
+derives the requested output count `N` from `length(C)` and requires `A` to hold
+at least `(N-1)*ptrstride + 1` entries. Wraps [`vDSP_vgathra`](https://developer.apple.com/documentation/accelerate/vdsp_vgathra)
+/ [`vDSP_vgathraD`](https://developer.apple.com/documentation/accelerate/vdsp_vgathrad).
+""" vgathra
