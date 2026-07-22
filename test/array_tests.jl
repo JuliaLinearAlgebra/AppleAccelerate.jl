@@ -1843,6 +1843,51 @@ end
     @test_throws DimensionMismatch AppleAccelerate.vflt24!(Vector{Float32}(undef, 1), A)
 end
 
+@testset "24-bit zero-copy packed interop" begin
+    AA = AppleAccelerate
+    vals = Int32[8388607, -8388608, 0, 12345, -12345]
+
+    # pack / unpack round-trip
+    packed = AA.pack24(vals)
+    @test packed isa Vector{AA.PackedInt24}
+    @test AA.unpack24(packed) == vals
+
+    # zero-copy conversion on a packed vector matches the integer-vector path
+    @test AA.vflt24(packed) ≈ AA.vflt24(vals) ≈ Float32.(vals)
+
+    # a raw byte blob (3n bytes) reinterprets to a packed vector zero-copy
+    bytes = collect(reinterpret(UInt8, packed))
+    @test length(bytes) == 3 * length(vals)
+    @test AA.vflt24(reinterpret(AA.PackedInt24, bytes)) ≈ Float32.(vals)
+
+    # unsigned
+    uvals = UInt32[16777215, 0, 12345]
+    upk = AA.packu24(uvals)
+    @test upk isa Vector{AA.PackedUInt24}
+    @test AA.unpack24(upk) == uvals
+    @test AA.vfltu24(upk) ≈ AA.vfltu24(uvals) ≈ Float32.(uvals)
+
+    # scaled input variants
+    b = 2.0f0
+    @test AA.vfltsm24(packed, b) ≈ Float32.(vals) .* b
+    @test AA.vfltsmu24(upk, b) ≈ Float32.(uvals) .* b
+
+    # zero-copy OUTPUT: write vDSP's packed result straight into a packed vector
+    Af = Float32[1.5, -2.25, 100.0, -100.9]
+    outp = Vector{AA.PackedInt24}(undef, length(Af))
+    @test AA.vsmfix24!(outp, Af, 1.0f0) === outp
+    @test AA.unpack24(outp) == Int32.(trunc.(Af))
+
+    Afu = Float32[1.9, 2.25, 100.0]
+    outu = Vector{AA.PackedUInt24}(undef, length(Afu))
+    AA.vsmfixu24!(outu, Afu, 1.0f0)
+    @test AA.unpack24(outu) == UInt32.(trunc.(Afu))
+
+    # length guards on the zero-copy paths
+    @test_throws DimensionMismatch AA.vflt24!(Vector{Float32}(undef, 1), packed)
+    @test_throws DimensionMismatch AA.vsmfix24!(Vector{AA.PackedInt24}(undef, 1), Af, 1.0f0)
+end
+
 @testset "Integer vector ops: vdivi, vsaddi, vsdivi" begin
     A = Int32[10, 20, 33, -40, 51]
     Bv = Int32[2, 5, 3, -8, 7]

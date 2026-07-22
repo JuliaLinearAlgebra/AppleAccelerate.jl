@@ -2230,6 +2230,105 @@ vsmfixu24(A::StridedVector{Float32}, b::Float32) = vsmfixu24!(Vector{UInt32}(und
 @doc "Scale `A` by `b` and truncate to packed 24-bit signed integers (returned as `Int32`): `C[i] = trunc(Int32, A[i] * b)`. Wraps [`vDSP_vsmfix24`](https://developer.apple.com/documentation/accelerate/vdsp_vsmfix24)." vsmfix24
 @doc "Scale `A` by `b` and truncate to packed 24-bit unsigned integers (returned as `UInt32`): `C[i] = trunc(UInt32, A[i] * b)`. Wraps [`vDSP_vsmfixu24`](https://developer.apple.com/documentation/accelerate/vdsp_vsmfixu24)." vsmfixu24
 
+# --- Zero-copy packed 24-bit interop ---
+#
+# The `vflt*24` / `vsmfix*24` wrappers above take/return ordinary integer vectors
+# and pack/unpack around each call — convenient, but an O(n) copy. When the data
+# is ALREADY in Apple's packed 3-byte layout (e.g. 24-bit audio as it comes off
+# disk or the wire), the variants below hand the packed buffer straight to vDSP
+# with no repacking. The packed element type is exposed as `PackedInt24` /
+# `PackedUInt24`; build one from an integer vector with [`pack24`](@ref) /
+# [`packu24`](@ref) and recover integers with [`unpack24`](@ref). A raw
+# `Vector{UInt8}` of `3n` bytes reinterprets to a packed vector zero-copy via
+# `reinterpret(PackedInt24, bytes)`.
+const PackedInt24  = LibAccelerate.vDSP_int24
+const PackedUInt24 = LibAccelerate.vDSP_uint24
+
+"""
+    pack24(A::AbstractVector{<:Integer}) -> Vector{PackedInt24}
+
+Pack integer values in `-8388608:8388607` into Apple's 3-byte signed 24-bit
+layout, ready to pass to [`vflt24`](@ref) / [`vfltsm24`](@ref) with no further
+copying. See also [`unpack24`](@ref), [`packu24`](@ref).
+"""
+pack24(A::AbstractVector{<:Integer}) = PackedInt24[_pack_int24(x) for x in A]
+
+"""
+    packu24(A::AbstractVector{<:Integer}) -> Vector{PackedUInt24}
+
+Pack integer values in `0:16777215` into Apple's 3-byte unsigned 24-bit layout.
+See also [`unpack24`](@ref), [`pack24`](@ref).
+"""
+packu24(A::AbstractVector{<:Integer}) = PackedUInt24[_pack_uint24(x) for x in A]
+
+"""
+    unpack24(A::AbstractVector{PackedInt24})  -> Vector{Int32}
+    unpack24(A::AbstractVector{PackedUInt24}) -> Vector{UInt32}
+
+Decode packed 24-bit integers back to `Int32` / `UInt32` values. Inverse of
+[`pack24`](@ref) / [`packu24`](@ref).
+"""
+unpack24(A::AbstractVector{PackedInt24})  = Int32[_unpack_int24(v)  for v in A]
+unpack24(A::AbstractVector{PackedUInt24}) = UInt32[_unpack_uint24(v) for v in A]
+
+# Zero-copy INPUT: hand an already-packed vector straight to vDSP (accepts strided
+# views and `reinterpret(PackedInt24, ::Vector{UInt8})` byte blobs).
+function vflt24!(C::StridedVector{Float32}, A::StridedVector{PackedInt24})
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vflt24(pointer(A), stride(A,1), pointer(C), stride(C,1), n)
+    return C
+end
+vflt24(A::StridedVector{PackedInt24}) = vflt24!(Vector{Float32}(undef, length(A)), A)
+
+function vfltu24!(C::StridedVector{Float32}, A::StridedVector{PackedUInt24})
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vfltu24(pointer(A), stride(A,1), pointer(C), stride(C,1), n)
+    return C
+end
+vfltu24(A::StridedVector{PackedUInt24}) = vfltu24!(Vector{Float32}(undef, length(A)), A)
+
+function vfltsm24!(C::StridedVector{Float32}, A::StridedVector{PackedInt24}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vfltsm24(pointer(A), stride(A,1), Ref(b), pointer(C), stride(C,1), n)
+    return C
+end
+vfltsm24(A::StridedVector{PackedInt24}, b::Float32) = vfltsm24!(Vector{Float32}(undef, length(A)), A, b)
+
+function vfltsmu24!(C::StridedVector{Float32}, A::StridedVector{PackedUInt24}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vfltsmu24(pointer(A), stride(A,1), Ref(b), pointer(C), stride(C,1), n)
+    return C
+end
+vfltsmu24(A::StridedVector{PackedUInt24}, b::Float32) = vfltsmu24!(Vector{Float32}(undef, length(A)), A, b)
+
+# Zero-copy OUTPUT: write vDSP's packed result straight into a packed vector.
+function vsmfix24!(C::StridedVector{PackedInt24}, A::StridedVector{Float32}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vsmfix24(pointer(A), stride(A,1), Ref(b), pointer(C), stride(C,1), n)
+    return C
+end
+
+function vsmfixu24!(C::StridedVector{PackedUInt24}, A::StridedVector{Float32}, b::Float32)
+    n = length(A)
+    length(C) >= n ||
+        throw(DimensionMismatch("C length ($(length(C))) must be at least length(A) ($n)"))
+    GC.@preserve A C LibAccelerate.vDSP_vsmfixu24(pointer(A), stride(A,1), Ref(b), pointer(C), stride(C,1), n)
+    return C
+end
+
+@doc "Packed 24-bit signed integer element (Apple's 3-byte `vDSP_int24`). Build a vector with [`pack24`](@ref); decode with [`unpack24`](@ref)." PackedInt24
+@doc "Packed 24-bit unsigned integer element (Apple's 3-byte `vDSP_uint24`). Build a vector with [`packu24`](@ref); decode with [`unpack24`](@ref)." PackedUInt24
+
 # --- Integer vector ops ---
 function vdivi!(C::StridedVector{Cint}, A::StridedVector{Cint}, B::StridedVector{Cint})
     length(A) == length(B) ||
