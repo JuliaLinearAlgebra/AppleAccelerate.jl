@@ -18,6 +18,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Sparse linear algebra** via `libSparse` — direct (Cholesky / LDLᵀ / LU / QR) and iterative (CG / GMRES / LSMR) solvers, real and complex
 - **Signal processing** — 1D/2D real & complex FFT (batched, mixed-radix), DCT, convolution, biquad filtering, window functions; cached setups make no-plan `fft(x)` competitive with FFTW and drop the FFTW dependency
 - **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations
+- **Image processing** via vImage — geometry (scale, rotate, affine warp), convolution, morphology, histogram, alpha compositing, and format/colorspace conversion (incl. Y′CbCr)
 
 See the [benchmarks](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/benchmarks/) for full performance comparisons and methodology.
 
@@ -62,9 +63,17 @@ S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
 As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
 xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
 
-# --- Neural-network primitives (BNNS) ---
-W = rand(Float32, 4, 3); v = rand(Float32, 3, 8)
-C = AppleAccelerate.bnns_matmul(W, v)           # α·(W*v), Float32
+# --- Neural-network primitives (BNNS): a tiny 2-layer MLP forward pass ---
+W1, b1 = randn(Float32, 16, 8), randn(Float32, 16)   # layer 1: 8 → 16
+W2, b2 = randn(Float32, 4, 16), randn(Float32, 4)    # layer 2: 16 → 4
+x = randn(Float32, 8)
+h = AppleAccelerate.bnns_activation(:relu, AppleAccelerate.bnns_matmul(W1, reshape(x, :, 1)) .+ b1)
+logits = AppleAccelerate.bnns_matmul(W2, h) .+ b2     # 4-class output
+
+# --- Image processing (vImage) ---
+img   = rand(Float32, 64, 48)                        # a 64×48 planar (grayscale) image
+small = AppleAccelerate.scale_PlanarF(img, 32, 24)   # resize to 32×24
+flip  = AppleAccelerate.horizontalReflect_PlanarF(img)
 ```
 
 ## Documentation
