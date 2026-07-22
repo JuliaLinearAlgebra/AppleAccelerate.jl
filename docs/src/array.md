@@ -558,6 +558,17 @@ packing/unpacking around each call.
 | [`vsmfix24`](@ref AppleAccelerate.vsmfix24) | `Float32` scaled by `b`, truncated to packed 24-bit signed int |
 | [`vsmfixu24`](@ref AppleAccelerate.vsmfixu24) | `Float32` scaled by `b`, truncated to packed 24-bit unsigned int |
 
+### Zero-copy packed interop
+
+When the data is already in Apple's packed 3-byte layout (e.g. 24-bit audio off
+disk or the wire), skip the per-call pack/unpack: the element types
+[`PackedInt24`](@ref AppleAccelerate.PackedInt24) / [`PackedUInt24`](@ref AppleAccelerate.PackedUInt24)
+can be handed straight to the conversions. Build a packed vector with
+[`pack24`](@ref AppleAccelerate.pack24) / [`packu24`](@ref AppleAccelerate.packu24)
+(or `reinterpret(PackedInt24, bytes)` over a raw `Vector{UInt8}`), pass it to the
+`vflt*24` functions (or write into it from `vsmfix*24!`), and decode with
+[`unpack24`](@ref AppleAccelerate.unpack24).
+
 ```@docs
 AppleAccelerate.vflt24
 AppleAccelerate.vfltu24
@@ -565,6 +576,11 @@ AppleAccelerate.vfltsm24
 AppleAccelerate.vfltsmu24
 AppleAccelerate.vsmfix24
 AppleAccelerate.vsmfixu24
+AppleAccelerate.PackedInt24
+AppleAccelerate.PackedUInt24
+AppleAccelerate.pack24
+AppleAccelerate.packu24
+AppleAccelerate.unpack24
 ```
 
 ## Type Conversion (int ↔ float)
