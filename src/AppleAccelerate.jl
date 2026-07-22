@@ -193,6 +193,7 @@ end
     include("sparse.jl")
     include("quadrature.jl")
     include("bnns.jl")
+    include("vimage.jl")
 end
 
 end # module

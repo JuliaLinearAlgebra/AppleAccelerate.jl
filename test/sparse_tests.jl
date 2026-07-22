@@ -1222,4 +1222,177 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test_throws ArgumentError AppleAccelerate.numeric_options(f)   # not yet factored
         end
     end
+
+    # Complex sparse support across the extended solver surface (macOS 15.5+).
+    # Cross-validated against dense `\` / LinearAlgebra for both ComplexF32 and
+    # ComplexF64. CG/Cholesky use Hermitian-positive-definite matrices;
+    # GMRES/LU/LSMR use discriminating non-Hermitian matrices.
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "Complex extended surface" begin
+        AA = AppleAccelerate
+
+        # Build a Hermitian positive-definite complex sparse matrix.
+        hpd(::Type{T}, n) where {T} = begin
+            M = sprandn(T, n, n, 0.15)
+            A = M * M' + n * I
+            SparseMatrixCSC{T,Int64}((A + A') / 2)
+        end
+
+        @testset "COO constructor $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? sqrt(eps(Float32)) : 1e-9
+            ref = sprandn(T, 11, 8, 0.3)
+            I, J, V = findnz(ref)
+            A = AASparseMatrix(I, J, V, 11, 8)
+            @test Matrix(A) ≈ Matrix(ref)
+            x = randn(T, 8)
+            @test A * x ≈ Matrix(ref) * x rtol = rtol
+            # Duplicate coordinates are summed.
+            Ad = AASparseMatrix(Int[1, 1, 2], Int[1, 1, 2], T[1+im, 2-im, 5], 2, 2)
+            @test Matrix(Ad) ≈ T[3 0; 0 5]
+            # Unsorted triplets round-trip through SparseArrays.sparse.
+            Iu = [3, 1, 2, 3]; Ju = [3, 1, 2, 3]; Vu = T[7im, 10, 20, 3]  # (3,3): 7im+3
+            Au = AASparseMatrix(Iu, Ju, Vu, 3, 3)
+            @test SparseMatrixCSC(Au) ≈ sparse(Iu, Ju, Vu, 3, 3)
+        end
+
+        @testset "Hermitian Cholesky solve $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? 1e-3 : 1e-8
+            n = 24
+            Acsc = hpd(T, n)
+            Aaa = AASparseMatrix(Acsc)
+            @test ishermitian(Aaa)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            f = AA.cholesky(Aaa)          # dispatches to Hermitian factorization
+            @test isapprox(AA.solve(f, b), xref; rtol = rtol)
+            @test isapprox(f \ b, xref; rtol = rtol)
+        end
+
+        @testset "CG on Hermitian-PD $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? 1e-2 : 1e-6
+            n = 40
+            Acsc = hpd(T, n)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            x = AA.solve(AASparseMatrix(Acsc), b; method = :cg,
+                         rtol = T == ComplexF32 ? 1.0f-6 : 1e-11, maxiter = 5000)
+            @test isapprox(x, xref; rtol = rtol)
+            # Also accepts a SparseMatrixCSC directly.
+            @test isapprox(AA.solve(Acsc, b; method = :cg,
+                           rtol = T == ComplexF32 ? 1.0f-6 : 1e-11, maxiter = 5000),
+                           xref; rtol = rtol)
+            # Diagonal preconditioner also converges.
+            P = AA.AAPreconditioner(AASparseMatrix(Acsc); kind = :diagonal)
+            xp = AA.solve(AASparseMatrix(Acsc), b; method = :cg, preconditioner = P,
+                          rtol = T == ComplexF32 ? 1.0f-6 : 1e-11, maxiter = 5000)
+            @test isapprox(xp, xref; rtol = rtol)
+        end
+
+        @testset "LU + GMRES on non-Hermitian $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? 5e-2 : 1e-5
+            n = 30
+            A = sprandn(T, n, n, 0.15) + n * I     # square, non-Hermitian
+            @test A != A'                           # discriminating
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            Aaa = AASparseMatrix(Acsc)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            # Direct LU (default for square non-Hermitian on 15.5+).
+            f = AA.lu(Aaa)
+            @test isapprox(AA.solve(f, b), xref; rtol = T == ComplexF32 ? 1e-3 : 1e-9)
+            # GMRES.
+            xg = AA.solve(Aaa, b; method = :gmres, maxiter = 3000,
+                          rtol = T == ComplexF32 ? 1.0f-7 : 1e-12)
+            @test isapprox(xg, xref; rtol = rtol)
+        end
+
+        @testset "QR + LSMR on rectangular $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? 5e-2 : 1e-4
+            m, n = 48, 20
+            A = sprandn(T, m, n, 0.3)
+            while rank(Matrix(A)) < n
+                A = sprandn(T, m, n, 0.3)
+            end
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            Aaa = AASparseMatrix(Acsc)
+            b = randn(T, m)
+            xref = Matrix(Acsc) \ b                 # dense least-squares
+            f = AA.qr(Aaa)
+            @test isapprox(AA.solve(f, b), xref; rtol = T == ComplexF32 ? 1e-2 : 1e-7)
+            xl = AA.solve(Aaa, b; method = :lsmr, maxiter = 6000,
+                          rtol = T == ComplexF32 ? 1.0f-7 : 1e-12)
+            @test isapprox(xl, xref; rtol = rtol)
+        end
+
+        @testset "preallocated workspace solve $T" for T in (ComplexF32, ComplexF64)
+            rtol = T == ComplexF32 ? sqrt(eps(Float32)) : 1e-9
+            n = 22
+            Acsc = SparseMatrixCSC{T,Int64}(sprandn(T, n, n, 0.3) + n * I)
+            f = AA.AAFactorization(Acsc); AA.factor!(f)
+            B = randn(T, n, 3)
+            Xref = Matrix(Acsc) \ B
+            ws = Vector{UInt8}(undef, AA.solve_workspace_size(f, 3))
+            X = similar(B)
+            AA.solve!(f, B, X, ws)
+            @test isapprox(X, Xref; rtol = rtol)
+            xb = copy(B)
+            AA.solve!(f, xb, ws)                    # in-place
+            @test isapprox(xb, Xref; rtol = rtol)
+        end
+
+        @testset "subfactor R/Q from QR $T" for T in (ComplexF32, ComplexF64)
+            tol = T == ComplexF32 ? 1e-3 : 1e-8
+            m, n = 36, 14
+            A = sprandn(T, m, n, 0.3)
+            while rank(Matrix(A)) < n
+                A = sprandn(T, m, n, 0.3)
+            end
+            f = AA.AAFactorization(SparseMatrixCSC{T,Int64}(A))
+            AA.factor!(f, AA.SparseFactorizationQR)
+            R = AA.subfactor(f, AA.SparseSubfactorR)
+            y = randn(T, n)
+            @test isapprox(R * (R \ y), y; rtol = tol)
+            Q = AA.subfactor(f, AA.SparseSubfactorQ)
+            v = randn(T, n)
+            Qv = Q * v
+            @test length(Qv) == m
+            @test isapprox(norm(Qv), norm(v); rtol = tol)   # Q is an isometry
+            @test isapprox(Q \ Qv, v; rtol = tol)           # Qᴴ Q = I on the range
+        end
+
+        @testset "partial LU update $T" for T in (ComplexF32, ComplexF64)
+            tol = T == ComplexF32 ? 1e-3 : 1e-8
+            n = 16
+            Acsc = SparseMatrixCSC{T,Int64}(sprandn(T, n, n, 0.3) + n * I)
+            f = AA.AAFactorization(Acsc)
+            AA.factor!(f, AA.SparseFactorizationLUUnpivoted)
+            Anew = copy(Acsc)
+            upd = Tuple{Int,Int}[]
+            for j in 1:n, k in Anew.colptr[j]:(Anew.colptr[j+1]-1)
+                if length(upd) < 4
+                    Anew.nzval[k] += T(0.75) + T(0.25)im
+                    push!(upd, (Anew.rowval[k], j))
+                end
+            end
+            AA.update_partial_lu!(f, upd, AASparseMatrix(Anew))
+            b = randn(T, n)
+            @test isapprox(AA.solve(f, b), Matrix(Anew) \ b; rtol = tol)
+        end
+
+        @testset "numeric_options $T" for T in (ComplexF32, ComplexF64)
+            Acsc = SparseMatrixCSC{T,Int64}(sprandn(T, 10, 10, 0.4) + 10I)
+            f = AA.AAFactorization(Acsc); AA.factor!(f)
+            no = AA.numeric_options(f)
+            @test no isa AA.SparseNumericFactorOptions
+            @test no.pivotTolerance > 0
+        end
+
+        @testset "guards" begin
+            n = 10
+            A = AASparseMatrix(SparseMatrixCSC{ComplexF64,Int64}(sprandn(ComplexF64, n, n, 0.3) + n * I))
+            @test_throws DimensionMismatch AA.solve(A, rand(ComplexF64, n + 1); method = :cg)
+            @test_throws ArgumentError AA.solve(A, rand(ComplexF64, n); method = :bogus)
+            @test_throws ArgumentError AA.AAPreconditioner(A; kind = :bogus)
+        end
+    end
 end

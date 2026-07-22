@@ -553,6 +553,23 @@ end
     SparseMatrix,
     Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
 
+# complex COO->CSC workspace variants (macOS 15.5+). The library mangles the
+# complex value pointer as C `float _Complex`/`double _Complex` (`PKCf`/`PKCd`),
+# which adds one substitution vs the real symbols, so the trailing void* reuses
+# `S5_` (not `S4_`). The attribute struct is still the plain `SparseAttributes_t`
+# (18); its 3-bit Hermitian kind field fits the same 32-bit word.
+@generateDemangled(SparseConvertFromCoord,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKCfPvS5_,
+    ComplexF32,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
+
+@generateDemangled(SparseConvertFromCoord,
+    :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKCdPvS5_,
+    ComplexF64,
+    SparseMatrix,
+    Cint, Cint, Clong, Cuchar, att_type, Ptr{Cint}, Ptr{Cint}, Ptr, Ptr{Cvoid}, Ptr{Cvoid})
+
 # cleanup SparseMatrix
 @generateDemangled(SparseCleanup,
     :_Z13SparseCleanup18SparseMatrix_Float,
@@ -882,12 +899,14 @@ value at row `I[k]`, column `J[k]`, with 1-based indices as in
 sorted internally) and duplicate coordinates are summed. Uses Accelerate's
 [`SparseConvertFromCoordinate`](https://developer.apple.com/documentation/accelerate/sparseconvertfromcoordinate).
 
-`V` must be `Float32` or `Float64`. Pass `attributes` (e.g. `ATT_SYMMETRIC | ATT_LOWER_TRIANGLE`)
-to build a matrix with symmetry/triangle structure; Accelerate coerces the input to conform.
+`V` must be `Float32`, `Float64`, `ComplexF32`, or `ComplexF64` (complex requires
+macOS 15.5+). Pass `attributes` (e.g. `ATT_SYMMETRIC | ATT_LOWER_TRIANGLE`, or
+`ATT_HERMITIAN | ATT_LOWER_TRIANGLE` for complex) to build a matrix with
+symmetry/triangle structure; Accelerate coerces the input to conform.
 """
 function AASparseMatrix(I::AbstractVector{<:Integer}, J::AbstractVector{<:Integer},
                         V::AbstractVector{T}, m::Integer, n::Integer,
-                        attributes::att_type = ATT_ORDINARY) where T<:Union{Cfloat,Cdouble}
+                        attributes::att_type = ATT_ORDINARY) where T<:vTypes
     length(I) == length(J) == length(V) ||
         throw(DimensionMismatch("I, J, and V must have equal lengths " *
                                 "($(length(I)), $(length(J)), $(length(V)))"))
@@ -1616,7 +1635,9 @@ const SparsePreconditionerDiagonal   = SparsePreconditioner_t(2)
 const SparsePreconditionerDiagScaling = SparsePreconditioner_t(3)
 
 # Layout mirrors libSparse's SparseOpaquePreconditioner_* (type, mem, apply).
-struct SparseOpaquePreconditioner{T<:Union{Float32,Float64}}
+# All fields are pointers/ints, so the layout is identical for real and complex T
+# (T is a phantom used only for dispatch).
+struct SparseOpaquePreconditioner{T<:vTypes}
     type::SparsePreconditioner_t
     mem::Ptr{Cvoid}
     apply::Ptr{Cvoid}
@@ -1625,18 +1646,22 @@ end
 """Opaque preconditioner handle for the iterative solvers. Build with
 [`AAPreconditioner`](@ref). Wraps a libSparse `SparseOpaquePreconditioner`; the
 backing memory is released by a finalizer."""
-mutable struct AAPreconditioner{T<:Union{Float32,Float64}}
+mutable struct AAPreconditioner{T<:vTypes}
     _p::SparseOpaquePreconditioner{T}
     _matrix::AASparseMatrix{T}   # keep the source matrix rooted for the handle's life
 end
 
 const _PRECOND_CREATE = Dict(
-    Cfloat  => :_SparseCreatePreconditioner_Float,
-    Cdouble => :_SparseCreatePreconditioner_Double,
+    Cfloat     => :_SparseCreatePreconditioner_Float,
+    Cdouble    => :_SparseCreatePreconditioner_Double,
+    ComplexF32 => :_SparseCreatePreconditioner_Complex_Float,
+    ComplexF64 => :_SparseCreatePreconditioner_Complex_Double,
 )
 const _PRECOND_RELEASE = Dict(
-    Cfloat  => :_SparseReleaseOpaquePreconditioner_Float,
-    Cdouble => :_SparseReleaseOpaquePreconditioner_Double,
+    Cfloat     => :_SparseReleaseOpaquePreconditioner_Float,
+    Cdouble    => :_SparseReleaseOpaquePreconditioner_Double,
+    ComplexF32 => :_SparseReleaseOpaquePreconditioner_Complex_Float,
+    ComplexF64 => :_SparseReleaseOpaquePreconditioner_Complex_Double,
 )
 
 function _precond_symbol(p::Symbol)
@@ -1676,9 +1701,9 @@ end
 
 Construct a preconditioner for `A` to accelerate the iterative solvers
 ([`solve`](@ref) with a `method` keyword). `kind` is `:diagonal` (Jacobi) or
-`:diagscaling`. Real `Float32`/`Float64` only.
+`:diagscaling`. `Float32`/`Float64`, and (macOS 15.5+) `ComplexF32`/`ComplexF64`.
 """
-function AAPreconditioner(A::AASparseMatrix{T}; kind::Symbol = :diagonal) where {T<:Union{Float32,Float64}}
+function AAPreconditioner(A::AASparseMatrix{T}; kind::Symbol = :diagonal) where {T<:vTypes}
     return _create_preconditioner(_precond_symbol(kind), A)
 end
 
@@ -1700,6 +1725,16 @@ const _ITER_SOLVE_SYMS = Dict(
         :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_,
         :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_i,
         :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_33SparseOpaquePreconditioner_Double),
+    # complex variants (macOS 15.5+). CG requires a Hermitian(-positive-definite)
+    # matrix; GMRES/LSMR are general.
+    ComplexF32 => (
+        :_Z11SparseSolve21SparseIterativeMethod26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS1_,
+        :_Z11SparseSolve21SparseIterativeMethod26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS1_i,
+        :_Z11SparseSolve21SparseIterativeMethod26SparseMatrix_Complex_Float25DenseMatrix_Complex_FloatS1_40SparseOpaquePreconditioner_Complex_Float),
+    ComplexF64 => (
+        :_Z11SparseSolve21SparseIterativeMethod27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS1_,
+        :_Z11SparseSolve21SparseIterativeMethod27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS1_i,
+        :_Z11SparseSolve21SparseIterativeMethod27SparseMatrix_Complex_Double26DenseMatrix_Complex_DoubleS1_41SparseOpaquePreconditioner_Complex_Double),
 )
 for (T, (base, enumsym, opaquesym)) in _ITER_SOLVE_SYMS
     @eval _iter_solve!(m::SparseIterativeMethod, A::SparseMatrix{$T},
@@ -1745,14 +1780,16 @@ factorization, returning `x`. `method` (required) is one of:
 `atol`/`rtol` are the absolute/relative convergence tolerances (0 selects the
 library default), `maxiter` the iteration cap (0 → 100). `preconditioner` may be
 `:none`, `:diagonal`, `:diagscaling`, or an [`AAPreconditioner`](@ref). `b` may
-be a vector or a matrix (multiple right-hand sides). Real `Float32`/`Float64`.
+be a vector or a matrix (multiple right-hand sides). `Float32`/`Float64`, and
+(macOS 15.5+) `ComplexF32`/`ComplexF64` — for complex, `:cg` requires a Hermitian
+positive-definite matrix.
 """
 function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
                method::Symbol,
                preconditioner::Union{Symbol,AAPreconditioner} = :none,
                atol::Real = 0, rtol::Real = 0, maxiter::Integer = 0,
                nvec::Integer = 0, variant::Symbol = :dqgmres,
-               lambda::Real = 0) where {T<:Union{Float32,Float64}}
+               lambda::Real = 0) where {T<:vTypes}
     m, n = size(A)
     size(b, 1) == m || throw(DimensionMismatch(
         "right-hand side has $(size(b, 1)) rows; A has $m rows"))
@@ -1788,7 +1825,7 @@ function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
     return b isa AbstractVector ? vec(X) : X
 end
 
-solve(A::SparseMatrixCSC{T,Int64}, b::StridedVecOrMat{T}; kw...) where {T<:Union{Float32,Float64}} =
+solve(A::SparseMatrixCSC{T,Int64}, b::StridedVecOrMat{T}; kw...) where {T<:vTypes} =
     solve(AASparseMatrix(A), b; kw...)
 
 # ============================================================
@@ -1804,6 +1841,11 @@ const _SOLVE_WS_SYMS = Dict(
                 :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatPv),
     Cdouble => (:_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoubleS0_Pv,
                 :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoublePv),
+    # complex variants (macOS 15.5+)
+    ComplexF32 => (:_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseMatrix_Complex_FloatS0_Pv,
+                   :_Z11SparseSolve39SparseOpaqueFactorization_Complex_Float25DenseMatrix_Complex_FloatPv),
+    ComplexF64 => (:_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseMatrix_Complex_DoubleS0_Pv,
+                   :_Z11SparseSolve40SparseOpaqueFactorization_Complex_Double26DenseMatrix_Complex_DoublePv),
 )
 for (T, (outsym, insym)) in _SOLVE_WS_SYMS
     @eval _solve_ws!(f::SparseOpaqueFactorization{$T}, B::StridedMatrix{$T},
@@ -1846,7 +1888,7 @@ In-place variant: `xb` holds the right-hand side on input and the solution on
 output (square systems only).
 """
 function solve!(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T},
-                x::StridedVecOrMat{T}, workspace::Vector{UInt8}) where {T<:Union{Float32,Float64}}
+                x::StridedVecOrMat{T}, workspace::Vector{UInt8}) where {T<:vTypes}
     m, n = size(aa_fact.matrixObj)
     size(b, 1) == m || throw(DimensionMismatch("RHS has $(size(b,1)) rows; A has $m rows"))
     size(x, 1) == n || throw(DimensionMismatch("solution has $(size(x,1)) rows; A has $n cols"))
@@ -1863,7 +1905,7 @@ function solve!(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T},
 end
 
 function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T},
-                workspace::Vector{UInt8}) where {T<:Union{Float32,Float64}}
+                workspace::Vector{UInt8}) where {T<:vTypes}
     m, n = size(aa_fact.matrixObj)
     m == n || throw(ArgumentError("in-place workspace solve requires a square system"))
     size(xb, 1) == n || throw(DimensionMismatch("RHS has $(size(xb,1)) rows; A is $m×$n"))
@@ -1894,8 +1936,9 @@ const SparseSubfactorR    = SparseSubfactor_t(7)
 const SparseSubfactorRP   = SparseSubfactor_t(8)
 
 # 128-byte layout: attributes@0, contents@4, factor@8, wsStatic@112, wsPerRHS@120
-# (verified against the raw layer).
-struct SparseOpaqueSubfactor{T<:Union{Float32,Float64}}
+# (verified against the raw layer). Layout is identical for real and complex T
+# (the embedded SparseOpaqueFactorization{T} has a phantom T, no T-typed field).
+struct SparseOpaqueSubfactor{T<:vTypes}
     attributes::att_type
     contents::SparseSubfactor_t
     factor::SparseOpaqueFactorization{T}
@@ -1907,14 +1950,16 @@ end
 [`AAFactorization`](@ref), created with [`subfactor`](@ref). Holds a *borrowed*
 reference into its parent factorization (kept alive by this object), so it needs
 no separate release. Apply it with `*` (multiply) or `\\` (solve)."""
-mutable struct AASubfactor{T<:Union{Float32,Float64}}
+mutable struct AASubfactor{T<:vTypes}
     _sub::SparseOpaqueSubfactor{T}
     _parent::AAFactorization{T}
 end
 
 const _SUBF_WS_SYMS = Dict(
-    Cfloat  => :_SparseGetWorkspaceRequired_Float,
-    Cdouble => :_SparseGetWorkspaceRequired_Double,
+    Cfloat     => :_SparseGetWorkspaceRequired_Float,
+    Cdouble    => :_SparseGetWorkspaceRequired_Double,
+    ComplexF32 => :_SparseGetWorkspaceRequired_Complex_Float,
+    ComplexF64 => :_SparseGetWorkspaceRequired_Complex_Double,
 )
 for (T, sym) in _SUBF_WS_SYMS
     @eval function _subfactor_ws(contents::SparseSubfactor_t, f::SparseOpaqueFactorization{$T})
@@ -1941,9 +1986,10 @@ Extract an individual factor of the factorization `f` for direct application.
 `SparseSubfactorQ`/`SparseSubfactorR` (from QR),
 `SparseSubfactorL`/`SparseSubfactorD`/`SparseSubfactorP` (from Cholesky/LDLᵀ).
 `f` is factored if necessary. Apply the result with `sub * x` (multiply by the
-factor) or `sub \\ b` (solve against it). Real `Float32`/`Float64` only.
+factor) or `sub \\ b` (solve against it). `Float32`/`Float64`, and (macOS 15.5+)
+`ComplexF32`/`ComplexF64`.
 """
-function subfactor(f::AAFactorization{T}, which::SparseSubfactor_t) where {T<:Union{Float32,Float64}}
+function subfactor(f::AAFactorization{T}, which::SparseSubfactor_t) where {T<:vTypes}
     factor!(f)
     fac = f._factorization
     fac.status == SparseStatusOk ||
@@ -1960,6 +2006,11 @@ const _SUBF_APPLY_SYMS = Dict(
                 :_Z11SparseSolve27SparseOpaqueSubfactor_Float17DenseMatrix_FloatS0_),
     Cdouble => (:_Z14SparseMultiply28SparseOpaqueSubfactor_Double18DenseMatrix_DoubleS0_,
                 :_Z11SparseSolve28SparseOpaqueSubfactor_Double18DenseMatrix_DoubleS0_),
+    # complex variants (macOS 15.5+)
+    ComplexF32 => (:_Z14SparseMultiply35SparseOpaqueSubfactor_Complex_Float25DenseMatrix_Complex_FloatS0_,
+                   :_Z11SparseSolve35SparseOpaqueSubfactor_Complex_Float25DenseMatrix_Complex_FloatS0_),
+    ComplexF64 => (:_Z14SparseMultiply36SparseOpaqueSubfactor_Complex_Double26DenseMatrix_Complex_DoubleS0_,
+                   :_Z11SparseSolve36SparseOpaqueSubfactor_Complex_Double26DenseMatrix_Complex_DoubleS0_),
 )
 for (T, (mulsym, solvesym)) in _SUBF_APPLY_SYMS
     @eval _subfactor_mul!(s::SparseOpaqueSubfactor{$T}, X::StridedMatrix{$T}, Y::StridedMatrix{$T}) =
@@ -1993,7 +2044,7 @@ Multiply the vector/matrix `x` by the extracted sub-factor `sub` (e.g. form
 `Q*x`). If `sub` acts as an `m×n` operator, `x` must have `n` rows and the
 result has `m` rows.
 """
-function Base.:(*)(sub::AASubfactor{T}, x::StridedVecOrMat{T}) where {T<:Union{Float32,Float64}}
+function Base.:(*)(sub::AASubfactor{T}, x::StridedVecOrMat{T}) where {T<:vTypes}
     m, n = _subfactor_dimn(sub._sub)
     size(x, 1) == n || throw(DimensionMismatch(
         "sub-factor multiply expects $(n) rows; got $(size(x, 1))"))
@@ -2011,7 +2062,7 @@ Solve a system against the extracted sub-factor `sub` (e.g. triangular solve
 `R \\ b`, or apply `Qᵀ` via `Q \\ b`). If `sub` acts as an `m×n` operator, `b`
 must have `m` rows and the result has `n` rows.
 """
-function Base.:(\)(sub::AASubfactor{T}, b::StridedVecOrMat{T}) where {T<:Union{Float32,Float64}}
+function Base.:(\)(sub::AASubfactor{T}, b::StridedVecOrMat{T}) where {T<:vTypes}
     m, n = _subfactor_dimn(sub._sub)
     size(b, 1) == m || throw(DimensionMismatch(
         "sub-factor solve expects $(m) rows; got $(size(b, 1))"))
@@ -2030,8 +2081,10 @@ end
 # entries. Requires a *pivotless* LU factorization (LUUnpivoted/LUSPP/LUTPP).
 
 const _UPDATE_LU_SYMS = Dict(
-    Cfloat  => :_SparseUpdatePartialRefactorLU_Float,
-    Cdouble => :_SparseUpdatePartialRefactorLU_Double,
+    Cfloat     => :_SparseUpdatePartialRefactorLU_Float,
+    Cdouble    => :_SparseUpdatePartialRefactorLU_Double,
+    ComplexF32 => :_SparseUpdatePartialRefactorLU_Complex_Float,
+    ComplexF64 => :_SparseUpdatePartialRefactorLU_Complex_Double,
 )
 for (T, sym) in _UPDATE_LU_SYMS
     @eval function _update_partial_lu!(fref::Base.RefValue{SparseOpaqueFactorization{$T}},
@@ -2059,15 +2112,15 @@ sparsity pattern** as the original.
 
 `f` must hold a **pivotless** LU factorization (`SparseFactorizationLUUnpivoted`,
 `SparseFactorizationLUSPP`, or `SparseFactorizationLUTPP`) — build it with
-`factor!(f, SparseFactorizationLUUnpivoted)`. Requires macOS 15.5+. Real
-`Float32`/`Float64` only. Returns `f`.
+`factor!(f, SparseFactorizationLUUnpivoted)`. Requires macOS 15.5+.
+`Float32`/`Float64`/`ComplexF32`/`ComplexF64`. Returns `f`.
 
 Distinct from [`refactor!`](@ref), which recomputes the entire numeric
 factorization.
 """
 function update_partial_lu!(f::AAFactorization{T},
         updated::AbstractVector{<:Tuple{Integer,Integer}},
-        A_new::AASparseMatrix{T}) where {T<:Union{Float32,Float64}}
+        A_new::AASparseMatrix{T}) where {T<:vTypes}
     fac = f._factorization
     fac.status == SparseStatusOk || throw(ArgumentError(
         "update_partial_lu! requires a completed factorization; call factor! first"))
@@ -2099,8 +2152,10 @@ end
 # ============================================================
 
 const _NUMOPTS_SYMS = Dict(
-    Cfloat  => :_SparseGetOptionsFromNumericFactor_Float,
-    Cdouble => :_SparseGetOptionsFromNumericFactor_Double,
+    Cfloat     => :_SparseGetOptionsFromNumericFactor_Float,
+    Cdouble    => :_SparseGetOptionsFromNumericFactor_Double,
+    ComplexF32 => :_SparseGetOptionsFromNumericFactor_Complex_Float,
+    ComplexF64 => :_SparseGetOptionsFromNumericFactor_Complex_Double,
 )
 for (T, sym) in _NUMOPTS_SYMS
     @eval function _numeric_options(f::SparseOpaqueFactorization{$T})
@@ -2117,9 +2172,9 @@ end
 
 Read back the numeric-factorization options (scaling method, pivot/zero
 tolerances) that libSparse recorded for the completed factorization `f`. `f`
-must already be factored. Real `Float32`/`Float64` only.
+must already be factored. `Float32`/`Float64`/`ComplexF32`/`ComplexF64`.
 """
-function numeric_options(f::AAFactorization{T}) where {T<:Union{Float32,Float64}}
+function numeric_options(f::AAFactorization{T}) where {T<:vTypes}
     f._factorization.status == SparseStatusOk || throw(ArgumentError(
         "numeric_options requires a completed factorization; call factor! first"))
     return _numeric_options(f._factorization)
