@@ -33,44 +33,68 @@ Pkg.add("AppleAccelerate")
 
 ## Quick start
 
-An example from each major subsystem (every function lives under the `AppleAccelerate.`
-prefix — the package intentionally exports nothing, so it never shadows `Base`/`LinearAlgebra`):
+One self-contained, copy-pasteable example per subsystem. Every function lives under the
+`AppleAccelerate.` prefix — the package intentionally exports nothing, so it never shadows
+`Base`/`LinearAlgebra`.
+
+### Dense linear algebra — all of `LinearAlgebra` accelerated transparently via LBT
+
+```julia
+using AppleAccelerate, LinearAlgebra
+A = randn(1000, 1000)
+F = lu(A)                                       # BLAS/LAPACK routed to Accelerate
+```
+
+### Vectorized elementwise math (vForce / vDSP)
 
 ```julia
 using AppleAccelerate
-using LinearAlgebra, SparseArrays
-
-# --- Dense linear algebra: all of LinearAlgebra is accelerated transparently via LBT ---
-A = randn(1000, 1000)
-F = lu(A)                                      # BLAS/LAPACK routed to Accelerate
-
-# --- Vectorized elementwise math (vForce / vDSP) ---
 X = randn(10_000)
-Y = AppleAccelerate.exp(X)                     # also sin, cos, log, sqrt, tanh, …
-AppleAccelerate.sincos(X)                      # fused, both results in one pass
+Y = AppleAccelerate.exp(X)                      # also sin, cos, log, sqrt, tanh, …
+AppleAccelerate.sincos(X)                       # fused, both results in one pass
+```
 
-# --- Signal processing: FFT / DCT / convolution / biquad filtering ---
+### Signal processing — FFT / DCT / convolution / biquad filtering
+
+```julia
+using AppleAccelerate
 x = randn(ComplexF64, 1024)
 X = AppleAccelerate.fft(x)                      # cached setup; also rfft, fft2d, dct
+```
 
-# --- Complex vector operations (split-complex vDSP) ---
+### Complex vector operations (split-complex vDSP)
+
+```julia
+using AppleAccelerate
 z = randn(ComplexF64, 1000)
 mags = AppleAccelerate.vmags(z)                 # squared magnitudes (abs2)
 ang  = AppleAccelerate.vphase(z)                # phase angles
+```
 
-# --- Sparse direct & iterative solvers (libSparse): Cholesky / LDLᵀ / LU / QR / CG / GMRES ---
+### Sparse solvers (libSparse) — direct Cholesky / LDLᵀ / LU / QR and iterative CG / GMRES / LSMR
+
+```julia
+using AppleAccelerate, LinearAlgebra, SparseArrays
 S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
 As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
 xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
+```
 
-# --- Neural-network primitives (BNNS): a tiny 2-layer MLP forward pass ---
+### Neural-network primitives (BNNS) — a tiny 2-layer MLP forward pass
+
+```julia
+using AppleAccelerate
 W1, b1 = randn(Float32, 16, 8), randn(Float32, 16)   # layer 1: 8 → 16
 W2, b2 = randn(Float32, 4, 16), randn(Float32, 4)    # layer 2: 16 → 4
 x = randn(Float32, 8)
 h = AppleAccelerate.bnns_activation(:relu, AppleAccelerate.bnns_matmul(W1, reshape(x, :, 1)) .+ b1)
 logits = AppleAccelerate.bnns_matmul(W2, h) .+ b2     # 4-class output
+```
 
-# --- Image processing (vImage) ---
+### Image processing (vImage)
+
+```julia
+using AppleAccelerate
 img   = rand(Float32, 64, 48)                        # a 64×48 planar (grayscale) image
 small = AppleAccelerate.scale_PlanarF(img, 32, 24)   # resize to 32×24
 flip  = AppleAccelerate.horizontalReflect_PlanarF(img)
