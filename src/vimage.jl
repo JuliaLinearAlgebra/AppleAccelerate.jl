@@ -2459,7 +2459,11 @@ const kvImage444AYpCbCr16                  = Cint(14)
 
 # --- Standard conversion matrix constants (loaded from the framework) --------
 @inline function _load_const(::Type{T}, name::Symbol) where {T}
-    pp = cglobal((name, vimage_lib), Ptr{T})   # symbol is a `const T *` variable
+    # The symbol is a `const T *` variable. Resolve it via dlsym rather than `cglobal`:
+    # `cglobal` requires a compile-time-constant first argument (Julia ≤1.10 rejects a
+    # runtime `Symbol`), whereas dlsym takes the name at run time. dlsym returns the
+    # address of the symbol (a `Ptr{Ptr{T}}`); load twice to reach the T value.
+    pp = Ptr{Ptr{T}}(Libdl.dlsym(Libdl.dlopen(vimage_lib), name))
     return unsafe_load(unsafe_load(pp))
 end
 
