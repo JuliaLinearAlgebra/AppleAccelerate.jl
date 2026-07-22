@@ -1,4 +1,4 @@
-# Filtering & Spectral Analysis
+# Filtering & Spectral Analysis (vDSP)
 
 AppleAccelerate wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) functions for convolution, correlation, filtering, spectral analysis, and window generation.
 

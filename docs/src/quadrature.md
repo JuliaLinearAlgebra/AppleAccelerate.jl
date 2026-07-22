@@ -1,4 +1,4 @@
-# Numerical Integration
+# Numerical Integration (Quadrature)
 
 AppleAccelerate wraps Apple's
 [Quadrature](https://developer.apple.com/documentation/accelerate/quadrature)

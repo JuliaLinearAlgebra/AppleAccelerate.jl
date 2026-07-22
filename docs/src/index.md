@@ -1,27 +1,18 @@
 # Introduction
 
-A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing high-performance BLAS/LAPACK, vectorized math operations, DSP/FFT, and sparse linear algebra on macOS.
+A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate)
+for macOS, providing accelerated:
 
-## Installation
+- **dense linear algebra** — BLAS/LAPACK, forwarded automatically via LBT,
+- **sparse linear algebra** (`libSparse`) — direct and iterative solvers, real and complex,
+- **vectorized elementwise math** (vForce / vDSP),
+- **signal processing** (vDSP) — FFT, DCT, convolution, biquad filtering, window functions,
+- **complex-vector operations** (split-complex vDSP),
+- **neural-network primitives** (BNNS), and
+- **image processing** (vImage) — geometry, convolution, morphology, histogram, alpha
+  compositing, and format/colorspace conversion,
 
-Requires macOS 13.4+ and Julia 1.10+.
-
-```julia
-using Pkg
-Pkg.add("AppleAccelerate")
-```
-
-## Feature Overview
-
-| Feature | Backend | Details |
-|---------|---------|---------|
-| Dense Linear Algebra | [BLAS](https://developer.apple.com/documentation/accelerate/blas) / [LAPACK](https://developer.apple.com/documentation/accelerate/solving-systems-of-linear-equations-with-lapack) | Automatic forwarding via LBT — `lu`, `qr`, `svd`, `mul!`, etc. |
-| Array Operations | [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) / [vecLib](https://developer.apple.com/documentation/accelerate/veclib) | Element-wise math (`exp`, `sin`, `log`), reductions, vector arithmetic |
-| FFT & Transforms | [vDSP FFT](https://developer.apple.com/documentation/accelerate/fast_fourier_transforms) | Complex FFT (1D `f*2^k` with `f ∈ {1,3,5,15}`, 2D power-of-2), real FFT (power-of-2), DFT, DCT — direct vDSP bindings under the `AppleAccelerate.` namespace |
-| Filtering & Spectral | [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) | Convolution, biquad IIR, spectral analysis, window functions |
-| Sparse Linear Algebra | [Sparse Solvers](https://developer.apple.com/documentation/accelerate/sparse_solvers) | SpMV, direct solvers (QR, Cholesky, LDLT), factorization reuse (`refactor!`) |
-| Neural Network Primitives | [BNNS](https://developer.apple.com/documentation/accelerate/bnns) | `Float32` matmul and activations — see [BNNS](@ref "Neural Network Primitives (BNNS)") |
-| Numerical Integration | [Quadrature](https://developer.apple.com/documentation/accelerate/quadrature) | Adaptive QUADPACK integration — see [Numerical Integration](@ref) |
+plus **numerical integration** (Quadrature).
 
 AppleAccelerate is built as **two layers**: an auto-generated raw ABI mirror of
 Accelerate's C API (`AppleAccelerate.LibAccelerate`) and a hand-written idiomatic
@@ -35,88 +26,90 @@ elsewhere in your session does. See [Architecture](@ref architecture).
 !!! warning "Key Limitations"
     - **macOS only** — this package uses Apple's Accelerate framework, which is not available on Linux or Windows.
     - **FFT size limits** — 1D complex `fft`/`ifft`/`bfft` support lengths `f * 2^k` with `f ∈ {1, 3, 5, 15}`; 2D transforms and the real FFT (`rfft`/`brfft`) are power-of-2 only. DFT also supports `f * 2^n` where `f ∈ {1, 3, 5, 15}`. Use FFTW.jl for other sizes or N-D transforms.
-    - **Float32/Float64 only** — no support for integer or extended-precision types.
+    - **Precision** — the vectorized array/DSP ops are `Float32`/`Float64` only; BNNS is `Float32`-centric; sparse solvers also accept `ComplexF32`/`ComplexF64`; vImage covers the usual 8-/16-bit and float pixel formats.
+
+## Installation
+
+Requires macOS 13.4+ and Julia 1.10+.
+
+```julia
+using Pkg
+Pkg.add("AppleAccelerate")
+```
 
 ## Quick Start
 
-### Array Operations
+One example per major subsystem — the same set as the
+[README](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl). Every function lives
+under the `AppleAccelerate.` prefix; the package intentionally exports nothing, so it never
+shadows `Base`/`LinearAlgebra`.
 
-AppleAccelerate provides accelerated element-wise math operations via Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib):
+### Dense linear algebra (BLAS/LAPACK via LBT)
 
-```@example
-using AppleAccelerate
-
-X = randn(Float64, 10_000)
-
-# Accelerated math functions (not exported to avoid conflicts)
-Y = AppleAccelerate.exp(X)
-Y = AppleAccelerate.sin(X)
-Y = AppleAccelerate.log(X)
-
-# Broadcasting works automatically
-Y = AppleAccelerate.sin.(X)
-nothing # hide
-```
-
-### Dense Linear Algebra
-
-AppleAccelerate automatically forwards BLAS and LAPACK calls to Apple's Accelerate framework on package load:
-
-```@example
-using AppleAccelerate
-using LinearAlgebra
-
-# All BLAS/LAPACK operations now use Accelerate
+```@example quickstart-dense
+using AppleAccelerate, LinearAlgebra
 A = randn(1000, 1000)
-F = lu(A)  # Uses Accelerate LAPACK
+F = lu(A)                                       # BLAS/LAPACK routed to Accelerate
 nothing # hide
 ```
 
-### Sparse Linear Algebra
+### Vectorized elementwise math (vForce / vDSP)
 
-```@example
-using AppleAccelerate, SparseArrays, LinearAlgebra
-
-A = sprandn(100, 100, 0.1)
-A = A + A' + 20I  # Make symmetric positive definite
-b = randn(100)
-
-import AppleAccelerate: AAFactorization, solve
-f = AAFactorization(A)
-x = solve(f, b)
-nothing # hide
-```
-
-### Signal Processing
-
-```@example
+```@example quickstart-math
 using AppleAccelerate
+X = randn(10_000)
+Y = AppleAccelerate.exp(X)                      # also sin, cos, log, sqrt, tanh, …
+AppleAccelerate.sincos(X)                       # fused, both results in one pass
+nothing # hide
+```
 
+### Signal processing — FFT / DCT / convolution / biquad (vDSP)
+
+```@example quickstart-fft
+using AppleAccelerate
 x = randn(ComplexF64, 1024)
-X = AppleAccelerate.fft(x)
-x_recovered = AppleAccelerate.ifft(X)
+X = AppleAccelerate.fft(x)                      # cached setup; also rfft, fft2d, dct
 nothing # hide
 ```
 
-### Neural Network Primitives
+### Complex vector operations (split-complex vDSP)
 
-BNNS-backed `Float32` matrix multiply and activations (see [Neural Network Primitives (BNNS)](@ref)):
-
-```@example
+```@example quickstart-complex
 using AppleAccelerate
-
-A = rand(Float32, 4, 3); B = rand(Float32, 3, 5)
-C = AppleAccelerate.bnns_matmul(A, B)
-y = AppleAccelerate.bnns_activation(:relu, Float32[-1, 0, 1])
+z = randn(ComplexF64, 1000)
+mags = AppleAccelerate.vmags(z)                 # squared magnitudes (abs2)
+ang  = AppleAccelerate.vphase(z)                # phase angles
 nothing # hide
 ```
 
-### Integration
+### Sparse solvers — direct & iterative (libSparse)
 
-Adaptive QUADPACK integration (see [Numerical Integration](@ref)):
+```@example quickstart-sparse
+using AppleAccelerate, LinearAlgebra, SparseArrays
+S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
+As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
+xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
+nothing # hide
+```
 
-```@example
+### Neural-network primitives — a tiny 2-layer MLP (BNNS)
+
+```@example quickstart-bnns
 using AppleAccelerate
+W1, b1 = randn(Float32, 16, 8), randn(Float32, 16)   # layer 1: 8 → 16
+W2, b2 = randn(Float32, 4, 16), randn(Float32, 4)    # layer 2: 16 → 4
+x = randn(Float32, 8)
+h = AppleAccelerate.bnns_activation(:relu, AppleAccelerate.bnns_matmul(W1, reshape(x, :, 1)) .+ b1)
+logits = AppleAccelerate.bnns_matmul(W2, h) .+ b2     # 4-class output
+nothing # hide
+```
 
-AppleAccelerate.integrate(x -> exp(-x^2), -Inf, Inf).value  # ≈ √π
+### Image processing (vImage)
+
+```@example quickstart-vimage
+using AppleAccelerate
+img   = rand(Float32, 64, 48)                        # a 64×48 planar (grayscale) image
+small = AppleAccelerate.scale_PlanarF(img, 32, 24)   # resize to 32×24
+flip  = AppleAccelerate.horizontalReflect_PlanarF(img)
+nothing # hide
 ```

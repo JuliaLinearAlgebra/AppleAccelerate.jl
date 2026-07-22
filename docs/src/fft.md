@@ -1,4 +1,4 @@
-# FFT & Transforms
+# FFT & Transforms (vDSP)
 
 AppleAccelerate wraps Apple's [vDSP](https://developer.apple.com/documentation/accelerate/vdsp) transform functions for FFT, real FFT, DFT, and DCT.
 
