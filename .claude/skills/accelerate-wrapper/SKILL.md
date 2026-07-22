@@ -96,6 +96,13 @@ surface and what users reach for — not everything that exists. Register-width 
 (rationale in `vmath.jl` `VMATH_COVERAGE`); document any such intentional exclusion
 so the next person doesn't re-investigate it.
 
+**Do NOT wrap deprecated API.** Check the SDK header's availability attribute
+(`__API_DEPRECATED`, "deprecated" in the doc comment) and skip what Apple retired — wrap the
+**modern replacement** instead (e.g. the `BNNSFilter*` layer API is deprecated in macOS 15
+for the **BNNS Graph** API — wrap Graph). Measure coverage % against the *worth-wrapping*
+surface (excluding deprecated + design-excluded), and state that denominator; don't ship
+deprecated wrappers to pad a symbol count.
+
 ## Phase 2 — Generate / extend the FFI bindings
 
 The symbol is usually already generated. Regenerate only when it's genuinely absent
@@ -201,6 +208,20 @@ the `@docs` block, and ideally a runnable `@example`. New capability area → ne
 rely on (`I = [...]` shadows `LinearAlgebra.I`). Keep README headline claims in sync
 with `benchmarks.md`.
 
+**ALWAYS build docs locally before pushing (`julia --project=docs docs/make.jl`, exit 0).**
+It's a **separate CI gate from `Pkg.test()`** — a green suite says nothing about docs. The
+usual failure: Documenter's `cross_references` check aborts unless **every `@ref`'d name is
+also in an `@docs` block** — including refs in a docstring body ("See also [`foo!`](@ref)")
+and both names of a shared `@doc (@doc x) y`. `@example`/doctest blocks also *run* during
+the build. "Didn't build docs" is the usual cause of a red Documentation check on a
+green-tests PR.
+
+**Keep the PR description in sync with all its commits.** When a PR grows past its first
+commit — a follow-up fix, or a later commit that *removes* something an earlier one added —
+update the PR title/body to describe the net final state, not just the opening commit.
+Reviewers read the description, not the commit-by-commit diff; a stale one (e.g. still
+advertising code a later commit deleted) misleads. List the commits' net effect.
+
 ## Phase 6 — Benchmark
 
 Add cases to the matching `test/bench/bench_*.jl` (or a new one, registered in
@@ -225,7 +246,17 @@ julia --project=test/bench test/bench/run_benchmarks.jl [fft|sparse|dense|array]
 julia --project=docs -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'  # once
 julia --project=docs docs/make.jl                                  # runs @example + doctests
 julia --project=gen  gen/generate.jl                               # only when the raw layer must change
+# ALSO test on the MINIMUM Julia in [compat] (`julia = "1.10"` today) before pushing:
+julia +1.10 --project=. -e 'using Pkg; Pkg.instantiate(); using AppleAccelerate'  # precompile check (min)
 ```
+
+**Always test on the minimum Julia declared in `Project.toml` `[compat]`, not just the one
+on your PATH.** Code that precompiles/runs on a newer Julia can fail on the floor — e.g. a
+runtime-`Symbol` `cglobal` is accepted on ≥1.11 but Julia 1.10 rejects it at precompile
+("first argument not a valid constant expression"; use `Libdl.dlsym` for a run-time name).
+`juliaup` makes this one command (`julia +<min>`); at minimum precompile-load, ideally run
+the changed subsystem's tests. CI's `Julia min` job catches it — running it locally first
+avoids a red round-trip on an otherwise-green PR.
 
 ## Reference
 
