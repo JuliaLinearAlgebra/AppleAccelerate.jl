@@ -1515,3 +1515,628 @@ LDLᵀ factorization of `A` via Apple's Sparse solvers, for symmetric/Hermitian
 Julia's `ldlt(::SparseMatrixCSC)`.
 """
 LinearAlgebra.ldlt(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, SparseFactorizationLDLT); f)
+
+# ============================================================
+# Iterative-solver option structs
+# ============================================================
+# Field-by-field mirrors of libSparse's option structs (verified against the
+# raw layer: sizes 40/48/72, offsets exact). A zeroed field selects the library
+# default (e.g. maxIterations 0 → 100, rtol 0 → sqrt(eps)).
+
+"""Options for the conjugate-gradient iterative solver. Zeroed fields select
+libSparse defaults (`maxIterations` 0 → 100, `rtol` 0 → `sqrt(eps)`)."""
+struct SparseCGOptions
+    reportError::Ptr{Cvoid}
+    maxIterations::Cint
+    atol::Cdouble
+    rtol::Cdouble
+    reportStatus::Ptr{Cvoid}
+end
+SparseCGOptions(; maxIterations::Integer = 0, atol::Real = 0.0, rtol::Real = 0.0) =
+    SparseCGOptions(C_NULL, Cint(maxIterations), Float64(atol), Float64(rtol), C_NULL)
+
+"""Options for the GMRES iterative solver. `variant` is `0`=DQGMRES (default),
+`1`=GMRES, `2`=FGMRES; `nvec` is the number of orthogonalization vectors."""
+struct SparseGMRESOptions
+    reportError::Ptr{Cvoid}
+    variant::UInt8
+    nvec::Cint
+    maxIterations::Cint
+    atol::Cdouble
+    rtol::Cdouble
+    reportStatus::Ptr{Cvoid}
+end
+SparseGMRESOptions(; variant::Integer = 0, nvec::Integer = 0, maxIterations::Integer = 0,
+                   atol::Real = 0.0, rtol::Real = 0.0) =
+    SparseGMRESOptions(C_NULL, UInt8(variant), Cint(nvec), Cint(maxIterations),
+                       Float64(atol), Float64(rtol), C_NULL)
+
+"""Options for the LSMR least-squares iterative solver. `lambda` is the
+(Tikhonov) damping factor; `nvec` the number of local-reorthogonalization
+vectors; `convergenceTest` `0`=default, `1`=Fong-Saunders."""
+struct SparseLSMROptions
+    reportError::Ptr{Cvoid}
+    lambda::Cdouble
+    nvec::Cint
+    convergenceTest::Cint
+    atol::Cdouble
+    rtol::Cdouble
+    btol::Cdouble
+    conditionLimit::Cdouble
+    maxIterations::Cint
+    reportStatus::Ptr{Cvoid}
+end
+SparseLSMROptions(; lambda::Real = 0.0, nvec::Integer = 0, convergenceTest::Integer = 0,
+                  atol::Real = 0.0, rtol::Real = 0.0, btol::Real = 0.0,
+                  conditionLimit::Real = 0.0, maxIterations::Integer = 0) =
+    SparseLSMROptions(C_NULL, Float64(lambda), Cint(nvec), Cint(convergenceTest),
+                      Float64(atol), Float64(rtol), Float64(btol),
+                      Float64(conditionLimit), Cint(maxIterations), C_NULL)
+
+# The 264-byte `SparseIterativeMethod`: a method tag (CG=0, GMRES=1, LSMR=2) at
+# offset 0 and a 256-byte options union at offset 8. We pack the chosen option
+# struct's bytes into the union payload.
+struct SparseIterativeMethod
+    method::Cint
+    _reserved::Cint
+    options::NTuple{256,UInt8}
+end
+
+function _pack_iter_options(opt)::NTuple{256,UInt8}
+    buf = zeros(UInt8, 256)
+    r = Ref(opt)
+    GC.@preserve r buf begin
+        unsafe_copyto!(pointer(buf),
+                       Ptr{UInt8}(Base.unsafe_convert(Ptr{typeof(opt)}, r)),
+                       sizeof(opt))
+        return unsafe_load(Ptr{NTuple{256,UInt8}}(pointer(buf)))
+    end
+end
+
+_iter_method(::Val{:cg},    o::SparseCGOptions)    = SparseIterativeMethod(Cint(0), Cint(0), _pack_iter_options(o))
+_iter_method(::Val{:gmres}, o::SparseGMRESOptions) = SparseIterativeMethod(Cint(1), Cint(0), _pack_iter_options(o))
+_iter_method(::Val{:lsmr},  o::SparseLSMROptions)  = SparseIterativeMethod(Cint(2), Cint(0), _pack_iter_options(o))
+
+@enum SparseIterativeStatus_t::Int32 begin
+    SparseIterativeConverged = 0
+    SparseIterativeMaxIterations = 1
+    SparseIterativeParameterError = -1
+    SparseIterativeIllConditioned = -2
+    SparseIterativeInternalError = -99
+end
+
+# ============================================================
+# Preconditioners (opaque handle)
+# ============================================================
+
+const SparsePreconditioner_t = Cint
+const SparsePreconditionerNone       = SparsePreconditioner_t(0)
+const SparsePreconditionerUser       = SparsePreconditioner_t(1)
+const SparsePreconditionerDiagonal   = SparsePreconditioner_t(2)
+const SparsePreconditionerDiagScaling = SparsePreconditioner_t(3)
+
+# Layout mirrors libSparse's SparseOpaquePreconditioner_* (type, mem, apply).
+struct SparseOpaquePreconditioner{T<:Union{Float32,Float64}}
+    type::SparsePreconditioner_t
+    mem::Ptr{Cvoid}
+    apply::Ptr{Cvoid}
+end
+
+"""Opaque preconditioner handle for the iterative solvers. Build with
+[`AAPreconditioner`](@ref). Wraps a libSparse `SparseOpaquePreconditioner`; the
+backing memory is released by a finalizer."""
+mutable struct AAPreconditioner{T<:Union{Float32,Float64}}
+    _p::SparseOpaquePreconditioner{T}
+    _matrix::AASparseMatrix{T}   # keep the source matrix rooted for the handle's life
+end
+
+const _PRECOND_CREATE = Dict(
+    Cfloat  => :_SparseCreatePreconditioner_Float,
+    Cdouble => :_SparseCreatePreconditioner_Double,
+)
+const _PRECOND_RELEASE = Dict(
+    Cfloat  => :_SparseReleaseOpaquePreconditioner_Float,
+    Cdouble => :_SparseReleaseOpaquePreconditioner_Double,
+)
+
+function _precond_symbol(p::Symbol)
+    p === :diagonal    && return SparsePreconditionerDiagonal
+    p === :diagscaling && return SparsePreconditionerDiagScaling
+    throw(ArgumentError("unknown preconditioner $(repr(p)); use :diagonal or :diagscaling"))
+end
+
+for (T, create) in _PRECOND_CREATE
+    release = _PRECOND_RELEASE[T]
+    @eval function _create_preconditioner(type::SparsePreconditioner_t, A::AASparseMatrix{$T})
+        # `_SparseCreatePreconditioner` reads A's structure/data (raw pointers into
+        # A's CSC buffers), so keep A rooted across the call.
+        p = GC.@preserve A begin
+            @ccall LIBSPARSE.$create(type::SparsePreconditioner_t,
+                A.matrix::Ref{SparseMatrix{$T}})::SparseOpaquePreconditioner{$T}
+        end
+        obj = AAPreconditioner{$T}(p, A)
+        finalizer(obj) do o
+            if o._p.type != SparsePreconditionerNone
+                # Release the internally-allocated backing store. A stack `Ref`
+                # copy is fine: the C call frees `->mem`, which is shared by the
+                # copy. The finalizer runs once, so there is no double free.
+                pref = Ref(o._p)
+                GC.@preserve pref begin
+                    @ccall LIBSPARSE.$release(
+                        Base.unsafe_convert(Ptr{SparseOpaquePreconditioner{$T}}, pref)::Ptr{SparseOpaquePreconditioner{$T}})::Cvoid
+                end
+            end
+        end
+        return obj
+    end
+end
+
+"""
+    AAPreconditioner(A::AASparseMatrix; kind = :diagonal)
+
+Construct a preconditioner for `A` to accelerate the iterative solvers
+([`solve`](@ref) with a `method` keyword). `kind` is `:diagonal` (Jacobi) or
+`:diagscaling`. Real `Float32`/`Float64` only.
+"""
+function AAPreconditioner(A::AASparseMatrix{T}; kind::Symbol = :diagonal) where {T<:Union{Float32,Float64}}
+    return _create_preconditioner(_precond_symbol(kind), A)
+end
+
+# ============================================================
+# Iterative solve (CG / GMRES / LSMR)
+# ============================================================
+# The public iterative `SparseSolve(method, A, B, X[, precond])` entry points are
+# exported (mangled) symbols; they build the operator-apply block internally, so
+# we call them directly. A is passed by value (raw pointers into the CSC buffers
+# → GC.@preserve the wrapper); B/X convert to DenseMatrix (rooting their arrays).
+
+const _ITER_SOLVE_SYMS = Dict(
+    # T => (base, enumPrecond, opaquePrecond)
+    Cfloat => (
+        :_Z11SparseSolve21SparseIterativeMethod18SparseMatrix_Float17DenseMatrix_FloatS1_,
+        :_Z11SparseSolve21SparseIterativeMethod18SparseMatrix_Float17DenseMatrix_FloatS1_i,
+        :_Z11SparseSolve21SparseIterativeMethod18SparseMatrix_Float17DenseMatrix_FloatS1_32SparseOpaquePreconditioner_Float),
+    Cdouble => (
+        :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_,
+        :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_i,
+        :_Z11SparseSolve21SparseIterativeMethod19SparseMatrix_Double18DenseMatrix_DoubleS1_33SparseOpaquePreconditioner_Double),
+)
+for (T, (base, enumsym, opaquesym)) in _ITER_SOLVE_SYMS
+    @eval _iter_solve!(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::StridedMatrix{$T}, X::StridedMatrix{$T}) =
+        @ccall LIBSPARSE.$base(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::DenseMatrix{$T}, X::DenseMatrix{$T})::SparseIterativeStatus_t
+    @eval _iter_solve!(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::StridedMatrix{$T}, X::StridedMatrix{$T}, pre::SparsePreconditioner_t) =
+        @ccall LIBSPARSE.$enumsym(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::DenseMatrix{$T}, X::DenseMatrix{$T}, pre::SparsePreconditioner_t)::SparseIterativeStatus_t
+    @eval _iter_solve!(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::StridedMatrix{$T}, X::StridedMatrix{$T}, pre::SparseOpaquePreconditioner{$T}) =
+        @ccall LIBSPARSE.$opaquesym(m::SparseIterativeMethod, A::SparseMatrix{$T},
+            B::DenseMatrix{$T}, X::DenseMatrix{$T}, pre::SparseOpaquePreconditioner{$T})::SparseIterativeStatus_t
+end
+
+function _check_iter_status(status::SparseIterativeStatus_t)
+    status == SparseIterativeConverged && return
+    status == SparseIterativeMaxIterations &&
+        (@warn "iterative solver reached its iteration limit without converging"; return)
+    status == SparseIterativeParameterError &&
+        throw(ArgumentError("iterative solve failed: parameter error " *
+            "(check the matrix/RHS dimensions and that CG's matrix is symmetric)"))
+    status == SparseIterativeIllConditioned &&
+        error("iterative solve failed: matrix is ill-conditioned")
+    error("iterative solve failed: status = $status")
+end
+
+"""
+    solve(A::AASparseMatrix, b; method, preconditioner = :none,
+          atol = 0, rtol = 0, maxiter = 0, nvec = 0, variant = :dqgmres, lambda = 0)
+
+Solve `A x = b` with an iterative Krylov method instead of a direct
+factorization, returning `x`. `method` (required) is one of:
+
+  - `:cg`    — conjugate gradient; `A` must be symmetric positive-definite.
+  - `:gmres` — GMRES; for square non-symmetric / indefinite systems. `variant`
+    is `:dqgmres` (default), `:gmres`, or `:fgmres`; `nvec` sets the number of
+    orthogonalization vectors.
+  - `:lsmr`  — LSMR least-squares; for rectangular or singular systems.
+    `lambda` applies Tikhonov damping.
+
+`atol`/`rtol` are the absolute/relative convergence tolerances (0 selects the
+library default), `maxiter` the iteration cap (0 → 100). `preconditioner` may be
+`:none`, `:diagonal`, `:diagscaling`, or an [`AAPreconditioner`](@ref). `b` may
+be a vector or a matrix (multiple right-hand sides). Real `Float32`/`Float64`.
+"""
+function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
+               method::Symbol,
+               preconditioner::Union{Symbol,AAPreconditioner} = :none,
+               atol::Real = 0, rtol::Real = 0, maxiter::Integer = 0,
+               nvec::Integer = 0, variant::Symbol = :dqgmres,
+               lambda::Real = 0) where {T<:Union{Float32,Float64}}
+    m, n = size(A)
+    size(b, 1) == m || throw(DimensionMismatch(
+        "right-hand side has $(size(b, 1)) rows; A has $m rows"))
+    if method === :cg
+        meth = _iter_method(Val(:cg), SparseCGOptions(; maxIterations = maxiter, atol, rtol))
+    elseif method === :gmres
+        variantcode = variant === :dqgmres ? 0 : variant === :gmres ? 1 :
+                      variant === :fgmres ? 2 :
+                      throw(ArgumentError("unknown GMRES variant $(repr(variant))"))
+        meth = _iter_method(Val(:gmres),
+            SparseGMRESOptions(; variant = variantcode, nvec, maxIterations = maxiter, atol, rtol))
+    elseif method === :lsmr
+        meth = _iter_method(Val(:lsmr),
+            SparseLSMROptions(; lambda, nvec, maxIterations = maxiter, atol, rtol))
+    else
+        throw(ArgumentError("unknown iterative method $(repr(method)); use :cg, :gmres, or :lsmr"))
+    end
+    nrhs = b isa AbstractVector ? 1 : size(b, 2)
+    B = reshape(b, m, nrhs)
+    X = zeros(T, n, nrhs)          # zero initial guess (also the output buffer)
+    status = GC.@preserve A begin
+        if preconditioner isa AAPreconditioner
+            preconditioner isa AAPreconditioner{T} ||
+                throw(ArgumentError("preconditioner eltype does not match A"))
+            GC.@preserve preconditioner _iter_solve!(meth, A.matrix, B, X, preconditioner._p)
+        elseif preconditioner === :none
+            _iter_solve!(meth, A.matrix, B, X)
+        else
+            _iter_solve!(meth, A.matrix, B, X, _precond_symbol(preconditioner))
+        end
+    end
+    _check_iter_status(status)
+    return b isa AbstractVector ? vec(X) : X
+end
+
+solve(A::SparseMatrixCSC{T,Int64}, b::StridedVecOrMat{T}; kw...) where {T<:Union{Float32,Float64}} =
+    solve(AASparseMatrix(A), b; kw...)
+
+# ============================================================
+# Preallocated / thread-safe factorization solve workspace
+# ============================================================
+# The direct-solve C++ entry points have overloads taking a caller-owned
+# `void* workspace`, letting repeated/concurrent solves avoid the per-call
+# internal allocation. Size the buffer with `solve_workspace_size`.
+
+const _SOLVE_WS_SYMS = Dict(
+    # T => (outOfPlace(B,X,ws), inPlace(XB,ws))
+    Cfloat  => (:_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatS0_Pv,
+                :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatPv),
+    Cdouble => (:_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoubleS0_Pv,
+                :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoublePv),
+)
+for (T, (outsym, insym)) in _SOLVE_WS_SYMS
+    @eval _solve_ws!(f::SparseOpaqueFactorization{$T}, B::StridedMatrix{$T},
+            X::StridedMatrix{$T}, ws::Vector{UInt8}) =
+        GC.@preserve ws (@ccall LIBSPARSE.$outsym(f::SparseOpaqueFactorization{$T},
+            B::DenseMatrix{$T}, X::DenseMatrix{$T}, pointer(ws)::Ptr{Cvoid})::Cvoid)
+    @eval _solve_ws!(f::SparseOpaqueFactorization{$T}, XB::StridedMatrix{$T},
+            ws::Vector{UInt8}) =
+        GC.@preserve ws (@ccall LIBSPARSE.$insym(f::SparseOpaqueFactorization{$T},
+            XB::DenseMatrix{$T}, pointer(ws)::Ptr{Cvoid})::Cvoid)
+end
+
+"""
+    solve_workspace_size(f::AAFactorization, nrhs = 1) -> Int
+
+Number of bytes of scratch a workspace buffer must hold for a
+[`solve!`](@ref)-with-workspace call on `f` with `nrhs` right-hand sides. The
+factorization must already be computed (call [`factor!`](@ref) first). Use to
+size the `workspace` argument of the preallocated-workspace `solve!`.
+"""
+function solve_workspace_size(f::AAFactorization, nrhs::Integer = 1)
+    fac = f._factorization
+    fac.status == SparseStatusOk || throw(ArgumentError(
+        "solve_workspace_size requires a computed factorization; call factor! first"))
+    return Int(fac.solveWorkspaceRequiredStatic) + Int(nrhs) * Int(fac.solveWorkspaceRequiredPerRHS)
+end
+
+"""
+    solve!(f::AAFactorization, b, x, workspace::Vector{UInt8})
+
+Solve `A x = b` writing the result into `x`, using the caller-supplied
+`workspace` scratch buffer instead of allocating internally — for repeated or
+concurrent solves that reuse a factorization without per-call allocation. Size
+`workspace` with [`solve_workspace_size`](@ref)`(f, size(b, 2))`. Each
+concurrent thread must use its **own** workspace and its own `x`. Returns `x`.
+
+    solve!(f::AAFactorization, xb, workspace::Vector{UInt8})
+
+In-place variant: `xb` holds the right-hand side on input and the solution on
+output (square systems only).
+"""
+function solve!(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T},
+                x::StridedVecOrMat{T}, workspace::Vector{UInt8}) where {T<:Union{Float32,Float64}}
+    m, n = size(aa_fact.matrixObj)
+    size(b, 1) == m || throw(DimensionMismatch("RHS has $(size(b,1)) rows; A has $m rows"))
+    size(x, 1) == n || throw(DimensionMismatch("solution has $(size(x,1)) rows; A has $n cols"))
+    nrhs = b isa AbstractVector ? 1 : size(b, 2)
+    factor!(aa_fact)
+    need = solve_workspace_size(aa_fact, nrhs)
+    length(workspace) >= need || throw(ArgumentError(
+        "workspace too small: need $need bytes, got $(length(workspace)); " *
+        "size it with solve_workspace_size(f, nrhs)"))
+    B = reshape(b, m, nrhs); X = reshape(x, n, nrhs)
+    _solve_ws!(aa_fact._factorization, B, X, workspace)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
+    return x
+end
+
+function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T},
+                workspace::Vector{UInt8}) where {T<:Union{Float32,Float64}}
+    m, n = size(aa_fact.matrixObj)
+    m == n || throw(ArgumentError("in-place workspace solve requires a square system"))
+    size(xb, 1) == n || throw(DimensionMismatch("RHS has $(size(xb,1)) rows; A is $m×$n"))
+    nrhs = xb isa AbstractVector ? 1 : size(xb, 2)
+    factor!(aa_fact)
+    need = solve_workspace_size(aa_fact, nrhs)
+    length(workspace) >= need || throw(ArgumentError(
+        "workspace too small: need $need bytes, got $(length(workspace))"))
+    XB = reshape(xb, n, nrhs)
+    _solve_ws!(aa_fact._factorization, XB, workspace)
+    _libsparse_throw(aa_fact._factorization.status, "solve")
+    return xb
+end
+
+# ============================================================
+# Subfactor extraction & application (Q, R, L, D, P, ...)
+# ============================================================
+
+const SparseSubfactor_t = UInt8
+const SparseSubfactorInvalid = SparseSubfactor_t(0)
+const SparseSubfactorP    = SparseSubfactor_t(1)
+const SparseSubfactorS    = SparseSubfactor_t(2)
+const SparseSubfactorL    = SparseSubfactor_t(3)
+const SparseSubfactorD    = SparseSubfactor_t(4)
+const SparseSubfactorPLPS = SparseSubfactor_t(5)
+const SparseSubfactorQ    = SparseSubfactor_t(6)
+const SparseSubfactorR    = SparseSubfactor_t(7)
+const SparseSubfactorRP   = SparseSubfactor_t(8)
+
+# 128-byte layout: attributes@0, contents@4, factor@8, wsStatic@112, wsPerRHS@120
+# (verified against the raw layer).
+struct SparseOpaqueSubfactor{T<:Union{Float32,Float64}}
+    attributes::att_type
+    contents::SparseSubfactor_t
+    factor::SparseOpaqueFactorization{T}
+    workspaceRequiredStatic::Csize_t
+    workspaceRequiredPerRHS::Csize_t
+end
+
+"""Handle to a sub-factor (`Q`, `R`, `L`, `D`, `P`, …) of an
+[`AAFactorization`](@ref), created with [`subfactor`](@ref). Holds a *borrowed*
+reference into its parent factorization (kept alive by this object), so it needs
+no separate release. Apply it with `*` (multiply) or `\\` (solve)."""
+mutable struct AASubfactor{T<:Union{Float32,Float64}}
+    _sub::SparseOpaqueSubfactor{T}
+    _parent::AAFactorization{T}
+end
+
+const _SUBF_WS_SYMS = Dict(
+    Cfloat  => :_SparseGetWorkspaceRequired_Float,
+    Cdouble => :_SparseGetWorkspaceRequired_Double,
+)
+for (T, sym) in _SUBF_WS_SYMS
+    @eval function _subfactor_ws(contents::SparseSubfactor_t, f::SparseOpaqueFactorization{$T})
+        ws = Ref{Csize_t}(0); wp = Ref{Csize_t}(0)
+        @ccall LIBSPARSE.$sym(contents::SparseSubfactor_t, f::SparseOpaqueFactorization{$T},
+            ws::Ptr{Csize_t}, wp::Ptr{Csize_t})::Cvoid
+        return (ws[], wp[])
+    end
+end
+
+# Sub-factor view attributes, mirroring libSparse's SparseCreateSubfactor:
+# L is lower-triangular, R/RP upper-triangular, everything else ordinary.
+function _subfactor_attributes(c::SparseSubfactor_t)
+    c == SparseSubfactorL && return ATT_TRI_LOWER
+    (c == SparseSubfactorR || c == SparseSubfactorRP) && return ATT_TRI_UPPER
+    return ATT_ORDINARY
+end
+
+"""
+    subfactor(f::AAFactorization, which) -> AASubfactor
+
+Extract an individual factor of the factorization `f` for direct application.
+`which` is one of the `SparseSubfactor*` constants:
+`SparseSubfactorQ`/`SparseSubfactorR` (from QR),
+`SparseSubfactorL`/`SparseSubfactorD`/`SparseSubfactorP` (from Cholesky/LDLᵀ).
+`f` is factored if necessary. Apply the result with `sub * x` (multiply by the
+factor) or `sub \\ b` (solve against it). Real `Float32`/`Float64` only.
+"""
+function subfactor(f::AAFactorization{T}, which::SparseSubfactor_t) where {T<:Union{Float32,Float64}}
+    factor!(f)
+    fac = f._factorization
+    fac.status == SparseStatusOk ||
+        throw(ArgumentError("subfactor requires a completed factorization"))
+    ws, wp = GC.@preserve f _subfactor_ws(which, fac)
+    sub = SparseOpaqueSubfactor{T}(_subfactor_attributes(which), which, fac, ws, wp)
+    return AASubfactor{T}(sub, f)
+end
+
+# The subfactor multiply/solve C++ entry points allocate their own scratch
+# (sized from the workspace fields we filled in), so we call them directly.
+const _SUBF_APPLY_SYMS = Dict(
+    Cfloat  => (:_Z14SparseMultiply27SparseOpaqueSubfactor_Float17DenseMatrix_FloatS0_,
+                :_Z11SparseSolve27SparseOpaqueSubfactor_Float17DenseMatrix_FloatS0_),
+    Cdouble => (:_Z14SparseMultiply28SparseOpaqueSubfactor_Double18DenseMatrix_DoubleS0_,
+                :_Z11SparseSolve28SparseOpaqueSubfactor_Double18DenseMatrix_DoubleS0_),
+)
+for (T, (mulsym, solvesym)) in _SUBF_APPLY_SYMS
+    @eval _subfactor_mul!(s::SparseOpaqueSubfactor{$T}, X::StridedMatrix{$T}, Y::StridedMatrix{$T}) =
+        @ccall LIBSPARSE.$mulsym(s::SparseOpaqueSubfactor{$T},
+            X::DenseMatrix{$T}, Y::DenseMatrix{$T})::Cvoid
+    @eval _subfactor_solve!(s::SparseOpaqueSubfactor{$T}, B::StridedMatrix{$T}, X::StridedMatrix{$T}) =
+        @ccall LIBSPARSE.$solvesym(s::SparseOpaqueSubfactor{$T},
+            B::DenseMatrix{$T}, X::DenseMatrix{$T})::Cvoid
+end
+
+# Dimensions of the operand a sub-factor acts on, mirroring libSparse's
+# `_SparseSubFactorGetDimn`: the parent is stored with rows ≥ cols; every
+# sub-factor is n×n EXCEPT the Q of a QR (m×n); a transpose bit swaps them. As a
+# map it takes an n-vector to an m-vector (`m×n` acting on the right).
+function _subfactor_dimn(s::SparseOpaqueSubfactor)
+    symb = s.factor.symbolicFactorization
+    bs = max(Int(symb.blockSize), 1)
+    m = Int(symb.rowCount) * bs
+    n = Int(symb.columnCount) * bs
+    m < n && ((m, n) = (n, m))    # parent always factored with m ≥ n
+    isQ = symb.type == SparseFactorizationQR && s.contents == SparseSubfactorQ
+    isQ || (m = n)                # all sub-factors are n×n except Q of QR
+    (s.attributes & ATT_TRANSPOSE) != 0 && ((m, n) = (n, m))
+    return (m, n)
+end
+
+"""
+    sub * x
+
+Multiply the vector/matrix `x` by the extracted sub-factor `sub` (e.g. form
+`Q*x`). If `sub` acts as an `m×n` operator, `x` must have `n` rows and the
+result has `m` rows.
+"""
+function Base.:(*)(sub::AASubfactor{T}, x::StridedVecOrMat{T}) where {T<:Union{Float32,Float64}}
+    m, n = _subfactor_dimn(sub._sub)
+    size(x, 1) == n || throw(DimensionMismatch(
+        "sub-factor multiply expects $(n) rows; got $(size(x, 1))"))
+    nrhs = x isa AbstractVector ? 1 : size(x, 2)
+    X = reshape(x, n, nrhs)
+    Y = zeros(T, m, nrhs)
+    GC.@preserve sub _subfactor_mul!(sub._sub, X, Y)
+    return x isa AbstractVector ? vec(Y) : Y
+end
+
+"""
+    sub \\ b
+
+Solve a system against the extracted sub-factor `sub` (e.g. triangular solve
+`R \\ b`, or apply `Qᵀ` via `Q \\ b`). If `sub` acts as an `m×n` operator, `b`
+must have `m` rows and the result has `n` rows.
+"""
+function Base.:(\)(sub::AASubfactor{T}, b::StridedVecOrMat{T}) where {T<:Union{Float32,Float64}}
+    m, n = _subfactor_dimn(sub._sub)
+    size(b, 1) == m || throw(DimensionMismatch(
+        "sub-factor solve expects $(m) rows; got $(size(b, 1))"))
+    nrhs = b isa AbstractVector ? 1 : size(b, 2)
+    B = reshape(b, m, nrhs)
+    X = zeros(T, n, nrhs)
+    GC.@preserve sub _subfactor_solve!(sub._sub, B, X)
+    return b isa AbstractVector ? vec(X) : X
+end
+
+# ============================================================
+# Partial / low-rank LU refactorization update
+# ============================================================
+# Distinct from the full numeric `refactor!`: recompute only the L/U values that
+# a from-scratch LU would change, given a small set of modified (row, col)
+# entries. Requires a *pivotless* LU factorization (LUUnpivoted/LUSPP/LUTPP).
+
+const _UPDATE_LU_SYMS = Dict(
+    Cfloat  => :_SparseUpdatePartialRefactorLU_Float,
+    Cdouble => :_SparseUpdatePartialRefactorLU_Double,
+)
+for (T, sym) in _UPDATE_LU_SYMS
+    @eval function _update_partial_lu!(fref::Base.RefValue{SparseOpaqueFactorization{$T}},
+            updatedIndices::Vector{Cint}, newMatrix::SparseMatrix{$T})
+        updateCount = Cint(length(updatedIndices) ÷ 2)
+        GC.@preserve updatedIndices begin
+            @ccall LIBSPARSE.$sym(
+                Base.unsafe_convert(Ptr{SparseOpaqueFactorization{$T}}, fref)::Ptr{SparseOpaqueFactorization{$T}},
+                updateCount::Cint, pointer(updatedIndices)::Ptr{Cint},
+                newMatrix::SparseMatrix{$T})::Cvoid
+        end
+        return fref[]
+    end
+end
+
+"""
+    update_partial_lu!(f::AAFactorization, updated, A_new)
+
+Apply a partial LU refactorization to `f` in place: recompute only the factor
+values that a from-scratch LU of `A_new` would change, given that just the
+entries listed in `updated` differ from the originally-factored matrix. `updated`
+is a vector of 1-based `(row, col)` tuples of the modified positions; `A_new` is
+a full copy of the matrix with those entries at their new values and the **same
+sparsity pattern** as the original.
+
+`f` must hold a **pivotless** LU factorization (`SparseFactorizationLUUnpivoted`,
+`SparseFactorizationLUSPP`, or `SparseFactorizationLUTPP`) — build it with
+`factor!(f, SparseFactorizationLUUnpivoted)`. Requires macOS 15.5+. Real
+`Float32`/`Float64` only. Returns `f`.
+
+Distinct from [`refactor!`](@ref), which recomputes the entire numeric
+factorization.
+"""
+function update_partial_lu!(f::AAFactorization{T},
+        updated::AbstractVector{<:Tuple{Integer,Integer}},
+        A_new::AASparseMatrix{T}) where {T<:Union{Float32,Float64}}
+    fac = f._factorization
+    fac.status == SparseStatusOk || throw(ArgumentError(
+        "update_partial_lu! requires a completed factorization; call factor! first"))
+    t = fac.symbolicFactorization.type
+    t in (SparseFactorizationLUUnpivoted, SparseFactorizationLUSPP, SparseFactorizationLUTPP) ||
+        throw(ArgumentError("update_partial_lu! requires a pivotless LU factorization " *
+            "(LUUnpivoted/LUSPP/LUTPP); f holds $t"))
+    size(f.matrixObj) == size(A_new) || throw(DimensionMismatch(
+        "update matrix size $(size(A_new)) ≠ factored size $(size(f.matrixObj))"))
+    # Flatten to the 0-based (row, col) pair list libSparse expects.
+    idx = Vector{Cint}(undef, 2 * length(updated))
+    @inbounds for (k, (i, j)) in enumerate(updated)
+        idx[2k-1] = Cint(i - 1)
+        idx[2k]   = Cint(j - 1)
+    end
+    fref = Ref(fac)
+    GC.@preserve A_new begin
+        _update_partial_lu!(fref, idx, A_new.matrix)
+    end
+    newfac = fref[]
+    _libsparse_throw(newfac.status, "update_partial_lu")
+    f._factorization = newfac
+    f.matrixObj = A_new
+    return f
+end
+
+# ============================================================
+# Factorization introspection (read options back)
+# ============================================================
+
+const _NUMOPTS_SYMS = Dict(
+    Cfloat  => :_SparseGetOptionsFromNumericFactor_Float,
+    Cdouble => :_SparseGetOptionsFromNumericFactor_Double,
+)
+for (T, sym) in _NUMOPTS_SYMS
+    @eval function _numeric_options(f::SparseOpaqueFactorization{$T})
+        fref = Ref(f)
+        GC.@preserve fref begin
+            @ccall LIBSPARSE.$sym(
+                Base.unsafe_convert(Ptr{SparseOpaqueFactorization{$T}}, fref)::Ptr{SparseOpaqueFactorization{$T}})::SparseNumericFactorOptions
+        end
+    end
+end
+
+"""
+    numeric_options(f::AAFactorization) -> SparseNumericFactorOptions
+
+Read back the numeric-factorization options (scaling method, pivot/zero
+tolerances) that libSparse recorded for the completed factorization `f`. `f`
+must already be factored. Real `Float32`/`Float64` only.
+"""
+function numeric_options(f::AAFactorization{T}) where {T<:Union{Float32,Float64}}
+    f._factorization.status == SparseStatusOk || throw(ArgumentError(
+        "numeric_options requires a completed factorization; call factor! first"))
+    return _numeric_options(f._factorization)
+end
+
+"""
+    symbolic_options(f::AAFactorization) -> SparseSymbolicFactorOptions
+
+Read back the symbolic-factorization options (ordering method, etc.) recorded
+for the completed factorization `f`.
+"""
+function symbolic_options(f::AAFactorization{T}) where {T<:vTypes}
+    f._factorization.status == SparseStatusOk || throw(ArgumentError(
+        "symbolic_options requires a completed factorization; call factor! first"))
+    symb = Ref(f._factorization.symbolicFactorization)
+    GC.@preserve symb begin
+        return @ccall LIBSPARSE._SparseGetOptionsFromSymbolicFactor(
+            Base.unsafe_convert(Ptr{SparseOpaqueSymbolicFactorization}, symb)::Ptr{SparseOpaqueSymbolicFactorization})::SparseSymbolicFactorOptions
+    end
+end

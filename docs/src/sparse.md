@@ -177,6 +177,108 @@ B = SparseMatrixCSC(A)
 nothing # hide
 ```
 
+## Iterative solvers (CG / GMRES / LSMR)
+
+Krylov iterative solvers are available through `solve` with a `method` keyword,
+dispatching on `AASparseMatrix` (or a `SparseMatrixCSC` directly). Choose `:cg`
+for symmetric positive-definite systems, `:gmres` for square non-symmetric or
+indefinite systems, and `:lsmr` for rectangular or singular least-squares systems.
+
+```@example sparse
+import AppleAccelerate: AASparseMatrix, solve
+
+M = sprandn(200, 200, 0.02)
+A = AASparseMatrix(M * M' + 200I)    # SPD
+b = randn(200)
+x = solve(A, b; method = :cg, rtol = 1e-10)
+nothing # hide
+```
+
+`atol`/`rtol` set the convergence tolerances (0 selects the library default),
+`maxiter` caps iterations (0 → 100). GMRES accepts `variant`
+(`:dqgmres`/`:gmres`/`:fgmres`) and `nvec`; LSMR accepts `lambda` (Tikhonov
+damping) and `nvec`.
+
+### Preconditioners
+
+Pass `preconditioner = :diagonal` or `:diagscaling` to `solve`, or build a reusable
+[`AAPreconditioner`](@ref AppleAccelerate.AAPreconditioner) handle:
+
+```@example sparse
+import AppleAccelerate: AASparseMatrix, AAPreconditioner, solve
+
+A = AASparseMatrix(let M = sprandn(200, 200, 0.02); M * M' + 200I end)
+P = AAPreconditioner(A; kind = :diagonal)
+x = solve(A, randn(200); method = :cg, preconditioner = P, rtol = 1e-10)
+nothing # hide
+```
+
+## Preallocated / thread-safe solve workspace
+
+For repeated or concurrent solves that reuse a factorization, a `solve!` overload
+takes a caller-owned scratch buffer sized with
+[`solve_workspace_size`](@ref AppleAccelerate.solve_workspace_size), avoiding the
+per-call internal allocation. Each concurrent thread must use its own workspace and
+its own solution buffer.
+
+```@example sparse
+import AppleAccelerate: AAFactorization, factor!, solve!, solve_workspace_size
+
+f = AAFactorization(sprandn(100, 100, 0.1) + 20I)
+factor!(f)
+ws = Vector{UInt8}(undef, solve_workspace_size(f, 1))
+b = randn(100); x = similar(b)
+solve!(f, b, x, ws)
+nothing # hide
+```
+
+## Sub-factor extraction (Q, R, L, D, P)
+
+Individual factors of a factorization can be extracted with
+[`subfactor`](@ref AppleAccelerate.subfactor) and applied with `*` (multiply) or
+`\` (solve). For example, from a QR factorization, `R` is upper-triangular and `Q`
+is orthogonal:
+
+```@example sparse
+import AppleAccelerate: AAFactorization, factor!, subfactor,
+                        SparseFactorizationQR, SparseSubfactorR, SparseSubfactorQ
+
+A = sprandn(40, 15, 0.3)
+f = AAFactorization(A)
+factor!(f, SparseFactorizationQR)
+R = subfactor(f, SparseSubfactorR)   # 15×15 upper-triangular
+Q = subfactor(f, SparseSubfactorQ)   # 40×15 orthogonal
+y = randn(15)
+@assert R * (R \ y) ≈ y
+nothing # hide
+```
+
+## Partial LU update
+
+For a **pivotless** LU factorization, [`update_partial_lu!`](@ref AppleAccelerate.update_partial_lu!)
+applies a partial refactorization when only a few entries change — recomputing only
+the L/U values a from-scratch LU would alter (requires macOS 15.5+). Distinct from
+`refactor!`, which recomputes the entire numeric factorization.
+
+## Introspection
+
+[`numeric_options`](@ref AppleAccelerate.numeric_options) and
+[`symbolic_options`](@ref AppleAccelerate.symbolic_options) read back the options
+libSparse recorded for a completed factorization.
+
+### Iterative / advanced solve functions
+
+| Function | Description |
+|----------|-------------|
+| `solve(A::AASparseMatrix, b; method, …)` | Iterative CG/GMRES/LSMR solve |
+| [`AAPreconditioner`](@ref AppleAccelerate.AAPreconditioner) | Diagonal / diagonal-scaling preconditioner |
+| [`solve_workspace_size`](@ref AppleAccelerate.solve_workspace_size) | Bytes needed for a preallocated-workspace solve |
+| `solve!(f, b, x, ws)` | Solve reusing a caller-owned workspace buffer |
+| [`subfactor`](@ref AppleAccelerate.subfactor) | Extract a Q/R/L/D/P sub-factor to apply with `*` / `\` |
+| [`update_partial_lu!`](@ref AppleAccelerate.update_partial_lu!) | Partial LU refactorization for a low-rank change |
+| [`numeric_options`](@ref AppleAccelerate.numeric_options) | Read back numeric-factor options |
+| [`symbolic_options`](@ref AppleAccelerate.symbolic_options) | Read back symbolic-factor options |
+
 ```@docs
 AppleAccelerate.AASparseMatrix
 AppleAccelerate.AAFactorization
@@ -185,4 +287,10 @@ AppleAccelerate.factor!
 AppleAccelerate.solve
 AppleAccelerate.solve!
 AppleAccelerate.refactor!
+AppleAccelerate.AAPreconditioner
+AppleAccelerate.solve_workspace_size
+AppleAccelerate.subfactor
+AppleAccelerate.update_partial_lu!
+AppleAccelerate.numeric_options
+AppleAccelerate.symbolic_options
 ```
