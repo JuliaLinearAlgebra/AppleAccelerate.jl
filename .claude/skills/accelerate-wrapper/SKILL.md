@@ -201,6 +201,20 @@ the `@docs` block, and ideally a runnable `@example`. New capability area → ne
 rely on (`I = [...]` shadows `LinearAlgebra.I`). Keep README headline claims in sync
 with `benchmarks.md`.
 
+**ALWAYS build the docs locally before pushing — `julia --project=docs docs/make.jl` — and
+confirm it exits 0.** The Documentation build is a **separate CI gate from `Pkg.test()`**:
+a green test suite says nothing about the docs, and a docs failure blocks the PR. The most
+common failure (it has bitten multiple PRs) is Documenter's `cross_references` check:
+**every name you `@ref` must also appear in an `@docs` block**, or the build aborts with
+`Cannot resolve @ref for ...`. That includes refs in a page's cross-ref *table*, refs inside
+a **docstring's own body** (e.g. a "See also [`foo!`](@ref)" line — `foo!` must be `@docs`'d
+too), and functions that share a docstring via `@doc (@doc x) y` (both `x` and `y` need
+their own `@docs` entry to be linkable). `@example`/`jldoctest` blocks are also *executed*
+during the build, so a runtime error or a wrong expected output fails it. When you add a new
+page, wire it into `docs/make.jl` AND make sure every `@ref` it introduces resolves — a
+subagent that "didn't build docs" is the usual cause of a red Documentation check on an
+otherwise-green PR.
+
 ## Phase 6 — Benchmark
 
 Add cases to the matching `test/bench/bench_*.jl` (or a new one, registered in
