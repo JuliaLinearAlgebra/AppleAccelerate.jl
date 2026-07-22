@@ -13,11 +13,13 @@
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
 
-- **Vectorized array operations** via vecLib (`vv*`) and vDSP (`vDSP_*`) — element-wise math, reductions, compound arithmetic, clipping, interpolation, integration, and more — **2–19× faster** than Base Julia for transcendental functions (`sin`, `cos`, `exp`, `log`)
-- **Dense linear algebra** via BLAS/LAPACK forwarding through [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — all standard `LinearAlgebra` operations (`lu`, `qr`, `svd`, `cholesky`, `eigen`, etc.) are accelerated transparently — **6–13× faster** GEMM than OpenBLAS on Apple Silicon when both are single-threaded; OpenBLAS narrows the gap with multiple threads, since Accelerate offloads GEMM to the SME/AMX matrix co-processor whose throughput is largely thread-independent while OpenBLAS scales across CPU cores — plus **2–4× faster** factorizations and solves
-- **Sparse linear algebra** via `libSparse` — sparse matrix operations and direct solvers (QR, Cholesky, LDLT) — **faster for Float32 QR** and **Cholesky at N=5000** vs SuiteSparse
-- **Signal Processing** — 1D/2D complex and real FFT (including batched and mixed-radix lengths), DCT, convolution, cross-correlation, biquad filtering, window functions — with pre-planned transforms FFTW is generally faster (roughly 1.5–14× across complex 1D, real, and 2D FFT), but for no-plan convenience calls AppleAccelerate's cached FFT setups make `fft(x)` **faster than FFTW at small sizes and competitive for Float32 throughout**; vDSP's FFT also avoids an FFTW dependency when Accelerate is already loaded
-- **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations (`:relu`, `:sigmoid`, `:tanh`, `:abs`, `:identity`)
+- **Vectorized array operations** via vDSP and vForce — element-wise math, reductions, compound arithmetic, clipping, interpolation — **2–19× faster** than Base Julia for transcendentals (`sin`, `cos`, `exp`, `log`)
+- **Dense linear algebra** — all of `LinearAlgebra` (`lu`, `qr`, `svd`, `cholesky`, `eigen`, …) accelerated transparently via [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — **6–13× faster** single-threaded GEMM than OpenBLAS on Apple Silicon (SME/AMX co-processor), plus **2–4× faster** factorizations and solves
+- **Sparse linear algebra** via `libSparse` — direct (Cholesky / LDLᵀ / LU / QR) and iterative (CG / GMRES / LSMR) solvers, real and complex
+- **Signal processing** — 1D/2D real & complex FFT (batched, mixed-radix), DCT, convolution, biquad filtering, window functions; cached setups make no-plan `fft(x)` competitive with FFTW and drop the FFTW dependency
+- **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations
+
+See the [benchmarks](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/benchmarks/) for full performance comparisons and methodology.
 
 ## Installation
 
