@@ -923,4 +923,207 @@ end
     @test Float64.(back4) ./ (n / 2) ≈ rf rtol = 1e-3
 end
 
+# ---------------------------------------------------------------------
+# Additional FFT/DFT variants (temp-buffer, in-place-real, batched, small
+# radix, fixed-size, interleaved DFT) and biquad live-state controls.
+# ---------------------------------------------------------------------
+
+@testset "temp-buffer FFT variants (zopt/zipt)" begin
+    @testset "$T" for T in (Float64, Float32)
+        rt = sqrt(eps(T)); CT = Complex{T}
+        # 1D
+        x = randn(CT, 128)
+        s = AppleAccelerate.plan_fft(128, T)
+        ws = AppleAccelerate.FFTWorkspace(x)
+        @test AppleAccelerate.fft(x, s, ws) ≈ FFTW.fft(x) rtol=rt
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(x, s, ws), s, ws) ≈ x rtol=rt
+        xc = copy(x); AppleAccelerate.fft!(xc, s, ws); @test xc ≈ FFTW.fft(x) rtol=rt
+        xc2 = copy(x); AppleAccelerate.bfft!(xc2, s, ws); @test xc2 ≈ FFTW.bfft(x) rtol=rt
+        xc3 = copy(x); AppleAccelerate.ifft!(AppleAccelerate.fft!(xc3, s, ws), s, ws)
+        @test xc3 ≈ x rtol=rt
+        # 2D (non-square)
+        A = randn(CT, 8, 32)
+        s2 = AppleAccelerate.plan_fft(32, T); ws2 = AppleAccelerate.FFTWorkspace(A)
+        @test AppleAccelerate.fft(A, s2, ws2) ≈ FFTW.fft(A) rtol=rt
+        Ac = copy(A); AppleAccelerate.fft!(Ac, s2, ws2); @test Ac ≈ FFTW.fft(A) rtol=rt
+        @test AppleAccelerate.ifft(AppleAccelerate.fft(A, s2, ws2), s2, ws2) ≈ A rtol=rt
+        # too-small workspace is rejected
+        @test_throws DimensionMismatch AppleAccelerate.fft(x, s, AppleAccelerate.FFTWorkspace{T}(4))
+    end
+end
+
+@testset "temp-buffer & in-place real FFT (zropt/zrip/zript)" begin
+    @testset "$T" for T in (Float64, Float32)
+        rt = sqrt(eps(T))
+        # 1D real, out-of-place + temp
+        x = randn(T, 128); s = AppleAccelerate.plan_rfft(x)
+        ws = AppleAccelerate.FFTWorkspace(x)
+        @test AppleAccelerate.rfft(x, s, ws) ≈ FFTW.rfft(x) rtol=rt
+        X = AppleAccelerate.rfft(x, s, ws)
+        @test AppleAccelerate.brfft(X, 128, s, ws) ≈ FFTW.brfft(X, 128) rtol=rt
+        @test AppleAccelerate.irfft(X, 128, s, ws) ≈ x rtol=rt
+        # 1D real, in-place (zrip / zript). rfft! consumes its input.
+        @test AppleAccelerate.rfft!(copy(x), s) ≈ FFTW.rfft(x) rtol=rt
+        @test AppleAccelerate.rfft!(copy(x), s, ws) ≈ FFTW.rfft(x) rtol=rt
+        @test AppleAccelerate.rfft!(copy(x)) ≈ FFTW.rfft(x) rtol=rt
+        # 2D real (non-square)
+        A = randn(T, 8, 16); s2 = AppleAccelerate.plan_rfft(A)
+        ws2 = AppleAccelerate.FFTWorkspace(A)
+        @test AppleAccelerate.rfft(A, s2, ws2) ≈ FFTW.rfft(A) rtol=rt
+        RA = AppleAccelerate.rfft(A, s2, ws2)
+        @test AppleAccelerate.irfft(RA, 8, s2, ws2) ≈ A rtol=rt
+        @test AppleAccelerate.brfft(RA, 8, s2, ws2) ≈ FFTW.brfft(RA, 8) rtol=rt
+        @test AppleAccelerate.rfft!(copy(A), s2, ws2) ≈ FFTW.rfft(A) rtol=rt
+    end
+end
+
+@testset "batched FFT extra variants (fftm zip/zipt/zopt/zr*)" begin
+    @testset "$T" for T in (Float64, Float32)
+        rt = sqrt(eps(T)); CT = Complex{T}
+        for sz in ((16, 5), (8, 64)), dims in (1, 2)
+            n = size(zeros(sz...), dims); ispow2(n) || continue
+            A = randn(CT, sz...)
+            s = AppleAccelerate.plan_fft(n, T); ws = AppleAccelerate.FFTWorkspace(A)
+            # in-place (zip), temp in-place (zipt), temp out-of-place (zopt)
+            Ac = copy(A); AppleAccelerate.fft!(Ac, dims, s); @test Ac ≈ FFTW.fft(A, dims) rtol=rt
+            Ac = copy(A); AppleAccelerate.fft!(Ac, dims, s, ws); @test Ac ≈ FFTW.fft(A, dims) rtol=rt
+            Ac = copy(A); AppleAccelerate.fft!(Ac, dims); @test Ac ≈ FFTW.fft(A, dims) rtol=rt
+            @test AppleAccelerate.fft(A, dims, s, ws) ≈ FFTW.fft(A, dims) rtol=rt
+            @test AppleAccelerate.ifft(AppleAccelerate.fft(A, dims, s, ws), dims, s, ws) ≈ A rtol=rt
+            Ac = copy(A); AppleAccelerate.ifft!(AppleAccelerate.fft!(Ac, dims), dims); @test Ac ≈ A rtol=rt
+        end
+        # batched real (zrop/zropt/zrip/zript) along both dims
+        for sz in ((16, 5), (8, 7)), dims in (1, 2)
+            n = size(zeros(sz...), dims); ispow2(n) || continue
+            A = randn(T, sz...)
+            s = AppleAccelerate.plan_rfft(A); ws = AppleAccelerate.FFTWorkspace{T}(length(A))
+            R = AppleAccelerate.rfft(A, dims)
+            @test R ≈ FFTW.rfft(A, dims) rtol=rt
+            @test AppleAccelerate.rfft(A, dims, s, ws) ≈ FFTW.rfft(A, dims) rtol=rt
+            @test AppleAccelerate.rfft!(copy(A), dims, s) ≈ FFTW.rfft(A, dims) rtol=rt
+            @test AppleAccelerate.rfft!(copy(A), dims, s, ws) ≈ FFTW.rfft(A, dims) rtol=rt
+            @test AppleAccelerate.irfft(R, n, dims) ≈ A rtol=rt
+            @test AppleAccelerate.irfft(R, n, dims, s, ws) ≈ A rtol=rt
+            @test AppleAccelerate.brfft(R, n, dims) ≈ FFTW.brfft(R, n, dims) rtol=rt
+        end
+        @test_throws ArgumentError AppleAccelerate.fft!(randn(CT, 16, 8), 3, AppleAccelerate.plan_fft(16, T))
+    end
+end
+
+@testset "small-radix FFT (fft3/fft5)" begin
+    @testset "$T" for T in (Float64, Float32)
+        rt = sqrt(eps(T)); CT = Complex{T}
+        for n in (3, 6, 12, 24, 48)
+            x = randn(CT, n)
+            @test AppleAccelerate.fftradix3(x) ≈ FFTW.fft(x) rtol=rt
+            @test AppleAccelerate.bfftradix3(AppleAccelerate.fftradix3(x)) ≈ n .* x rtol=rt
+        end
+        for n in (5, 10, 20, 40)
+            x = randn(CT, n)
+            @test AppleAccelerate.fftradix5(x) ≈ FFTW.fft(x) rtol=rt
+            @test AppleAccelerate.bfftradix5(AppleAccelerate.fftradix5(x)) ≈ n .* x rtol=rt
+        end
+        # radix-3 handles length 12 and radix-5 handles length 20, which the
+        # mixed-radix DFT path cannot (verified above); guards reject bad lengths.
+        @test_throws ArgumentError AppleAccelerate.fftradix3(randn(CT, 7))
+        @test_throws ArgumentError AppleAccelerate.fftradix5(randn(CT, 7))
+    end
+end
+
+@testset "fixed-size FFT16/FFT32 (Float32)" begin
+    rt = sqrt(eps(Float32))
+    for (N, f, bf) in ((16, AppleAccelerate.fft16, AppleAccelerate.bfft16),
+                       (32, AppleAccelerate.fft32, AppleAccelerate.bfft32))
+        x = randn(ComplexF32, N)
+        @test f(x) ≈ FFTW.fft(x) rtol=rt
+        @test bf(f(x)) ≈ N .* x rtol=rt
+    end
+    @test_throws DimensionMismatch AppleAccelerate.fft16(randn(ComplexF32, 8))
+    @test_throws DimensionMismatch AppleAccelerate.fft32(randn(ComplexF32, 16))
+end
+
+@testset "interleaved DFT (vDSP_DFT_Interleaved)" begin
+    @testset "$T" for T in (Float64, Float32)
+        rt = sqrt(eps(T)); CT = Complex{T}
+        for n in (16, 24, 32, 48)
+            x = randn(CT, n)
+            s = AppleAccelerate.plan_dft_interleaved(n, AppleAccelerate.DFT_FORWARD, T)
+            @test AppleAccelerate.dft_interleaved(x, s) ≈ FFTW.fft(x) rtol=rt
+            @test AppleAccelerate.dft_interleaved(x) ≈ FFTW.fft(x) rtol=rt
+            @test AppleAccelerate.idft_interleaved(AppleAccelerate.dft_interleaved(x)) ≈ x rtol=rt
+        end
+        @test_throws ArgumentError AppleAccelerate.plan_dft_interleaved(5, AppleAccelerate.DFT_FORWARD, T)
+    end
+end
+
+@testset "biquad single-channel coefficient setter" begin
+    # Only the single-precision setup supports live coefficient updates.
+    bq = AppleAccelerate.biquadcreate([1.0, 0, 0, 0, 0], 1, Float32)  # passthrough
+    x = Float32.(1:8)
+    @test AppleAccelerate.biquad(x, zeros(Float32, 4), 8, bq) ≈ x
+    AppleAccelerate.biquad_setcoefficients!(bq, Float32[2, 0, 0, 0, 0])   # Single setter
+    @test AppleAccelerate.biquad(x, zeros(Float32, 4), 8, bq) ≈ 2 .* x
+    AppleAccelerate.biquad_setcoefficients!(bq, [3.0, 0, 0, 0, 0])        # Double setter
+    @test AppleAccelerate.biquad(x, zeros(Float32, 4), 8, bq) ≈ 3 .* x
+    # Float64 setups have no coefficient setter in vDSP.
+    @test_throws ArgumentError AppleAccelerate.biquad_setcoefficients!(
+        AppleAccelerate.biquadcreate([1.0, 0, 0, 0, 0], 1, Float64), [1.0, 0, 0, 0, 0])
+    @test_throws DimensionMismatch AppleAccelerate.biquad_setcoefficients!(bq, Float32[1, 0, 0], 0, 1)
+end
+
+@testset "biquadm live-state controls" begin
+    @testset "$T" for T in (Float32, Float64)
+        x = T.(1:8)
+        # SetCoefficients: retune one channel live (2 channels, 1 section).
+        setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, T)
+        Y = AppleAccelerate.biquadm([copy(x), copy(x)], 8, setup)
+        @test Y[1] ≈ x && Y[2] ≈ x
+        AppleAccelerate.biquadm_setcoefficients!(setup, T[5,0,0,0,0], 0, 1, 1, 1)  # channel 1 -> 5x
+        Y2 = AppleAccelerate.biquadm([copy(x), copy(x)], 8, setup)
+        @test Y2[1] ≈ x
+        @test Y2[2] ≈ 5 .* x
+
+        # ResetState: a filter with feedback carries state across calls; reset clears it.
+        cr = [1.0, 0, 0, -0.5, 0]     # b0=1, a1=-0.5 (has memory)
+        sr = AppleAccelerate.biquadm_create(cr, 1, 1, T)
+        imp = T[1, 0, 0, 0, 0, 0, 0, 0]
+        ya = AppleAccelerate.biquadm([copy(imp)], 8, sr)
+        yb = AppleAccelerate.biquadm([copy(imp)], 8, sr)   # continues from leftover state
+        AppleAccelerate.biquadm_resetstate!(sr)
+        yc = AppleAccelerate.biquadm([copy(imp)], 8, sr)   # fresh again
+        @test ya[1] ≈ yc[1]
+        @test !(yb[1] ≈ ya[1])
+
+        # CopyState: transplant state so the next block matches.
+        s1 = AppleAccelerate.biquadm_create(cr, 1, 1, T)
+        s2 = AppleAccelerate.biquadm_create(cr, 1, 1, T)
+        AppleAccelerate.biquadm([copy(imp)], 8, s1)        # s1 accumulates state
+        AppleAccelerate.biquadm_copystate!(s2, s1)
+        nxt = T[1, 0, 0, 0, 0, 0, 0, 0]
+        @test AppleAccelerate.biquadm([copy(nxt)], 8, s1)[1] ≈
+              AppleAccelerate.biquadm([copy(nxt)], 8, s2)[1]
+
+        # SetActiveFilters: disabling a section bypasses it (2 sections, each ×2).
+        sa = AppleAccelerate.biquadm_create([2.0,0,0,0,0, 2.0,0,0,0,0], 1, 2, T)
+        @test AppleAccelerate.biquadm([copy(x)], 8, sa)[1] ≈ 4 .* x
+        AppleAccelerate.biquadm_setactivefilters!(sa, Bool[true, false])
+        AppleAccelerate.biquadm_resetstate!(sa)
+        @test AppleAccelerate.biquadm([copy(x)], 8, sa)[1] ≈ 2 .* x
+
+        # SetTargets: drives coefficients toward a target; steady state reaches it.
+        st = AppleAccelerate.biquadm_create([1.0,0,0,0,0], 1, 1, T)
+        AppleAccelerate.biquadm_settargets!(st, T[4,0,0,0,0], 0.5, 0.0, 0, 0, 1, 1)
+        yt = AppleAccelerate.biquadm([ones(T, 200)], 200, st)
+        @test yt[1][end] ≈ 4 rtol=sqrt(eps(T))
+
+        # Guards.
+        @test_throws DimensionMismatch AppleAccelerate.biquadm_setcoefficients!(setup, T[1,0,0], 0, 0, 1, 1)
+        @test_throws ArgumentError AppleAccelerate.biquadm_setcoefficients!(setup, T[1,0,0,0,0], 0, 5, 1, 1)
+        @test_throws DimensionMismatch AppleAccelerate.biquadm_setactivefilters!(sa, Bool[true])  # too short
+        @test_throws ArgumentError AppleAccelerate.biquadm_copystate!(
+            AppleAccelerate.biquadm_create(cr, 1, 1, T),
+            AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, T))
+    end
+end
+
 end # @testset "Signal Processing"

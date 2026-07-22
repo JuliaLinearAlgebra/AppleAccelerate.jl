@@ -72,6 +72,19 @@ AppleAccelerate.ifft!(y)      # inverse, modifies y in-place
 nothing # hide
 ```
 
+### Temp-buffer variants
+
+For repeated transforms of the same size, an [`FFTWorkspace`](@ref AppleAccelerate.FFTWorkspace) supplies vDSP with a reusable scratch buffer (the `*t` vDSP variants), avoiding its internal per-call allocation. Pass it as the last argument to `fft`/`fft!`/`bfft`/`ifft` (1D, 2D, or batched) and to the real transforms. Results are identical to the non-workspace calls.
+
+```@example fft
+x = randn(ComplexF64, 1024)
+setup = AppleAccelerate.plan_fft(x)
+ws = AppleAccelerate.FFTWorkspace(x)
+X = AppleAccelerate.fft(x, setup, ws)
+@assert AppleAccelerate.ifft(X, setup, ws) ≈ x
+nothing # hide
+```
+
 ```@docs
 AppleAccelerate.plan_fft
 AppleAccelerate.fft
@@ -80,6 +93,7 @@ AppleAccelerate.bfft
 AppleAccelerate.fft!
 AppleAccelerate.ifft!
 AppleAccelerate.bfft!
+AppleAccelerate.FFTWorkspace
 AppleAccelerate.is_supported_fft_length
 ```
 
@@ -107,11 +121,42 @@ x2_recovered = AppleAccelerate.irfft(X2, 16) # back to real, 16×32
 nothing # hide
 ```
 
+Batched real FFT (`rfft(x, dims)` / `irfft(X, n, dims)`) transforms each column (`dims = 1`) or row (`dims = 2`) of a real matrix independently, like FFTW's `rfft(x, dims)`. In-place real variants (`rfft!`) reuse the input buffer as vDSP's scratch (overwriting it), and workspace variants accept an [`FFTWorkspace`](@ref AppleAccelerate.FFTWorkspace).
+
 ```@docs
 AppleAccelerate.plan_rfft
 AppleAccelerate.rfft
+AppleAccelerate.rfft!
 AppleAccelerate.irfft
 AppleAccelerate.brfft
+```
+
+## Small-radix, fixed-size, and interleaved transforms
+
+Beyond the general FFT/DFT paths, vDSP provides specialized complex-transform kernels:
+
+- **Radix-3 / radix-5 FFTs** ([`fftradix3`](@ref AppleAccelerate.fftradix3), [`fftradix5`](@ref AppleAccelerate.fftradix5), and their unnormalized inverses `bfftradix3`/`bfftradix5`) handle lengths `3·2^k` and `5·2^k` — including `12`, `20`, `24`, `40`, which the mixed-radix `fft`/`dft` path cannot.
+- **Fixed-size 16-/32-point FFTs** ([`fft16`](@ref AppleAccelerate.fft16), [`fft32`](@ref AppleAccelerate.fft32), inverses `bfft16`/`bfft32`) are dedicated `Float32` kernels that need no setup.
+- **Interleaved-complex DFT** ([`dft_interleaved`](@ref AppleAccelerate.dft_interleaved) / [`idft_interleaved`](@ref AppleAccelerate.idft_interleaved), planned with [`plan_dft_interleaved`](@ref AppleAccelerate.plan_dft_interleaved)) operates directly on `Vector{Complex}` buffers rather than the split-complex layout of [`dft`](@ref AppleAccelerate.dft).
+
+```@example fft
+x = randn(ComplexF64, 12)           # 12 = 3·2^2, not an fft() length
+@assert AppleAccelerate.bfftradix3(AppleAccelerate.fftradix3(x)) ≈ 12 .* x
+
+y = randn(ComplexF32, 16)
+@assert AppleAccelerate.bfft16(AppleAccelerate.fft16(y)) ≈ 16 .* y
+
+z = randn(ComplexF64, 24)
+@assert AppleAccelerate.idft_interleaved(AppleAccelerate.dft_interleaved(z)) ≈ z
+nothing # hide
+```
+
+```@docs
+AppleAccelerate.fftradix3
+AppleAccelerate.fft16
+AppleAccelerate.plan_dft_interleaved
+AppleAccelerate.dft_interleaved
+AppleAccelerate.idft_interleaved
 ```
 
 ## DFT (Complex Discrete Fourier Transform)

@@ -62,9 +62,15 @@ result32 = AppleAccelerate.biquad(X32, delays32, length(X32), bq32)
 nothing # hide
 ```
 
+A single-precision setup's coefficients can be updated in place with
+[`biquad_setcoefficients!`](@ref AppleAccelerate.biquad_setcoefficients!), avoiding
+a full recreate when re-tuning a filter (vDSP provides this setter only for the
+`Float32` setup).
+
 ```@docs
 AppleAccelerate.biquadcreate
 AppleAccelerate.biquad
+AppleAccelerate.biquad_setcoefficients!
 AppleAccelerate.biquaddestroy
 ```
 
@@ -88,9 +94,39 @@ outputs64 = AppleAccelerate.biquadm(inputs64, 64, setup64)
 nothing # hide
 ```
 
+### Live-state controls
+
+A `BiquadMulti` setup keeps internal per-channel/section state and coefficients
+that can be manipulated between processing calls — for gain automation,
+click-free parameter changes, resetting or transplanting filter memory, and
+bypassing sections:
+
+| Function | Effect |
+|----------|--------|
+| [`biquadm_setcoefficients!`](@ref AppleAccelerate.biquadm_setcoefficients!) | Immediately set a block of `(section, channel)` coefficients |
+| [`biquadm_settargets!`](@ref AppleAccelerate.biquadm_settargets!) | Set target coefficients the filter interpolates toward (smooth changes) |
+| [`biquadm_resetstate!`](@ref AppleAccelerate.biquadm_resetstate!) | Zero all internal delays |
+| [`biquadm_copystate!`](@ref AppleAccelerate.biquadm_copystate!) | Copy internal state from one setup to another |
+| [`biquadm_setactivefilters!`](@ref AppleAccelerate.biquadm_setactivefilters!) | Enable/disable (bypass) individual sections |
+
+```@example filtering
+setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float64)
+# Retune channel 1 (0-based) to a gain of 5 without recreating the setup:
+AppleAccelerate.biquadm_setcoefficients!(setup, [5.0,0,0,0,0], 0, 1, 1, 1)
+y = AppleAccelerate.biquadm([ones(8), ones(8)], 8, setup)
+@assert y[2] ≈ fill(5.0, 8)
+AppleAccelerate.biquadm_resetstate!(setup)  # clear filter memory
+nothing # hide
+```
+
 ```@docs
 AppleAccelerate.biquadm_create
 AppleAccelerate.biquadm
+AppleAccelerate.biquadm_setcoefficients!
+AppleAccelerate.biquadm_settargets!
+AppleAccelerate.biquadm_resetstate!
+AppleAccelerate.biquadm_copystate!
+AppleAccelerate.biquadm_setactivefilters!
 ```
 
 ## Recursive Filters
