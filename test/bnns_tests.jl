@@ -298,27 +298,8 @@ end
     @test AA.bnns_compile_options_get_output_fd(o2) == 3
 end
 
-@testset "BNNS layer filters" begin
-    W = Float32[1 2 3; 4 5 6]; bias = Float32[10, 20]
-    f = AA.bnns_fully_connected(W, bias)
-    x = Float32[1, 2, 3]; y = zeros(Float32, 2)
-    @test AA.bnns_filter_apply!(f, y, x) == W * x .+ bias
-
-    X = Float32[1 0; 2 0; 3 1]; Yb = zeros(Float32, 2, 2)
-    @test AA.bnns_filter_apply_batch!(f, Yb, X) == W * X .+ bias
-
-    # no bias, relu
-    fr = AA.bnns_fully_connected(Float32[1 -1], Float32[0]; activation = :relu)
-    yr = zeros(Float32, 1)
-    AA.bnns_filter_apply!(fr, yr, Float32[1, 5])
-    @test yr[1] == 0.0f0                       # relu(1 - 5) = 0
-
-    fn = AA.bnns_fully_connected(W)
-    yn = zeros(Float32, 2); AA.bnns_filter_apply!(fn, yn, x)
-    @test yn == W * x
-    @test_throws DimensionMismatch AA.bnns_fully_connected(W, Float32[1, 2, 3])
-
-    # direct activation batch
+@testset "BNNS activation batch" begin
+    # direct activation batch (BNNSDirectApplyActivationBatch — no filter handle)
     ob = zeros(Float32, 4)
     AA.bnns_activation_batch!(:relu, ob, Float32[-1, 2, -3, 4])
     @test ob == Float32[0, 2, 0, 4]

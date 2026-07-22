@@ -192,29 +192,6 @@ The compile-options accessors
 introspection helpers (`bnns_graph_input_count`, `bnns_graph_argument_names`,
 `bnns_graph_argument_intents`, …) round out the family.
 
-## Layer filters
-
-The classic (deprecated) create → apply → destroy filter API. The
-fully-connected layer is numerically verified; the remaining `bnns_create_layer_*`
-constructors are thin passthroughs over the raw parameter structs.
-
-```@docs
-AppleAccelerate.BNNSFilter
-AppleAccelerate.bnns_fully_connected
-AppleAccelerate.bnns_filter_apply!
-AppleAccelerate.bnns_filter_apply_batch!
-AppleAccelerate.bnns_filter_apply_two_input!
-```
-
-```@example bnns
-W = Float32[1 2 3; 4 5 6]; b = Float32[10, 20]
-fc = AppleAccelerate.bnns_fully_connected(W, b)
-y = zeros(Float32, 2)
-AppleAccelerate.bnns_filter_apply!(fc, y, Float32[1, 2, 3])
-@assert y == W * Float32[1, 2, 3] .+ b
-nothing # hide
-```
-
 ## Optimizer
 
 ```@docs
