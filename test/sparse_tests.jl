@@ -969,4 +969,257 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         @test_throws ArgumentError AASparseMatrix(Int[1, 3], Int[1, 1], T[1, 2], 2, 2)  # row OOR
         @test_throws ArgumentError AASparseMatrix(Int[1, 1], Int[1, 3], T[1, 2], 2, 2)  # col OOR
     end
+
+    @testset "iterative solvers" begin
+        @testset "CG on SPD $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? 1e-2 : 1e-6
+            n = 50
+            M = sprandn(T, n, n, 0.1)
+            A = M * M' + n * I                       # symmetric positive-definite
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            Aaa = AppleAccelerate.AASparseMatrix(Acsc)
+            x = AppleAccelerate.solve(Aaa, b; method = :cg,
+                                      rtol = T == Float32 ? 1.0f-6 : 1e-10)
+            @test isapprox(x, xref; rtol = rtol)
+            # Also accepts a SparseMatrixCSC directly.
+            x2 = AppleAccelerate.solve(Acsc, b; method = :cg,
+                                       rtol = T == Float32 ? 1.0f-6 : 1e-10)
+            @test isapprox(x2, xref; rtol = rtol)
+        end
+
+        @testset "GMRES on non-symmetric $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? 5e-2 : 1e-5
+            n = 40
+            A = sprandn(T, n, n, 0.1) + n * I       # square, non-symmetric
+            @test A != A'                            # discriminating: not symmetric
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            Aaa = AppleAccelerate.AASparseMatrix(Acsc)
+            x = AppleAccelerate.solve(Aaa, b; method = :gmres, maxiter = 2000,
+                                      rtol = T == Float32 ? 1.0f-7 : 1e-11)
+            @test isapprox(x, xref; rtol = rtol)
+        end
+
+        @testset "LSMR on rectangular least-squares $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? 5e-2 : 1e-4
+            m, n = 60, 30
+            A = sprandn(T, m, n, 0.25)
+            while rank(Matrix(A)) < n
+                A = sprandn(T, m, n, 0.25)
+            end
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            b = randn(T, m)
+            xref = Matrix(Acsc) \ b                  # dense least-squares
+            Aaa = AppleAccelerate.AASparseMatrix(Acsc)
+            x = AppleAccelerate.solve(Aaa, b; method = :lsmr, maxiter = 4000,
+                                      rtol = T == Float32 ? 1.0f-7 : 1e-11)
+            @test isapprox(x, xref; rtol = rtol)
+        end
+
+        @testset "multiple right-hand sides $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? 1e-2 : 1e-6
+            n = 30
+            M = sprandn(T, n, n, 0.15)
+            A = M * M' + n * I
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            B = randn(T, n, 3)
+            Xref = Matrix(Acsc) \ B
+            Aaa = AppleAccelerate.AASparseMatrix(Acsc)
+            X = AppleAccelerate.solve(Aaa, B; method = :cg,
+                                      rtol = T == Float32 ? 1.0f-6 : 1e-10)
+            @test size(X) == (n, 3)
+            @test isapprox(X, Xref; rtol = rtol)
+        end
+
+        @testset "guards" begin
+            n = 10
+            A = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(sprandn(n, n, 0.3) + n * I))
+            @test_throws DimensionMismatch AppleAccelerate.solve(A, rand(n + 1); method = :cg)
+            @test_throws ArgumentError AppleAccelerate.solve(A, rand(n); method = :bogus)
+        end
+    end
+
+    @testset "preconditioners" begin
+        @testset "diagonal preconditioner converges $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? 1e-2 : 1e-6
+            n = 60
+            # Poorly-scaled SPD system where Jacobi preconditioning clearly helps.
+            M = sprandn(T, n, n, 0.1)
+            D = Diagonal(T.(10 .^ range(0, 4; length = n)))
+            A = D * (M * M' + n * I) * D
+            A = (A + A') / 2
+            Acsc = SparseMatrixCSC{T,Int64}(A)
+            b = randn(T, n)
+            xref = Matrix(Acsc) \ b
+            Aaa = AppleAccelerate.AASparseMatrix(Acsc)
+            # Symbol form.
+            xp = AppleAccelerate.solve(Aaa, b; method = :cg, preconditioner = :diagonal,
+                                       rtol = T == Float32 ? 1.0f-6 : 1e-10, maxiter = 5000)
+            @test isapprox(xp, xref; rtol = rtol)
+            # Opaque-handle form.
+            P = AppleAccelerate.AAPreconditioner(Aaa; kind = :diagonal)
+            xp2 = AppleAccelerate.solve(Aaa, b; method = :cg, preconditioner = P,
+                                        rtol = T == Float32 ? 1.0f-6 : 1e-10, maxiter = 5000)
+            @test isapprox(xp2, xref; rtol = rtol)
+            Ps = AppleAccelerate.AAPreconditioner(Aaa; kind = :diagscaling)
+            xp3 = AppleAccelerate.solve(Aaa, b; method = :cg, preconditioner = Ps,
+                                        rtol = T == Float32 ? 1.0f-6 : 1e-10, maxiter = 5000)
+            @test isapprox(xp3, xref; rtol = rtol)
+        end
+
+        @testset "guards" begin
+            A = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(sprandn(8, 8, 0.4) + 8I))
+            @test_throws ArgumentError AppleAccelerate.AAPreconditioner(A; kind = :bogus)
+        end
+    end
+
+    @testset "preallocated workspace solve" begin
+        @testset "out-of-place $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? sqrt(eps(Float32)) : 1e-9
+            n = 25
+            M = sprandn(T, n, n, 0.3) + n * I
+            Mcsc = SparseMatrixCSC{T,Int64}(M)
+            f = AppleAccelerate.AAFactorization(Mcsc)
+            AppleAccelerate.factor!(f)
+            b = randn(T, n)
+            xref = Matrix(Mcsc) \ b
+            ws = Vector{UInt8}(undef, AppleAccelerate.solve_workspace_size(f, 1))
+            x = similar(b)
+            AppleAccelerate.solve!(f, b, x, ws)
+            @test isapprox(x, xref; rtol = rtol)
+            # Reuse the same workspace + factorization for another RHS.
+            b2 = randn(T, n); x2 = similar(b2)
+            AppleAccelerate.solve!(f, b2, x2, ws)
+            @test isapprox(x2, Matrix(Mcsc) \ b2; rtol = rtol)
+        end
+
+        @testset "in-place and multiple RHS $T" for T in (Float32, Float64)
+            rtol = T == Float32 ? sqrt(eps(Float32)) : 1e-9
+            n = 20
+            M = sprandn(T, n, n, 0.3) + n * I
+            Mcsc = SparseMatrixCSC{T,Int64}(M)
+            f = AppleAccelerate.AAFactorization(Mcsc)
+            AppleAccelerate.factor!(f)
+            B = randn(T, n, 4)
+            Xref = Matrix(Mcsc) \ B
+            ws = Vector{UInt8}(undef, AppleAccelerate.solve_workspace_size(f, 4))
+            xb = copy(B)
+            AppleAccelerate.solve!(f, xb, ws)       # in-place
+            @test isapprox(xb, Xref; rtol = rtol)
+        end
+
+        @testset "guards" begin
+            n = 12
+            f = AppleAccelerate.AAFactorization(SparseMatrixCSC{Float64,Int64}(sprandn(n, n, 0.3) + n * I))
+            AppleAccelerate.factor!(f)
+            small = Vector{UInt8}(undef, 0)
+            @test_throws ArgumentError AppleAccelerate.solve!(f, rand(n), rand(n), small)
+        end
+    end
+
+    @testset "subfactor extraction and application" begin
+        @testset "R from QR: R*(R\\y) == y $T" for T in (Float32, Float64)
+            tol = T == Float32 ? 1e-3 : 1e-8
+            m, n = 40, 18
+            A = sprandn(T, m, n, 0.3)
+            while rank(Matrix(A)) < n
+                A = sprandn(T, m, n, 0.3)
+            end
+            f = AppleAccelerate.AAFactorization(SparseMatrixCSC{T,Int64}(A))
+            AppleAccelerate.factor!(f, AppleAccelerate.SparseFactorizationQR)
+            R = AppleAccelerate.subfactor(f, AppleAccelerate.SparseSubfactorR)
+            y = randn(T, n)
+            x = R \ y                                # triangular solve R x = y
+            @test isapprox(R * x, y; rtol = tol)     # multiply by R recovers y
+            # RᵀR == AᵀA (both give the normal-equations matrix).
+            e = zeros(T, n); e[3] = one(T)
+            col = R * (R \ e)                        # == e (sanity of round trip)
+            @test isapprox(col, e; rtol = tol)
+        end
+
+        @testset "Q from QR is orthogonal: Qᵀ(Qv) == v $T" for T in (Float32, Float64)
+            tol = T == Float32 ? 1e-3 : 1e-8
+            m, n = 45, 15
+            A = sprandn(T, m, n, 0.3)
+            while rank(Matrix(A)) < n
+                A = sprandn(T, m, n, 0.3)
+            end
+            f = AppleAccelerate.AAFactorization(SparseMatrixCSC{T,Int64}(A))
+            AppleAccelerate.factor!(f, AppleAccelerate.SparseFactorizationQR)
+            Q = AppleAccelerate.subfactor(f, AppleAccelerate.SparseSubfactorQ)
+            v = randn(T, n)
+            Qv = Q * v                               # length m
+            @test length(Qv) == m
+            @test isapprox(norm(Qv), norm(v); rtol = tol)   # Q preserves the norm
+            @test isapprox(Q \ Qv, v; rtol = tol)           # Qᵀ Q = I on the range
+        end
+
+        @testset "guards" begin
+            f = AppleAccelerate.AAFactorization(SparseMatrixCSC{Float64,Int64}(sprandn(8, 8, 0.4) + 8I))
+            AppleAccelerate.factor!(f, AppleAccelerate.SparseFactorizationQR)
+            R = AppleAccelerate.subfactor(f, AppleAccelerate.SparseSubfactorR)
+            m_, n_ = AppleAccelerate._subfactor_dimn(R._sub)
+            @test_throws DimensionMismatch (R \ rand(m_ + 1))
+        end
+    end
+
+    if something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5"
+        @testset "partial LU update (macOS 15.5+)" begin
+            @testset "matches full refactor $T" for T in (Float32, Float64)
+                tol = T == Float32 ? 1e-3 : 1e-8
+                n = 16
+                A = sprandn(T, n, n, 0.3) + n * I
+                Acsc = SparseMatrixCSC{T,Int64}(A)
+                f = AppleAccelerate.AAFactorization(Acsc)
+                AppleAccelerate.factor!(f, AppleAccelerate.SparseFactorizationLUUnpivoted)
+
+                # Modify a handful of EXISTING stored entries, recording positions.
+                Anew = copy(Acsc)
+                upd = Tuple{Int,Int}[]
+                for j in 1:n, k in Anew.colptr[j]:(Anew.colptr[j+1]-1)
+                    if length(upd) < 4
+                        Anew.nzval[k] += T(0.75)
+                        push!(upd, (Anew.rowval[k], j))
+                    end
+                end
+
+                AppleAccelerate.update_partial_lu!(f, upd, AppleAccelerate.AASparseMatrix(Anew))
+                b = randn(T, n)
+                x = AppleAccelerate.solve(f, b)
+                @test isapprox(x, Matrix(Anew) \ b; rtol = tol)
+            end
+
+            @testset "guards" begin
+                n = 10
+                # A QR (not LU) factorization must be rejected.
+                fqr = AppleAccelerate.AAFactorization(SparseMatrixCSC{Float64,Int64}(sprandn(n, n, 0.3) + n * I))
+                AppleAccelerate.factor!(fqr, AppleAccelerate.SparseFactorizationQR)
+                Anew = SparseMatrixCSC{Float64,Int64}(sprandn(n, n, 0.3) + n * I)
+                @test_throws ArgumentError AppleAccelerate.update_partial_lu!(
+                    fqr, [(1, 1)], AppleAccelerate.AASparseMatrix(Anew))
+            end
+        end
+    end
+
+    @testset "factorization introspection" begin
+        @testset "read options back $T" for T in (Float32, Float64)
+            A = SparseMatrixCSC{T,Int64}(sprandn(12, 12, 0.4) + 12I)
+            f = AppleAccelerate.AAFactorization(A)
+            AppleAccelerate.factor!(f)
+            no = AppleAccelerate.numeric_options(f)
+            so = AppleAccelerate.symbolic_options(f)
+            @test no isa AppleAccelerate.SparseNumericFactorOptions
+            @test so isa AppleAccelerate.SparseSymbolicFactorOptions
+            # Float uses the looser default pivot tolerance (0.1) vs double (0.01).
+            @test no.pivotTolerance > 0
+        end
+
+        @testset "guards" begin
+            f = AppleAccelerate.AAFactorization(SparseMatrixCSC{Float64,Int64}(sprandn(6, 6, 0.5) + 6I))
+            @test_throws ArgumentError AppleAccelerate.numeric_options(f)   # not yet factored
+        end
+    end
 end
