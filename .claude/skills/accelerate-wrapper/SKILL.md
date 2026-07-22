@@ -40,28 +40,55 @@ the web page — e.g. exact buffer-size formulas). Apple's web docs
 
 ```bash
 SDK=$(xcrun --show-sdk-path)
-VECLIB="$SDK/System/Library/Frameworks/Accelerate.framework/Frameworks/vecLib.framework/Headers"
+ACC="$SDK/System/Library/Frameworks/Accelerate.framework"
+ls "$ACC/Frameworks"                       # the subframeworks: today only vecLib + vImage
+VECLIB="$ACC/Frameworks/vecLib.framework/Headers"
 ls "$VECLIB" "$VECLIB/Sparse" "$VECLIB/BNNS" "$VECLIB/Quadrature"
 ```
 
 In-scope headers today (`gen/generate.jl`): `vDSP.h`, `vForce.h`, `vBasicOps.h`,
 `vfp.h`, `vectorOps.h`, `vBigNum.h`, `Sparse/Solve.h`, `BNNS/bnns.h`,
-`Quadrature/Quadrature.h`. **To bring an entirely new capability area in scope**
-(e.g. vImage, or another Accelerate subframework), add its umbrella header to the
+`Quadrature/Quadrature.h`. Accelerate has exactly **two** subframeworks on disk —
+`vecLib` (all of the above) and **`vImage`** (image processing: convolution,
+geometry/resize/warp, format conversion, histogram, morphology, alpha compositing,
+Core Video interop), which is entirely out of scope. **To bring a new capability area
+in scope** (vImage, or a future subframework), add its umbrella header to the
 `headers` list in `gen/generate.jl` and regenerate (Phase 2).
 
-**Coverage-gap scan** (candidates the idiomatic layer doesn't reference literally):
+**Coverage-gap scan.** Don't use a literal `comm -23` of raw-vs-referenced symbols —
+it over-reports catastrophically (wrappers build names dynamically, e.g.
+`Symbol(string("vDSP_", op, suff))` and from symbol lists like `(:vadd,:vsub,:vmul)`,
+so most *wrapped* functions look "missing"). Reconcile at the **base-operation** level:
+collect every identifier token from the idiomatic source, then for each raw function
+strip its family prefix and type suffix and test the stem against that token set.
 
 ```bash
 grep -oE 'function [A-Za-z_][A-Za-z0-9_]+' src/lib/LibAccelerate.jl | sed 's/^function //' | sort -u > /tmp/available.txt
-grep -rhoE '(LibAccelerate\.|:)[A-Za-z_][A-Za-z0-9_]+' src/*.jl | sed -E 's/^(LibAccelerate\.|:)//' | sort -u > /tmp/ref.txt
-comm -23 /tmp/available.txt /tmp/ref.txt
+cat src/*.jl > /tmp/idiom.txt          # idiomatic layer only — NOT src/lib/
+```
+```python
+import re
+avail  = [l.strip() for l in open('/tmp/available.txt') if l.strip()]
+tokens = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', open('/tmp/idiom.txt').read()))
+def stems(n):
+    c = {n}
+    for p in ('vDSP_','vv','BNNS','bnns_','Sparse','_Sparse','sparse_','quadrature_'):
+        if n.startswith(p): c.add(n[len(p):])
+    for x in list(c):
+        for s in ('D','f','_Float','_Double','_Complex_Float','_Complex_Double'):
+            if x.endswith(s): c.add(x[:-len(s)])
+    return {x for x in c if x}
+for n in avail:                        # survivors = genuine candidates to investigate
+    if not any(s in tokens for s in stems(n)): print(n)
 ```
 
-**Caveat — over-reports:** most wrappers build the symbol dynamically
-(`$(Symbol(string("vDSP_conv", suff)))`), so wrapped functions appear "missing".
-Treat the output as candidates; confirm by grepping the base name across `src/`
-(`grep -rn 'conv\|biquad' src/dsp.jl`) before calling something unwrapped.
+This scored vForce at 100% and cut false positives ~10× versus `comm`. Survivors are
+still only *candidates* — verify each by reading the module. Judge **opaque-handle
+families at the capability level, not the symbol level**: Sparse and BNNS call *public*
+mangled/umbrella symbols, so the private `_Sparse*` implementations and per-layer
+`BNNSFilterCreate*` names show as "unwrapped" even when the capability is fully covered
+(or, conversely, is exposed only through dead binding code). Confirm by grepping the
+base op and reading how the wrapper reaches it.
 
 **Decide whether it deserves an idiomatic wrapper.** Wrap what has a natural Julian
 surface and what users reach for — not everything that exists. Register-width SIMD
@@ -130,9 +157,10 @@ is full of "Harden FFI/GC safety", "Guard against OOB writes", "Add length guard
    Still `GC.@preserve` across the ccall when passing a view's `pointer` — it roots
    the parent buffer.
 5. **Respect layout.** vDSP matrices are **row-major**, Julia is **col-major** — many
-   matrix ops need operands and dims passed swapped (see `zmmul`/`zmma`). If an op
-   can't be expressed under the transpose without an extra copy, leave it unwrapped
-   rather than ship it wrong (`zmsm`).
+   matrix ops need operands and dims passed swapped (see `zmmul`, the confirmed-wrapped
+   template). An op that combines a multiply with a subtraction on the multiplicand
+   (`D=(A−B)*C`) doesn't compose with the transpose swap without materializing an
+   intermediate — do the extra copy or leave it unwrapped rather than ship it wrong.
 6. **Verify struct layout field-by-field** against the raw layer for any struct you
    construct (descriptors, options, factor structs) — order/type/alignment must match
    exactly, or it silently corrupts.
@@ -205,3 +233,7 @@ Durable, empirically-verified ABI facts (packing layouts, buffer-size formulas,
 operand-order findings, the wrapped-function inventory) live in the project
 auto-memory `MEMORY.md`. Consult it before re-deriving ABI details; add to it
 whenever you verify something non-obvious so the next capability build reuses it.
+**But verify its inventory claims against the source before trusting them** — the
+"what's wrapped" list drifts (a note claiming `zmma`/`zmms` were added was found to be
+false; grep of the module settled it). ABI/packing facts are durable; coverage claims
+are not. A grep of the actual module beats a stale memory line every time.
