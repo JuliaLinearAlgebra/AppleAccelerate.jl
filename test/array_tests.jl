@@ -1652,4 +1652,249 @@ for T in (Float32, Float64)
     end
 end
 
+# ============================================================
+# Batch 9: dotpr2, vrampmuladd, fixed-point (Q1.15/Q8.24), 24-bit packed
+# conversions, and misc integer vector ops
+# ============================================================
+for T in (Float32, Float64)
+    rtol = T == Float32 ? sqrt(eps(Float32)) : sqrt(eps(Float64))
+    @testset "dotpr2 / vrampmuladd::$T" begin
+        A0 = T[1.0, 2.0, 3.0, -4.0, 5.5]
+        A1 = T[-2.0, 0.5, 3.0, 4.0, -1.5]
+        B = T[0.5, -1.5, 2.0, 1.0, -0.5]
+
+        c0, c1 = AppleAccelerate.dotpr2(A0, A1, B)
+        @test c0 ≈ dot(A0, B) rtol=rtol
+        @test c1 ≈ dot(A1, B) rtol=rtol
+        @test_throws DimensionMismatch AppleAccelerate.dotpr2(A0, A1[1:end-1], B)
+
+        # strided inputs
+        A0s = @view A0[1:2:end]
+        A1s = @view A1[1:2:end]
+        Bs = @view B[1:2:end]
+        c0s, c1s = AppleAccelerate.dotpr2(A0s, A1s, Bs)
+        @test c0s ≈ dot(A0s, Bs) rtol=rtol
+        @test c1s ≈ dot(A1s, Bs) rtol=rtol
+
+        # vrampmuladd: result[i] = C[i] + X[i]*(start + i*step)
+        X = T[1.0, 1.0, 1.0, 1.0]
+        C = T[10.0, 20.0, 30.0, 40.0]
+        start, step = T(0.0), T(1.0)
+        ramp = [start + i*step for i in 0:3]
+        expected = C .+ X .* ramp
+        @test AppleAccelerate.vrampmuladd(X, start, step, C) ≈ expected rtol=rtol
+
+        result = copy(C)
+        AppleAccelerate.vrampmuladd!(result, X, start, step)
+        @test result ≈ expected rtol=rtol
+
+        # vrampmuladd2
+        I0 = T[1.0, 2.0, 3.0]
+        I1 = T[4.0, 5.0, 6.0]
+        C0 = T[100.0, 200.0, 300.0]
+        C1 = T[10.0, 20.0, 30.0]
+        ramp2 = [start + i*step for i in 0:2]
+        e0 = C0 .+ I0 .* ramp2
+        e1 = C1 .+ I1 .* ramp2
+        O0, O1 = AppleAccelerate.vrampmuladd2(I0, I1, start, step, C0, C1)
+        @test O0 ≈ e0 rtol=rtol
+        @test O1 ≈ e1 rtol=rtol
+        @test_throws DimensionMismatch AppleAccelerate.vrampmuladd2(I0, I1[1:end-1], start, step, C0, C1)
+    end
+end
+
+@testset "Fixed-point Q1.15 kernels" begin
+    scale = Int32(32768)
+    tofrac(v::Int16) = Float64(v) / scale
+    toq15(x::Float64) = Int16(round(Int, x * scale))
+
+    A = Int16[16384, -8192, 4096, 8192]
+    B = Int16[8192, 16384, -16384, -4096]
+    A1 = Int16[1000, 2000, -3000, 500]
+
+    # dotpr_s1_15 (allow ±1 ULP: vDSP's fixed-point accumulation rounds
+    # slightly differently than round(Float64 sum) in the last bit)
+    expected = sum(tofrac.(A) .* tofrac.(B)) * scale
+    @test abs(Int(AppleAccelerate.dotpr_s1_15(A, B)) - Int(round(Int16, expected))) <= 1
+    @test_throws DimensionMismatch AppleAccelerate.dotpr_s1_15(A, B[1:end-1])
+
+    # dotpr2_s1_15
+    c0, c1 = AppleAccelerate.dotpr2_s1_15(A, A1, B)
+    @test abs(Int(c0) - Int(round(Int16, sum(tofrac.(A) .* tofrac.(B)) * scale))) <= 1
+    @test abs(Int(c1) - Int(round(Int16, sum(tofrac.(A1) .* tofrac.(B)) * scale))) <= 1
+    @test_throws DimensionMismatch AppleAccelerate.dotpr2_s1_15(A, A1[1:end-1], B)
+
+    # vrampmul_s1_15
+    start = toq15(0.25); step = toq15(0.125)
+    ramp = [tofrac(start) + i*tofrac(step) for i in 0:length(A)-1]
+    O = AppleAccelerate.vrampmul_s1_15(A, start, step)
+    expectedO = round.(Int16, tofrac.(A) .* ramp .* scale)
+    @test all(abs.(Int.(O) .- Int.(expectedO)) .<= 1)
+
+    result = similar(A)
+    AppleAccelerate.vrampmul_s1_15!(result, A, start, step)
+    @test all(abs.(Int.(result) .- Int.(expectedO)) .<= 1)
+
+    # vrampmul2_s1_15
+    O0, O1 = AppleAccelerate.vrampmul2_s1_15(A, A1, start, step)
+    e0 = round.(Int16, tofrac.(A) .* ramp .* scale)
+    e1 = round.(Int16, tofrac.(A1) .* ramp .* scale)
+    @test all(abs.(Int.(O0) .- Int.(e0)) .<= 1)
+    @test all(abs.(Int.(O1) .- Int.(e1)) .<= 1)
+    @test_throws DimensionMismatch AppleAccelerate.vrampmul2_s1_15(A, A1[1:end-1], start, step)
+
+    # vrampmuladd_s1_15
+    C = Int16[100, 200, 300, 400]
+    Oadd = AppleAccelerate.vrampmuladd_s1_15(A, start, step, C)
+    expectedAdd = C .+ round.(Int16, tofrac.(A) .* ramp .* scale)
+    @test all(abs.(Int.(Oadd) .- Int.(expectedAdd)) .<= 1)
+
+    # vrampmuladd2_s1_15
+    C0 = Int16[10, 20, 30, 40]
+    C1 = Int16[1, 2, 3, 4]
+    Oa0, Oa1 = AppleAccelerate.vrampmuladd2_s1_15(A, A1, start, step, C0, C1)
+    ea0 = C0 .+ round.(Int16, tofrac.(A) .* ramp .* scale)
+    ea1 = C1 .+ round.(Int16, tofrac.(A1) .* ramp .* scale)
+    @test all(abs.(Int.(Oa0) .- Int.(ea0)) .<= 1)
+    @test all(abs.(Int.(Oa1) .- Int.(ea1)) .<= 1)
+    @test_throws DimensionMismatch AppleAccelerate.vrampmuladd2_s1_15(A, A1[1:end-1], start, step, C0, C1)
+end
+
+@testset "Fixed-point Q8.24 kernels" begin
+    scale = 2.0^24
+    tofrac(v::Int32) = Float64(v) / scale
+    toq824(x::Float64) = Int32(round(Int, x * scale))
+
+    A = Int32[round(Int32, 0.5*scale), round(Int32, -0.25*scale), round(Int32, 0.125*scale)]
+    B = Int32[round(Int32, 0.25*scale), round(Int32, 0.5*scale), round(Int32, -0.5*scale)]
+    A1 = Int32[round(Int32, 0.1*scale), round(Int32, -0.2*scale), round(Int32, 0.3*scale)]
+
+    expected = sum(tofrac.(A) .* tofrac.(B)) * scale
+    @test abs(Int(AppleAccelerate.dotpr_s8_24(A, B)) - Int(round(Int32, expected))) <= 1
+    @test_throws DimensionMismatch AppleAccelerate.dotpr_s8_24(A, B[1:end-1])
+
+    c0, c1 = AppleAccelerate.dotpr2_s8_24(A, A1, B)
+    @test abs(Int(c0) - Int(round(Int32, sum(tofrac.(A) .* tofrac.(B)) * scale))) <= 1
+    @test abs(Int(c1) - Int(round(Int32, sum(tofrac.(A1) .* tofrac.(B)) * scale))) <= 1
+
+    start = toq824(0.25); step = toq824(0.0625)
+    ramp = [tofrac(start) + i*tofrac(step) for i in 0:length(A)-1]
+    O = AppleAccelerate.vrampmul_s8_24(A, start, step)
+    expectedO = round.(Int32, tofrac.(A) .* ramp .* scale)
+    @test all(abs.(Int.(O) .- Int.(expectedO)) .<= 1)
+
+    O0, O1 = AppleAccelerate.vrampmul2_s8_24(A, A1, start, step)
+    e0 = round.(Int32, tofrac.(A) .* ramp .* scale)
+    e1 = round.(Int32, tofrac.(A1) .* ramp .* scale)
+    @test all(abs.(Int.(O0) .- Int.(e0)) .<= 1)
+    @test all(abs.(Int.(O1) .- Int.(e1)) .<= 1)
+
+    C = Int32[100, 200, 300]
+    Oadd = AppleAccelerate.vrampmuladd_s8_24(A, start, step, C)
+    expectedAdd = C .+ round.(Int32, tofrac.(A) .* ramp .* scale)
+    @test all(abs.(Int.(Oadd) .- Int.(expectedAdd)) .<= 1)
+
+    C0 = Int32[10, 20, 30]
+    C1 = Int32[1, 2, 3]
+    Oa0, Oa1 = AppleAccelerate.vrampmuladd2_s8_24(A, A1, start, step, C0, C1)
+    ea0 = C0 .+ round.(Int32, tofrac.(A) .* ramp .* scale)
+    ea1 = C1 .+ round.(Int32, tofrac.(A1) .* ramp .* scale)
+    @test all(abs.(Int.(Oa0) .- Int.(ea0)) .<= 1)
+    @test all(abs.(Int.(Oa1) .- Int.(ea1)) .<= 1)
+end
+
+@testset "24-bit packed conversions" begin
+    # vflt24 / vfltu24
+    vals = Int32[8388607, -8388608, 0, 12345, -12345]
+    @test AppleAccelerate.vflt24(vals) ≈ Float32.(vals)
+    uvals = UInt32[16777215, 0, 12345]
+    @test AppleAccelerate.vfltu24(uvals) ≈ Float32.(uvals)
+
+    # range guards
+    @test_throws ArgumentError AppleAccelerate.vflt24(Int32[8388608])
+    @test_throws ArgumentError AppleAccelerate.vflt24(Int32[-8388609])
+    @test_throws ArgumentError AppleAccelerate.vfltu24(UInt32[16777216])
+
+    # vfltsm24 / vfltsmu24: convert then scale by b
+    A = Int32[100, -50, 12345]
+    b = 2.0f0
+    @test AppleAccelerate.vfltsm24(A, b) ≈ Float32.(A) .* b
+    Au = UInt32[100, 200, 12345]
+    @test AppleAccelerate.vfltsmu24(Au, b) ≈ Float32.(Au) .* b
+
+    # vsmfix24 / vsmfixu24: scale then truncate to packed 24-bit
+    Af = Float32[1.5, -2.25, 100.0, -100.9]
+    bs = 1.0f0
+    @test AppleAccelerate.vsmfix24(Af, bs) == Int32.(trunc.(Af .* bs))
+
+    Afu = Float32[1.9, 2.25, 100.0]
+    @test AppleAccelerate.vsmfixu24(Afu, bs) == UInt32.(trunc.(Afu .* bs))
+
+    # mutating variants
+    C = Vector{Float32}(undef, length(A))
+    AppleAccelerate.vflt24!(C, A)
+    @test C ≈ Float32.(A)
+
+    Ci = Vector{Int32}(undef, length(Af))
+    AppleAccelerate.vsmfix24!(Ci, Af, bs)
+    @test Ci == Int32.(trunc.(Af .* bs))
+
+    # length guard
+    @test_throws DimensionMismatch AppleAccelerate.vflt24!(Vector{Float32}(undef, 1), A)
+end
+
+@testset "Integer vector ops: vdivi, vsaddi, vsdivi" begin
+    A = Int32[10, 20, 33, -40, 51]
+    Bv = Int32[2, 5, 3, -8, 7]
+
+    @test AppleAccelerate.vdivi(A, Bv) == Int32.(div.(A, Bv))
+    @test_throws DimensionMismatch AppleAccelerate.vdivi(A, Bv[1:end-1])
+
+    b = Int32(7)
+    @test AppleAccelerate.vsaddi(A, b) == A .+ b
+
+    @test AppleAccelerate.vsdivi(A, b) == Int32.(div.(A, b))
+
+    # mutating variants
+    C = similar(A)
+    AppleAccelerate.vdivi!(C, A, Bv)
+    @test C == Int32.(div.(A, Bv))
+
+    C2 = similar(A)
+    AppleAccelerate.vsaddi!(C2, A, b)
+    @test C2 == A .+ b
+
+    C3 = similar(A)
+    AppleAccelerate.vsdivi!(C3, A, b)
+    @test C3 == Int32.(div.(A, b))
+end
+
+for T in (Float32, Float64)
+    @testset "vgathra::$T" begin
+        v1 = T[1.0, 2.0, 3.0]
+        v2 = T[10.0, 20.0, 30.0]
+        v3 = T[100.0, 200.0, 300.0]
+        srcs = [v1, v2, v3]
+
+        C = AppleAccelerate.vgathra(srcs)
+        @test C == T[1.0, 10.0, 100.0]
+
+        Cbuf = Vector{T}(undef, 3)
+        AppleAccelerate.vgathra!(Cbuf, srcs)
+        @test Cbuf == T[1.0, 10.0, 100.0]
+
+        # pointer-array stride
+        v4 = T[999.0]
+        srcs6 = [v1, v4, v2, v4, v3, v4]
+        C2 = AppleAccelerate.vgathra(srcs6, 2)
+        @test C2 == T[1.0, 10.0, 100.0]
+
+        # guards: requesting more outputs than A has pointer entries for
+        @test_throws DimensionMismatch AppleAccelerate.vgathra!(Vector{T}(undef, 5), srcs)
+        @test_throws ArgumentError AppleAccelerate.vgathra(srcs, 0)
+        strided_src = [(@view T[1.0,2.0,3.0,4.0][1:2:end])]
+        @test_throws ArgumentError AppleAccelerate.vgathra(strided_src)
+    end
+end
+
 end # @testset "Array Operations"
