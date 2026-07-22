@@ -389,4 +389,125 @@ for T in (Float32, Float64)
     end
 end
 
+# ============================================================
+# Complex matrix multiply-add / multiply-subtract / reverse-subtract
+# (zmma, zmms, zmsm), vector multiply-multiply-add-add (zvmmaa), and
+# complex-real decimating resample (zrdesamp)
+# ============================================================
+for T in (Float32, Float64)
+    @testset "Complex Matrix Multiply-Add/Subtract::$T" begin
+        # non-square, non-symmetric so a layout/order bug fails loudly
+        m, p, n = 4, 3, 5
+        A = complex.(randn(T, m, p), randn(T, m, p))
+        B = complex.(randn(T, p, n), randn(T, p, n))
+        C = complex.(randn(T, m, n), randn(T, m, n))
+        rtol = T == Float32 ? sqrt(eps(Float32)) : sqrt(eps(Float64))
+
+        # zmma: D = A*B + C
+        D = AppleAccelerate.zmma(A, B, C)
+        @test D ≈ A * B .+ C rtol=rtol
+        D2 = Matrix{Complex{T}}(undef, m, n)
+        AppleAccelerate.zmma!(D2, A, B, C)
+        @test D2 ≈ A * B .+ C rtol=rtol
+
+        # zmms: D = A*B - C
+        D3 = AppleAccelerate.zmms(A, B, C)
+        @test D3 ≈ A * B .- C rtol=rtol
+        D4 = Matrix{Complex{T}}(undef, m, n)
+        AppleAccelerate.zmms!(D4, A, B, C)
+        @test D4 ≈ A * B .- C rtol=rtol
+
+        # zmsm: D = C - A*B (vDSP's reverse subtract, confirmed empirically —
+        # NOT (A-B)*C)
+        D5 = AppleAccelerate.zmsm(A, B, C)
+        @test D5 ≈ C .- A * B rtol=rtol
+        D6 = Matrix{Complex{T}}(undef, m, n)
+        AppleAccelerate.zmsm!(D6, A, B, C)
+        @test D6 ≈ C .- A * B rtol=rtol
+
+        # DimensionMismatch guards
+        Bbad = complex.(randn(T, p + 1, n), randn(T, p + 1, n))
+        @test_throws DimensionMismatch AppleAccelerate.zmma(A, Bbad, C)
+        @test_throws DimensionMismatch AppleAccelerate.zmms(A, Bbad, C)
+        @test_throws DimensionMismatch AppleAccelerate.zmsm(A, Bbad, C)
+        Cbad = complex.(randn(T, m, n + 1), randn(T, m, n + 1))
+        @test_throws DimensionMismatch AppleAccelerate.zmma(A, B, Cbad)
+        @test_throws DimensionMismatch AppleAccelerate.zmms(A, B, Cbad)
+        @test_throws DimensionMismatch AppleAccelerate.zmsm(A, B, Cbad)
+        Dbad = Matrix{Complex{T}}(undef, m, n + 1)
+        @test_throws DimensionMismatch AppleAccelerate.zmma!(Dbad, A, B, C)
+        @test_throws DimensionMismatch AppleAccelerate.zmms!(Dbad, A, B, C)
+        @test_throws DimensionMismatch AppleAccelerate.zmsm!(Dbad, A, B, C)
+    end
+
+    @testset "Complex Vector Multiply-Multiply-Add-Add (zvmmaa)::$T" begin
+        Av::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Bv::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Cv::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Dv::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        Ev::Vector{Complex{T}} = complex.(randn(T, N), randn(T, N))
+        rtol = T == Float32 ? sqrt(eps(Float32)) : sqrt(eps(Float64))
+
+        ref = Av .* Bv .+ Cv .* Dv .+ Ev
+        F = AppleAccelerate.zvmmaa(Av, Bv, Cv, Dv, Ev)
+        @test F ≈ ref rtol=rtol
+
+        F2 = similar(Av)
+        @test AppleAccelerate.zvmmaa!(F2, Av, Bv, Cv, Dv, Ev) === F2
+        @test F2 ≈ ref rtol=rtol
+
+        bad = similar(Av, N - 1)
+        @test_throws DimensionMismatch AppleAccelerate.zvmmaa!(bad, Av, Bv, Cv, Dv, Ev)
+        @test_throws DimensionMismatch AppleAccelerate.zvmmaa!(F2, bad, Bv, Cv, Dv, Ev)
+    end
+
+    @testset "Complex-Real Decimating Resample (zrdesamp)::$T" begin
+        Av::Vector{Complex{T}} = complex.(randn(T, 41), randn(T, 41))
+        Fv::Vector{T} = randn(T, 7)
+        DF = 3
+        rtol = T == Float32 ? sqrt(eps(Float32)) : sqrt(eps(Float64))
+
+        P = length(Fv)
+        Nout = div(length(Av) - P, DF) + 1
+
+        Cv = AppleAccelerate.zrdesamp(Av, DF, Fv)
+        @test length(Cv) == Nout
+
+        # manual decimated-correlation reference (0-indexed n, p)
+        Cref = Vector{Complex{T}}(undef, Nout)
+        for n in 0:(Nout - 1)
+            s = Complex{T}(0)
+            for p in 0:(P - 1)
+                s += Av[n * DF + p + 1] * Fv[p + 1]
+            end
+            Cref[n + 1] = s
+        end
+        @test Cv ≈ Cref rtol=rtol
+
+        Cout = Vector{Complex{T}}(undef, Nout)
+        AppleAccelerate.zrdesamp!(Cout, Av, DF, Fv)
+        @test Cout ≈ Cref rtol=rtol
+
+        # DF=1 (pure FIR correlation, no decimation)
+        C1 = AppleAccelerate.zrdesamp(Av, 1, Fv)
+        Nout1 = div(length(Av) - P, 1) + 1
+        Cref1 = Vector{Complex{T}}(undef, Nout1)
+        for n in 0:(Nout1 - 1)
+            s = Complex{T}(0)
+            for p in 0:(P - 1)
+                s += Av[n * 1 + p + 1] * Fv[p + 1]
+            end
+            Cref1[n + 1] = s
+        end
+        @test C1 ≈ Cref1 rtol=rtol
+
+        # errors when filter longer than signal
+        Ashort = complex.(randn(T, 3), randn(T, 3))
+        Flong = randn(T, 5)
+        @test_throws ErrorException AppleAccelerate.zrdesamp(Ashort, 1, Flong)
+        Coutbad = Vector{Complex{T}}(undef, 10)
+        @test_throws ErrorException AppleAccelerate.zrdesamp!(Coutbad, Ashort, 1, Flong)
+    end
+end
+
 end # @testset

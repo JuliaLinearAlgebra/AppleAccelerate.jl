@@ -809,6 +809,156 @@ end
 @doc "Complex matrix multiply-subtract: `D = A * B - C`. `C` and `D` are `size(A,1)×size(B,2)`. The `zmms!(D, A, B, C)` form writes into `D`. Wraps [`vDSP_zmms`](https://developer.apple.com/documentation/accelerate/vdsp_zmms)." zmms
 
 # ============================================================
+# Complex matrix multiply-add / multiply-subtract / reverse-subtract,
+# vector multiply-multiply-add-add, and complex-real decimating resample.
+#
+# zmma/zmms/zmsm share zmmul's row-major ↔ col-major operand swap: pass
+# (B, A, C, D) with dims (n, m, p) instead of (A, B, C, D) with (m, n, p).
+# The elementwise operand C composes cleanly under the swap (verified
+# empirically, see PR notes / project memory): reading Julia's m×n C as a
+# row-major n×m matrix always yields C^T under the same convention used for
+# the output D, so the transpose cancels exactly as it does for A*B in
+# zmmul. This works for zmsm too because its C-level formula is the reverse
+# subtract D = C − A*B (confirmed by direct ccall probing against the
+# vDSP.h header comment "matrix multiply and reverse subtract"), NOT
+# `(A-B)*C` — a plausible-looking guess from the name that is not what the
+# framework computes. Because D = C − A*B decomposes as (elementwise C) −
+# (matrix product A*B), and both pieces transpose consistently, no extra
+# copy is needed.
+# ============================================================
+for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
+                            (Float64, "D", :DSPDoubleSplitComplex))
+
+    # zmsm: D = C - A*B (vDSP's "reverse subtract"; verified empirically —
+    # NOT (A-B)*C, see the section note above)
+    @eval begin
+        function zmsm!(D::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+            m, p = size(A)
+            p2, n = size(B)
+            p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
+            size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n"))
+            size(D) == (m, n) || throw(DimensionMismatch("D must be $m×$n"))
+            GC.@preserve A B C D begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                csplit = _split_view($DSPSplit, pointer(C))
+                dsplit = _split_view($DSPSplit, pointer(D))
+                LibAccelerate.$(Symbol(string("vDSP_zmsm", suff)))(
+                      Ref(bsplit), _CSTRIDE, Ref(asplit), _CSTRIDE, Ref(csplit), _CSTRIDE, Ref(dsplit), _CSTRIDE,
+                      UInt64(n), UInt64(m), UInt64(p))
+            end
+            return D
+        end
+        @doc """
+            zmsm(A::Matrix{Complex{$($T)}}, B::Matrix{Complex{$($T)}}, C::Matrix{Complex{$($T)}}) -> Matrix{Complex{$($T)}}
+            zmsm!(D, A, B, C)
+
+        Complex matrix multiply and reverse-subtract: `D = C - A*B`.
+        Wraps [`vDSP_zmsm`](https://developer.apple.com/documentation/accelerate/vdsp_zmsm)
+        (the vDSP.h header labels this "matrix multiply and reverse subtract";
+        confirmed empirically to compute `C - A*B`, not `(A-B)*C`).
+        """
+        function zmsm(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+            m = size(A, 1)
+            n = size(B, 2)
+            D = Matrix{Complex{$T}}(undef, m, n)
+            zmsm!(D, A, B, C)
+        end
+    end
+
+    # zvmmaa: F = A*B + C*D + E (elementwise complex vectors; "vector
+    # multiply, multiply, add, and add" — verified empirically that the 5th
+    # operand E is a genuine additive term, not unused)
+    @eval begin
+        function zvmmaa!(F::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}}, D::Vector{Complex{$T}}, E::Vector{Complex{$T}})
+            n = length(A)
+            (length(B) == n && length(C) == n && length(D) == n && length(E) == n && length(F) == n) ||
+                throw(DimensionMismatch("zvmmaa!: A, B, C, D, E, and F must have equal lengths"))
+            GC.@preserve A B C D E F begin
+                asplit = _split_view($DSPSplit, pointer(A))
+                bsplit = _split_view($DSPSplit, pointer(B))
+                csplit = _split_view($DSPSplit, pointer(C))
+                dsplit = _split_view($DSPSplit, pointer(D))
+                esplit = _split_view($DSPSplit, pointer(E))
+                fsplit = _split_view($DSPSplit, pointer(F))
+                LibAccelerate.$(Symbol(string("vDSP_zvmmaa", suff)))(
+                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE,
+                      Ref(dsplit), _CSTRIDE, Ref(esplit), _CSTRIDE, Ref(fsplit), _CSTRIDE, n)
+            end
+            return F
+        end
+        @doc """
+            zvmmaa(A::Vector{Complex{$($T)}}, B::Vector{Complex{$($T)}}, C::Vector{Complex{$($T)}}, D::Vector{Complex{$($T)}}, E::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
+            zvmmaa!(F, A, B, C, D, E)
+
+        Elementwise vector multiply-multiply-add-add: `F[i] = A[i]*B[i] + C[i]*D[i] + E[i]`.
+        Wraps [`vDSP_zvmmaa`](https://developer.apple.com/documentation/accelerate/vdsp_zvmmaa).
+        """
+        function zvmmaa(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}}, D::Vector{Complex{$T}}, E::Vector{Complex{$T}})
+            F = similar(A)
+            zvmmaa!(F, A, B, C, D, E)
+        end
+    end
+
+    # zrdesamp: complex-real decimating resample/correlation.
+    # C[n] = sum(A[n*DF+p] * F[p], 0 <= p < P)  (0-indexed; matches vDSP.h's
+    # "Maps" comment, and the real-valued `desamp` this mirrors).
+    #
+    # Unlike zmma/zmms/zmsm/zvmmaa, vDSP_zrdesamp takes NO stride argument
+    # for its split-complex operands ("No strides are used; arrays map
+    # directly to memory" — vDSP.h) — it reads/writes the realp/imagp
+    # buffers as fully contiguous arrays. This file's usual pointer trick
+    # (`_split_view` over an interleaved Complex{T} buffer with an explicit
+    # stride of `_CSTRIDE=2`) therefore does NOT apply here: verified
+    # empirically that feeding it interleaved storage silently produces
+    # wrong results (each of realp/imagp gets alternating real/imag values).
+    # So this wrapper deinterleaves into genuine contiguous real/imag
+    # buffers (à la `ctoz`/`ztoc`) rather than reusing `_split_view`.
+    @eval begin
+        function zrdesamp!(C::Vector{Complex{$T}}, A::Vector{Complex{$T}}, DF::Int, F::Vector{$T})
+            length(A) >= length(F) ||
+                error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
+            P = length(F)
+            nout = div(length(A) - P, DF) + 1
+            length(C) >= nout || error("C must have at least $(nout) elements")
+            Are = $T[real(a) for a in A]
+            Aim = $T[imag(a) for a in A]
+            Cre = Vector{$T}(undef, nout)
+            Cim = Vector{$T}(undef, nout)
+            GC.@preserve Are Aim F Cre Cim begin
+                asplit = $DSPSplit(pointer(Are), pointer(Aim))
+                csplit = $DSPSplit(pointer(Cre), pointer(Cim))
+                LibAccelerate.$(Symbol(string("vDSP_zrdesamp", suff)))(
+                      Ref(asplit), DF, F, Ref(csplit), UInt64(nout), UInt64(P))
+            end
+            @inbounds for i in 1:nout
+                C[i] = Complex{$T}(Cre[i], Cim[i])
+            end
+            return C
+        end
+        @doc """
+            zrdesamp(A::Vector{Complex{$($T)}}, DF::Int, F::Vector{$($T)}) -> Vector{Complex{$($T)}}
+            zrdesamp!(C, A, DF, F)
+
+        Complex-real decimating resample/correlation using `vDSP_zrdesamp`.
+        Filters complex input `A` with real FIR coefficients `F` (`P` taps)
+        and decimation factor `DF`. `C` must have at least
+        `div(length(A) - P, DF) + 1` elements.
+        Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed).
+        Wraps [`vDSP_zrdesamp`](https://developer.apple.com/documentation/accelerate/vdsp_zrdesamp).
+        """
+        function zrdesamp(A::Vector{Complex{$T}}, DF::Int, F::Vector{$T})
+            length(A) >= length(F) ||
+                error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
+            P = length(F)
+            nout = div(length(A) - P, DF) + 1
+            C = Vector{Complex{$T}}(undef, nout)
+            zrdesamp!(C, A, DF, F)
+        end
+    end
+end
+
+# ============================================================
 # Format conversion (interleaved ↔ split complex)
 # ============================================================
 for (T, suff, DSPSplit, DSPCplx) in ((Float32, "", :DSPSplitComplex, :DSPComplex),
