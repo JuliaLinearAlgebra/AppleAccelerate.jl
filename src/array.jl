@@ -332,9 +332,16 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
                     (:sum, :sve), (:summag, :svemg), (:sumsqr, :svesq),
                     (:sumssqr, :svs))
         # vDSP returns ±Inf for max/min of an empty vector; match Base and throw instead.
-        guard = f in (:maximum, :minimum) ?
-            :(isempty(X) && throw(ArgumentError($(string(f)) * " over an empty collection is not allowed"))) :
+        # The mean family divides by length and returns NaN for an empty vector;
+        # match Base.mean and throw. Sum-type reductions correctly return 0 for
+        # an empty vector and are left unguarded.
+        guard = if f in (:maximum, :minimum)
+            :(isempty(X) && throw(ArgumentError($(string(f)) * " over an empty collection is not allowed")))
+        elseif f in (:mean, :meanmag, :meansqr, :meanssqr)
+            :(isempty(X) && throw(ArgumentError("mean of empty collection")))
+        else
             :(nothing)
+        end
         @eval begin
             function ($f)(X::StridedVector{$T})
                 $guard
@@ -828,6 +835,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
     @eval begin
         function vsmsa!(result::StridedVector{$T}, A::StridedVector{$T}, b::$T, c::$T)
+            length(result) >= length(A) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vsmsa", suff)))(A,stride(A,1),Ref(b),Ref(c),result,stride(result,1),length(A))
             return result
         end
@@ -1083,12 +1092,21 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             vthres!(result, X, threshold)
         end
         function vcmprs!(result::StridedVector{$T}, X::StridedVector{$T}, gate::StridedVector{$T})
+            length(gate) >= length(X) ||
+                throw(DimensionMismatch("gate length ($(length(gate))) must be at least length(X) ($(length(X)))"))
+            length(result) >= length(X) ||
+                throw(DimensionMismatch("result length ($(length(result))) must be at least length(X) ($(length(X)))"))
             LibAccelerate.$(Symbol(string("vDSP_vcmprs", suff)))(X,stride(X,1),gate,stride(gate,1),result,stride(result,1),length(X))
             return result
         end
         function vcmprs(X::StridedVector{$T}, gate::StridedVector{$T})
+            # vDSP_vcmprs packs the gated elements into the front of the buffer; the
+            # meaningful result length is the number of nonzero gate entries, so
+            # write into a full-length scratch buffer and trim to that count.
             result = similar(X)
             vcmprs!(result, X, gate)
+            count = Base.count(!iszero, @view gate[1:length(X)])
+            return result[1:count]
         end
     end
 end
@@ -1158,6 +1176,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
         function vrampmul2!(O0::StridedVector{$T}, O1::StridedVector{$T}, I0::StridedVector{$T}, I1::StridedVector{$T}, start::$T, step::$T)
             n = length(I0)
+            (length(I1) >= n && length(O0) >= n && length(O1) >= n) ||
+                throw(DimensionMismatch("I1, O0 and O1 must each have length at least length(I0) ($n)"))
             stride(I0,1) == stride(I1,1) ||
                 throw(ArgumentError("vrampmul2!: I0 and I1 must have the same stride (vDSP shares one input stride)"))
             stride(O0,1) == stride(O1,1) ||
@@ -1448,6 +1468,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return C
         end
         function vswap!(A::StridedVector{$T}, B::StridedVector{$T})
+            length(B) >= length(A) ||
+                throw(DimensionMismatch("B length ($(length(B))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vswap", suff)))(A,stride(A,1),B,stride(B,1),length(A))
             return (A, B)
         end
@@ -1508,6 +1530,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         function vgenp!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, n::Integer)
             length(C) >= n ||
                 throw(DimensionMismatch("C length ($(length(C))) must be at least n ($n)"))
+            length(B) >= length(A) ||
+                throw(DimensionMismatch("B length ($(length(B))) must be at least length(A) ($(length(A)))"))
             LibAccelerate.$(Symbol(string("vDSP_vgenp", suff)))(A,stride(A,1),B,stride(B,1),C,stride(C,1),n,length(A))
             return C
         end

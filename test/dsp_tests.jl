@@ -123,6 +123,26 @@ end
     end
 end
 
+@testset "is_supported_fft_length exact" begin
+    # Powers of two are always supported. The only supported non-power-of-2
+    # lengths are f*2^k with f ∈ {3, 5, 15} and k ≥ 3 (smallest: 24, 40, 120).
+    for n in (3, 5, 6, 10, 12, 15, 20, 30, 60)
+        @test !AppleAccelerate.is_supported_fft_length(n)
+    end
+    for n in (1, 2, 4, 8, 16, 24, 40, 48, 120)
+        @test AppleAccelerate.is_supported_fft_length(n)
+    end
+
+    # Lengths that route to the mixed-radix DFT with k < 3 must be rejected.
+    @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF64, 12))
+    @test_throws ArgumentError AppleAccelerate.fft(randn(ComplexF64, 20))
+
+    # The smallest supported non-power-of-2 length succeeds and matches FFTW.
+    let r = randn(ComplexF64, 24)
+        @test AppleAccelerate.fft(r) ≈ FFTW.fft(r)
+    end
+end
+
 @testset "fft known values" begin
     # DFT of unit impulse is all ones
     @test AppleAccelerate.fft(ComplexF64[1, 0, 0, 0]) ≈ ComplexF64[1, 1, 1, 1]
@@ -495,6 +515,16 @@ end
         fdsp = DSP.Biquad(c[1], c[2], c[3], c[4], c[5])
         fa = AppleAccelerate.biquadcreate(c, 1)
         @test DSP.filt(fdsp, X) ≈ AppleAccelerate.biquad(X, d, length(X), fa)
+    end
+
+    @testset "Partial numelem returns exactly numelem outputs::Float64" begin
+        X::Vector{Float64} = randn(10)
+        d::Vector{Float64} = zeros(4)
+        c::Vector{Float64} = [x%0.5 for x in randn(5)]
+        fa = AppleAccelerate.biquadcreate(c, 1)
+        numelem = 6
+        result = AppleAccelerate.biquad(X, d, numelem, fa)
+        @test length(result) == numelem
     end
 end
 

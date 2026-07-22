@@ -251,7 +251,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
             if numelem > length(X)
                 error("numelem = $numelem exceeds the input length $(length(X))")
             end
-            result::Vector{$T} = similar(X)
+            result::Vector{$T} = Vector{$T}(undef, numelem)
             LibAccelerate.$(Symbol(string("vDSP_biquad", suff)))(biquad.setup,delays,X,1,result,1,numelem)
             return result
         end
@@ -862,8 +862,8 @@ end
     plan_dft(length::Int, direction::Int, ::Type{T}=Float32; previous=C_NULL) where T
 
 Create a DFT setup for complex-to-complex DFT of the given `length` and `direction`
-(`DFT_FORWARD` or `DFT_INVERSE`). Length must be `f * 2^n` where `f ∈ {1, 3, 5, 15}`
-and `n ≥ 3`. Optionally pass a `previous` setup to share underlying data.
+(`DFT_FORWARD` or `DFT_INVERSE`). Length must be `f * 2^k` where `f ∈ {3, 5, 15}`
+and `k ≥ 3` (a power of two is also accepted). Optionally pass a `previous` setup to share underlying data.
 Wraps [`vDSP_DFT_zop_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_zop_createsetup).
 
 Returns: `DFTSetup{T}`
@@ -872,7 +872,7 @@ function plan_dft(length::Int, direction::Int, ::Type{Float32}=Float32; previous
     setup = ccall(("vDSP_DFT_zop_CreateSetup", libacc), Ptr{Cvoid},
                   (Ptr{Cvoid}, UInt64, Cint),
                   previous isa DFTSetup ? previous.setup : previous, length, Cint(direction))
-    setup == C_NULL && error("Invalid DFT length $length. Length must be f*(2^n) where f ∈ {1,3,5,15} and n ≥ 3")
+    setup == C_NULL && error("Invalid DFT length $length. Length must be a power of two, or f*(2^k) where f ∈ {3,5,15} and k ≥ 3")
     return DFTSetup(Float32, setup, direction)
 end
 
@@ -880,7 +880,7 @@ function plan_dft(length::Int, direction::Int, ::Type{Float64}; previous=C_NULL)
     setup = ccall(("vDSP_DFT_zop_CreateSetupD", libacc), Ptr{Cvoid},
                   (Ptr{Cvoid}, UInt64, Cint),
                   previous isa DFTSetup ? previous.setup : previous, length, Cint(direction))
-    setup == C_NULL && error("Invalid DFT length $length. Length must be f*(2^n) where f ∈ {1,3,5,15} and n ≥ 3")
+    setup == C_NULL && error("Invalid DFT length $length. Length must be a power of two, or f*(2^k) where f ∈ {3,5,15} and k ≥ 3")
     return DFTSetup(Float64, setup, direction)
 end
 
@@ -1056,9 +1056,10 @@ end
 # --- Mixed-radix length support (for non-power-of-2 1D complex FFT) ---
 #
 # Apple's vDSP DFT (vDSP_DFT_zop_CreateSetup) supports lengths of the form
-# `f * 2^n` where `f ∈ {1, 3, 5, 15}`. `fft`/`ifft`/`bfft` on a 1D vector with no
+# `f * 2^k` where `f ∈ {3, 5, 15}` and `k ≥ 3` (plus any power of two).
+# `fft`/`ifft`/`bfft` on a 1D vector with no
 # explicit `FFTSetup` transparently route to this mixed-radix DFT path when the
-# length is not a power of two but is a supported `f * 2^n`; power-of-2 lengths
+# length is not a power of two but is a supported `f * 2^k`; power-of-2 lengths
 # keep using the (faster, in-place-capable) `vDSP_fft_*` path unchanged.
 
 # Return the odd cofactor `f` of `n` (i.e. `n` with all factors of 2 removed).
@@ -1068,16 +1069,18 @@ _odd_cofactor(n::Integer) = n >> trailing_zeros(n)
     is_supported_fft_length(n::Integer) -> Bool
 
 Return `true` if a 1D complex FFT of length `n` is supported by Apple vDSP via the
-idiomatic `fft`/`ifft`/`bfft` API. Supported lengths are `f * 2^k` with
-`f ∈ {1, 3, 5, 15}` (this includes all powers of two).
+idiomatic `fft`/`ifft`/`bfft` API. Supported lengths are any power of two, plus
+`f * 2^k` with `f ∈ {3, 5, 15}` and `k ≥ 3` (the smallest such non-power-of-two
+lengths are 24, 40, and 120).
 """
-is_supported_fft_length(n::Integer) = n >= 1 && _odd_cofactor(n) in (1, 3, 5, 15)
+is_supported_fft_length(n::Integer) = n >= 1 && (ispow2(n) || (_odd_cofactor(n) in (3, 5, 15) && trailing_zeros(n) >= 3))
 
 # Throw an informative error for an unsupported 1D FFT length.
 @noinline function _unsupported_fft_length(n::Integer)
     throw(ArgumentError(string(
         "unsupported FFT length $n: AppleAccelerate only supports 1D complex FFT ",
-        "lengths of the form f*2^k with f ∈ {1, 3, 5, 15}. ",
+        "lengths that are a power of two, or of the form f*2^k with f ∈ {3, 5, 15} ",
+        "and k ≥ 3 (smallest non-power-of-two lengths are 24, 40, 120). ",
         "For arbitrary (e.g. prime) lengths, use FFTW.jl instead.")))
 end
 
@@ -1185,8 +1188,8 @@ Compute the forward FFT of `x` via Apple vDSP. Supports 1D vectors and 2D matric
 with `ComplexF32` or `ComplexF64` elements.
 
 For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
-`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported and transparently use Apple's
-mixed-radix DFT (see [`is_supported_fft_length`](@ref)); an unsupported length throws
+`f * 2^k` with `f ∈ {3, 5, 15}` and `k ≥ 3` are also supported and transparently use
+Apple's mixed-radix DFT (see [`is_supported_fft_length`](@ref)); an unsupported length throws
 an `ArgumentError`. When a `setup::FFTSetup` is supplied, or for 2D inputs, all
 dimensions must be powers of 2. If `setup` is omitted, a temporary plan is created
 automatically.
@@ -1212,7 +1215,7 @@ Compute the unnormalized inverse (backward) FFT of `x` via Apple vDSP.
 The result is *not* divided by `length(x)`; use [`ifft`](@ref) for the normalized version.
 
 For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
-`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported (via Apple's mixed-radix DFT);
+`f * 2^k` with `f ∈ {3, 5, 15}` and `k ≥ 3` are also supported (via Apple's mixed-radix DFT);
 an unsupported length throws an `ArgumentError`. With an explicit `setup::FFTSetup`,
 or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
@@ -1237,7 +1240,7 @@ Compute the normalized inverse FFT of `x` via Apple vDSP.
 Equivalent to `bfft(x) / length(x)`. Satisfies `ifft(fft(x)) ≈ x`.
 
 For a 1D vector with no explicit `setup`, non-power-of-2 lengths of the form
-`f * 2^k` with `f ∈ {1, 3, 5, 15}` are also supported (via Apple's mixed-radix DFT);
+`f * 2^k` with `f ∈ {3, 5, 15}` and `k ≥ 3` are also supported (via Apple's mixed-radix DFT);
 an unsupported length throws an `ArgumentError`. With an explicit `setup::FFTSetup`,
 or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /

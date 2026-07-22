@@ -72,7 +72,9 @@ The complex-valued docstrings for `vneg` and `vabs` are rendered alongside the r
 |----------|-------------|
 | [`zvfill!`](@ref AppleAccelerate.zvfill!) | Fill complex vector with scalar |
 | [`zconv`](@ref AppleAccelerate.zconv) | Complex convolution |
-| [`zmmul`](@ref AppleAccelerate.zmmul) | Complex matrix multiply |
+| [`zmmul`](@ref AppleAccelerate.zmmul) | Complex matrix multiply: `A * B` |
+| [`zmma`](@ref AppleAccelerate.zmma) | Complex matrix multiply-add: `A * B + C` |
+| [`zmms`](@ref AppleAccelerate.zmms) | Complex matrix multiply-subtract: `A * B - C` |
 
 ## Coordinate conversion
 
@@ -99,6 +101,10 @@ mags = AppleAccelerate.vmags(Z)
 # Coordinate conversion
 r, θ = AppleAccelerate.polar(Z)
 Z_back = AppleAccelerate.rect(r, θ)
+
+# Complex matrix multiply-add: D = A*B + C
+A = rand(ComplexF64, 4, 3); B = rand(ComplexF64, 3, 5); C = rand(ComplexF64, 4, 5)
+D = AppleAccelerate.zmma(A, B, C)   # ≈ A*B + C
 nothing # hide
 ```
 
@@ -126,6 +132,8 @@ AppleAccelerate.zrdotpr
 AppleAccelerate.zvfill!
 AppleAccelerate.zconv
 AppleAccelerate.zmmul
+AppleAccelerate.zmma
+AppleAccelerate.zmms
 AppleAccelerate.ctoz
 AppleAccelerate.ztoc
 ```

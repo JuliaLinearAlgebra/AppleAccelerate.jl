@@ -75,6 +75,14 @@ struct _QuadTestError <: Exception end
         @test_throws ArgumentError integrate(cos, 0, π/2; integrator = :qag, qag_points = 16)
     end
 
+    @testset "infinite bounds require QAGS" begin
+        # QNG and QAG only handle finite intervals; infinite bounds must be rejected.
+        @test_throws ArgumentError integrate(x -> exp(-x^2), -Inf, Inf; integrator = :qng)
+        @test_throws ArgumentError integrate(x -> exp(-x^2), 0, Inf; integrator = :qag)
+        # Positive control: QAGS still integrates over the infinite interval.
+        @test integrate(x -> exp(-x^2), -Inf, Inf; integrator = :qags).value ≈ sqrt(π) atol=1e-7
+    end
+
     @testset "custom tolerances and max_intervals" begin
         # Exercise the non-default keyword paths; ∫₀¹ x² dx = 1/3.
         r = integrate(x -> x^2, 0, 1; abstol = 1e-10, reltol = 1e-10, max_intervals = 50)

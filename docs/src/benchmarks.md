@@ -1,6 +1,6 @@
 # Benchmarks
 
-All benchmarks were run on an Apple M2 Max, macOS 26, single-threaded, with Julia 1.12.6 and AppleAccelerate.jl v0.8.0 master (all tables measured July 2026, after the 2D real FFT / batched FFT / FFT setup-caching work). Times are the minimum of 5 trials.
+All benchmarks were run on an Apple M2 Max, macOS 26, single-threaded, with Julia 1.12.6 and AppleAccelerate.jl v0.8.0 master (all tables re-measured July 2026). Times are the minimum of 5 trials.
 
 Single-threaded execution is used to compare **kernel quality** on a level footing. This is *not* representative of how OpenBLAS is normally deployed — OpenBLAS scales GEMM across CPU cores, whereas Accelerate offloads large GEMM to a shared SME co-processor that a single thread already saturates. See the GEMM note below for a multi-threaded comparison.
 
@@ -38,15 +38,15 @@ Transcendental functions show the biggest gains — vDSP is 7–19× faster for 
 
 | Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
 |----|------|---|-----------|------------|---------|
-| exp | Float64 | 100,000 | 135 | 301 | 2.2× |
-| log | Float64 | 100,000 | 174 | 500 | 2.9× |
-| sin | Float64 | 100,000 | 147 | 731 | 5.0× |
-| cos | Float64 | 100,000 | 113 | 759 | 6.7× |
-| sqrt | Float64 | 100,000 | 30 | 59 | 2.0× |
-| exp | Float32 | 100,000 | 42 | 319 | 7.7× |
+| exp | Float64 | 100,000 | 142 | 343 | 2.4× |
+| log | Float64 | 100,000 | 183 | 492 | 2.7× |
+| sin | Float64 | 100,000 | 106 | 733 | 6.9× |
+| cos | Float64 | 100,000 | 113 | 756 | 6.7× |
+| sqrt | Float64 | 100,000 | 29 | 59 | 2.0× |
+| exp | Float32 | 100,000 | 42 | 327 | 7.7× |
 | log | Float32 | 100,000 | 56 | 381 | 6.8× |
-| sin | Float32 | 100,000 | 38 | 704 | 18.8× |
-| cos | Float32 | 100,000 | 38 | 715 | 18.7× |
+| sin | Float32 | 100,000 | 38 | 706 | 18.7× |
+| cos | Float32 | 100,000 | 38 | 719 | 18.8× |
 | sqrt | Float32 | 100,000 | 28 | 69 | 2.5× |
 
 ### Reductions
@@ -55,23 +55,23 @@ Transcendental functions show the biggest gains — vDSP is 7–19× faster for 
 
 | Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
 |----|------|---|-----------|------------|---------|
-| sum | Float64 | 1,000,000 | 90 | 101 | 1.1× |
-| maximum | Float64 | 1,000,000 | 90 | 97 | 1.1× |
-| minimum | Float64 | 1,000,000 | 93 | 94 | 1.0× |
+| sum | Float64 | 1,000,000 | 93 | 104 | 1.1× |
+| maximum | Float64 | 1,000,000 | 91 | 95 | 1.0× |
+| minimum | Float64 | 1,000,000 | 90 | 95 | 1.1× |
 | sum | Float32 | 1,000,000 | 44 | 54 | 1.2× |
-| maximum | Float32 | 1,000,000 | 45 | 49 | 1.1× |
-| minimum | Float32 | 1,000,000 | 44 | 49 | 1.1× |
+| maximum | Float32 | 1,000,000 | 44 | 50 | 1.1× |
+| minimum | Float32 | 1,000,000 | 43 | 48 | 1.1× |
 
 ### Binary Element-wise Ops
 
-Addition and multiplication are memory-bandwidth-bound, so Float64 results hover at parity, while vDSP shows a modest edge for Float32:
+Addition and multiplication are memory-bandwidth-bound, so results hover near parity; these ops are noisy run-to-run, with Float32 `vmul` keeping a modest edge while `vadd` lands around parity:
 
 | Op | Type | N | vDSP (μs) | Julia (μs) | Speedup |
 |----|------|---|-----------|------------|---------|
-| vadd | Float64 | 1,000,000 | 254 | 252 | 1.0× |
-| vmul | Float64 | 1,000,000 | 255 | 240 | 1.1× slower |
-| vadd | Float32 | 1,000,000 | 89 | 141 | 1.6× |
-| vmul | Float32 | 1,000,000 | 135 | 140 | 1.0× |
+| vadd | Float64 | 1,000,000 | 252 | 247 | 1.0× slower |
+| vmul | Float64 | 1,000,000 | 253 | 240 | 1.1× slower |
+| vadd | Float32 | 1,000,000 | 128 | 117 | 1.1× slower |
+| vmul | Float32 | 1,000,000 | 76 | 116 | 1.5× |
 
 !!! note "Benchmark environment"
     Julia reference uses `map(Base.f, X)` for unary ops and `@inbounds @simd` loops for binary/compound ops. Source: [`bench_array.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_array.jl).
@@ -82,18 +82,18 @@ Performance comparison of Apple Accelerate vs OpenBLAS. The dense benchmark scri
 
 ### GEMM (`mul!`) — GFLOPS (higher is better)
 
-Single-threaded, Accelerate is 6–13× faster for matrix multiply, with the largest gains for Float32:
+Single-threaded, Accelerate is roughly 6–13× faster for matrix multiply at moderate-to-large sizes, with the largest gains for Float32:
 
 | Type | N | OpenBLAS | Accelerate | Speedup |
 |------|---|----------|------------|---------|
-| Float64 | 64 | 24 | 237 | 9.8× |
-| Float64 | 256 | 45 | 349 | 7.7× |
-| Float64 | 1,024 | 51 | 360 | 7.1× |
-| Float64 | 4,096 | 52 | 291 | 5.6× |
-| Float32 | 64 | 88 | 599 | 6.8× |
-| Float32 | 256 | 100 | 1,217 | 12.2× |
-| Float32 | 1,024 | 104 | 1,396 | 13.5× |
-| Float32 | 4,096 | 106 | 1,136 | 10.8× |
+| Float64 | 64 | 22 | 237 | 10.8× |
+| Float64 | 256 | 45 | 352 | 7.9× |
+| Float64 | 1,024 | 51 | 356 | 7.0× |
+| Float64 | 4,096 | 53 | 303 | 5.8× |
+| Float32 | 64 | 91 | 434 | 4.8× |
+| Float32 | 256 | 103 | 1,213 | 11.8× |
+| Float32 | 1,024 | 105 | 1,381 | 13.2× |
+| Float32 | 4,096 | 104 | 1,150 | 11.0× |
 
 !!! warning "These are single-threaded numbers — read this before comparing"
     The table above pins **both** libraries to a single thread (`BLAS.set_num_threads(1)`),
@@ -144,27 +144,27 @@ Single-threaded, Accelerate is 6–13× faster for matrix multiply, with the lar
 
 | Operation | N | OpenBLAS (μs) | Accelerate (μs) | Speedup |
 |-----------|---|---------------|-----------------|---------|
-| LU | 256 | 429 | 220 | 2.0× |
-| LU | 1,024 | 16,956 | 11,190 | 1.5× |
-| LU | 2,048 | 123,071 | 68,307 | 1.8× |
-| QR | 512 | 5,571 | 3,422 | 1.6× |
-| QR | 2,048 | 280,167 | 145,190 | 1.9× |
-| Cholesky | 256 | 252 | 88 | 2.9× |
-| Cholesky | 1,024 | 9,313 | 2,688 | 3.5× |
-| SVD | 256 | 11,533 | 6,609 | 1.7× |
-| SVD | 512 | 68,990 | 30,973 | 2.2× |
-| SVD | 1,024 | 435,259 | 157,894 | 2.8× |
+| LU | 256 | 426 | 223 | 1.9× |
+| LU | 1,024 | 17,212 | 11,009 | 1.6× |
+| LU | 2,048 | 125,138 | 68,345 | 1.8× |
+| QR | 512 | 5,582 | 3,421 | 1.6× |
+| QR | 2,048 | 284,814 | 146,969 | 1.9× |
+| Cholesky | 256 | 251 | 88 | 2.9× |
+| Cholesky | 1,024 | 9,459 | 2,901 | 3.3× |
+| SVD | 256 | 11,658 | 6,720 | 1.7× |
+| SVD | 512 | 69,807 | 31,351 | 2.2× |
+| SVD | 1,024 | 438,729 | 162,882 | 2.7× |
 
 ### Linear Solve (`A\b`) — time in μs (lower is better)
 
 | Type | N | OpenBLAS (μs) | Accelerate (μs) | Speedup |
 |------|---|---------------|-----------------|---------|
-| Float64 | 256 | 458 | 193 | 2.4× |
-| Float64 | 1,024 | 17,156 | 5,341 | 3.2× |
-| Float64 | 2,048 | 123,081 | 37,501 | 3.3× |
-| Float32 | 256 | 312 | 124 | 2.5× |
-| Float32 | 1,024 | 9,799 | 2,576 | 3.8× |
-| Float32 | 2,048 | 65,855 | 14,773 | 4.5× |
+| Float64 | 256 | 469 | 201 | 2.3× |
+| Float64 | 1,024 | 16,980 | 5,465 | 3.1× |
+| Float64 | 2,048 | 123,214 | 37,538 | 3.3× |
+| Float32 | 256 | 311 | 154 | 2.0× |
+| Float32 | 1,024 | 9,867 | 2,526 | 3.9× |
+| Float32 | 2,048 | 66,555 | 14,882 | 4.5× |
 
 !!! note "Benchmark environment"
     LinearAlgebra.jl v1.12.0 (OpenBLAS 0.3.29). OpenBLAS benchmarked before loading AppleAccelerate; Accelerate benchmarked after `using AppleAccelerate` forwards BLAS via LBT. Source: [`bench_dense.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_dense.jl).
@@ -180,10 +180,10 @@ SuiteSparse CSC SpMV is 2.4–4.5× faster due to its simpler data layout:
 | Type | N | Apple (μs) | SuiteSparse (μs) | Ratio |
 |------|---|-----------|-------------------|-------|
 | Float64 | 1,000 | 23 | 7 | 0.32× |
-| Float64 | 10,000 | 2,139 | 512 | 0.24× |
-| Float64 | 50,000 | 52,121 | 22,038 | 0.42× |
-| Float32 | 1,000 | 23 | 7 | 0.31× |
-| Float32 | 10,000 | 2,106 | 472 | 0.22× |
+| Float64 | 10,000 | 2,117 | 508 | 0.24× |
+| Float64 | 50,000 | 51,718 | 21,908 | 0.42× |
+| Float32 | 1,000 | 24 | 7 | 0.31× |
+| Float32 | 10,000 | 2,077 | 462 | 0.22× |
 
 ### QR Factorize + Solve
 
@@ -191,12 +191,12 @@ SuiteSparse LU (`\`) is modestly faster for Float64 (near parity by N=2000). App
 
 | Type | N | Apple (μs) | SuiteSparse (μs) | Speedup |
 |------|---|-----------|-------------------|---------|
-| Float64 | 500 | 2,412 | 1,990 | 0.83× |
-| Float64 | 2,000 | 117,360 | 119,056 | 1.01× |
-| Float64 | 5,000 | 2,038,889 | 1,845,175 | 0.91× |
-| Float32 | 1,000 | 9,521 | 13,286 | 1.40× |
-| Float32 | 2,000 | 57,290 | 116,995 | 2.04× |
-| Float32 | 5,000 | 966,020 | 1,820,923 | 1.88× |
+| Float64 | 500 | 2,619 | 2,307 | 0.88× |
+| Float64 | 2,000 | 118,872 | 129,784 | 1.09× |
+| Float64 | 5,000 | 2,076,402 | 1,820,733 | 0.88× |
+| Float32 | 1,000 | 9,578 | 15,277 | 1.59× |
+| Float32 | 2,000 | 56,474 | 123,482 | 2.19× |
+| Float32 | 5,000 | 1,014,408 | 1,980,747 | 1.95× |
 
 ### Cholesky Factorize + Solve
 
@@ -204,11 +204,11 @@ Apple Cholesky is around parity at N=500 and pulls ahead as N grows, reaching ~4
 
 | Type | N | Apple (μs) | SuiteSparse (μs) | Speedup |
 |------|---|-----------|-------------------|---------|
-| Float64 | 500 | 1,488 | 1,513 | 1.02× |
-| Float64 | 2,000 | 38,322 | 78,226 | 2.04× |
-| Float64 | 5,000 | 258,357 | 1,042,905 | 4.04× |
-| Float32 | 2,000 | 30,550 | 51,237 | 1.68× |
-| Float32 | 5,000 | 185,574 | 613,517 | 3.31× |
+| Float64 | 500 | 1,542 | 1,486 | 0.96× |
+| Float64 | 2,000 | 41,494 | 77,341 | 1.86× |
+| Float64 | 5,000 | 260,519 | 1,069,279 | 4.1× |
+| Float32 | 2,000 | 32,239 | 50,665 | 1.57× |
+| Float32 | 5,000 | 190,393 | 608,049 | 3.19× |
 
 !!! note "Benchmark environment"
     SparseArrays.jl v1.12.0 (SuiteSparse 7.8.3). Matrices have density 0.01. Source: [`bench_sparse.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_sparse.jl).
@@ -218,23 +218,23 @@ Apple Cholesky is around parity at N=500 and pulls ahead as N grows, reaching ~4
 
 ## FFT
 
-FFT performance comparing Apple vDSP against FFTW, both single-threaded. With **pre-planned** transforms (`FFTW.MEASURE` plans) FFTW leads across sizes and dimensions — typically 1.5–2.4× for 1D and up to ~14× for large 2D Float64 grids — with vDSP reaching parity only for Float32 at the largest 1D sizes. For **no-plan convenience calls**, however, the picture changed with the FFT setup cache: `AppleAccelerate.fft(x)` reuses a cached setup after the first call at each size, and now beats FFTW's unplanned `fft(x)` at small sizes and wins or ties for Float32 at every size tested (see the last table). vDSP's FFT also remains useful to avoid an FFTW dependency or when Accelerate is already loaded. Source: [`bench_fft.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl).
+FFT performance comparing Apple vDSP against FFTW, both single-threaded. With **pre-planned** transforms (`FFTW.MEASURE` plans) FFTW leads across sizes and dimensions — typically 1.5–2.4× for 1D and up to ~14× for large 2D Float64 grids — with vDSP reaching parity only for Float32 at the largest 1D sizes. For **no-plan convenience calls**, however, the picture changed with the FFT setup cache: `AppleAccelerate.fft(x)` reuses a cached setup after the first call at each size, and now beats FFTW's unplanned `fft(x)` at small sizes and stays competitive for Float32 across sizes (see the last table). vDSP's FFT also remains useful to avoid an FFTW dependency or when Accelerate is already loaded. Source: [`bench_fft.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl).
 
 ### Complex 1D FFT (pre-planned)
 
-FFTW leads for 1D complex transforms, typically by 1.6–2.4×; vDSP reaches parity for Float32 at some large sizes:
+FFTW leads for 1D complex transforms, typically by 1.5–2×; vDSP reaches parity for Float32 at some large sizes:
 
 | Type | N | vDSP (μs) | FFTW (μs) | Speedup |
 |------|---|-----------|-----------|---------|
-| ComplexF64 | 1,024 | 4.6 | 2.0 | 2.36× slower |
-| ComplexF64 | 4,096 | 19.5 | 9.7 | 2.0× slower |
-| ComplexF64 | 65,536 | 611 | 263 | 2.32× slower |
-| ComplexF64 | 1,048,576 | 13,423 | 8,249 | 1.63× slower |
-| ComplexF32 | 1,024 | 2.2 | 1.2 | 1.79× slower |
-| ComplexF32 | 4,096 | 10.9 | 4.6 | 2.36× slower |
-| ComplexF32 | 65,536 | 185 | 164 | 1.12× slower |
-| ComplexF32 | 262,144 | 653 | 675 | 1.03× |
-| ComplexF32 | 1,048,576 | 7,143 | 5,850 | 1.22× slower |
+| ComplexF64 | 1,024 | 5.4 | 2.7 | 2.02× slower |
+| ComplexF64 | 4,096 | 19.2 | 12.2 | 1.57× slower |
+| ComplexF64 | 65,536 | 469 | 296 | 1.58× slower |
+| ComplexF64 | 1,048,576 | 13,100 | 8,092 | 1.62× slower |
+| ComplexF32 | 1,024 | 2.2 | 1.2 | 1.93× slower |
+| ComplexF32 | 4,096 | 7.0 | 4.8 | 1.46× slower |
+| ComplexF32 | 65,536 | 244 | 161 | 1.52× slower |
+| ComplexF32 | 262,144 | 616 | 669 | 1.09× |
+| ComplexF32 | 1,048,576 | 7,406 | 5,901 | 1.26× slower |
 
 ### Real FFT (pre-planned)
 
@@ -242,11 +242,11 @@ FFTW leads for real transforms too, though vDSP closes to near parity for Float3
 
 | Type | N | vDSP (μs) | FFTW (μs) | Speedup |
 |------|---|-----------|-----------|---------|
-| Float64 | 1,024 | 3.3 | 1.0 | 3.16× slower |
-| Float64 | 65,536 | 241 | 128 | 1.87× slower |
-| Float32 | 4,096 | 6.2 | 4.1 | 1.51× slower |
-| Float32 | 65,536 | 93 | 71 | 1.3× slower |
-| Float32 | 262,144 | 369 | 355 | 1.04× slower |
+| Float64 | 1,024 | 2.9 | 1.1 | 2.65× slower |
+| Float64 | 65,536 | 241 | 127 | 1.9× slower |
+| Float32 | 4,096 | 5.7 | 3.0 | 1.89× slower |
+| Float32 | 65,536 | 93 | 71 | 1.31× slower |
+| Float32 | 262,144 | 399 | 332 | 1.2× slower |
 
 ### Complex 2D FFT (pre-planned)
 
@@ -254,10 +254,10 @@ FFTW is substantially faster for 2D complex transforms — up to ~14× for large
 
 | Type | Size | vDSP (μs) | FFTW (μs) | Speedup |
 |------|------|-----------|-----------|---------|
-| ComplexF64 | 64×64 | 32.5 | 7.9 | 4.12× slower |
-| ComplexF64 | 256×256 | 3,255 | 231 | 14.06× slower |
-| ComplexF32 | 64×64 | 13.6 | 4.7 | 2.92× slower |
-| ComplexF32 | 256×256 | 228 | 124 | 1.84× slower |
+| ComplexF64 | 64×64 | 32.4 | 8.0 | 4.03× slower |
+| ComplexF64 | 256×256 | 3,328 | 241 | 13.84× slower |
+| ComplexF32 | 64×64 | 13.2 | 4.7 | 2.81× slower |
+| ComplexF32 | 256×256 | 232 | 127 | 1.83× slower |
 
 ### Real 2D FFT (pre-planned)
 
@@ -265,12 +265,12 @@ The new 2D real FFT (`rfft(A::Matrix)`) follows the same pattern — FFTW leads 
 
 | Type | Size | vDSP (μs) | FFTW (μs) | Speedup |
 |------|------|-----------|-----------|---------|
-| Float64 | 64×64 | 17.3 | 5.0 | 3.5× slower |
-| Float64 | 128×128 | 69.4 | 23.2 | 2.99× slower |
-| Float64 | 256×256 | 1,181 | 110 | 10.74× slower |
-| Float32 | 64×64 | 7.0 | 3.8 | 1.86× slower |
-| Float32 | 128×128 | 30.4 | 15.6 | 1.95× slower |
-| Float32 | 256×256 | 156 | 69 | 2.25× slower |
+| Float64 | 64×64 | 17.5 | 5.0 | 3.49× slower |
+| Float64 | 128×128 | 69.0 | 23.2 | 2.97× slower |
+| Float64 | 256×256 | 1,152 | 108 | 10.65× slower |
+| Float32 | 64×64 | 7.0 | 3.7 | 1.89× slower |
+| Float32 | 128×128 | 28.0 | 15.8 | 1.77× slower |
+| Float32 | 256×256 | 154 | 69 | 2.22× slower |
 
 ### Batched 1D FFT (columns of a matrix)
 
@@ -278,25 +278,25 @@ The new `fft(A, 1)` transforms each column via `vDSP_fftm_*`. FFTW's planned bat
 
 | Type | Size | vDSP (μs) | FFTW (μs) | Speedup |
 |------|------|-----------|-----------|---------|
-| ComplexF64 | 256×64 | 57.4 | 23.0 | 2.5× slower |
-| ComplexF64 | 1024×64 | 257 | 124 | 2.07× slower |
-| ComplexF64 | 4096×16 | 294 | 152 | 1.94× slower |
-| ComplexF32 | 256×64 | 50.6 | 11.4 | 4.43× slower |
-| ComplexF32 | 1024×64 | 165 | 59 | 2.77× slower |
-| ComplexF32 | 4096×16 | 181 | 80 | 2.25× slower |
+| ComplexF64 | 256×64 | 57.4 | 23.0 | 2.49× slower |
+| ComplexF64 | 1024×64 | 254 | 123 | 2.06× slower |
+| ComplexF64 | 4096×16 | 290 | 150 | 1.93× slower |
+| ComplexF32 | 256×64 | 48.7 | 11.4 | 4.26× slower |
+| ComplexF32 | 1024×64 | 168 | 60 | 2.78× slower |
+| ComplexF32 | 4096×16 | 179 | 80 | 2.23× slower |
 
 ### No-plan `fft(x)` — cached setups
 
-This table compares the *convenience* entry points: `AppleAccelerate.fft(x)` vs `FFTW.fft(x)`, neither given a pre-built plan. AppleAccelerate reuses a cached vDSP setup after the first call at each size (FFTW builds an `ESTIMATE` plan per call), so for the common "just call `fft`" pattern vDSP now leads at small sizes and wins or ties for Float32 at every size tested:
+This table compares the *convenience* entry points: `AppleAccelerate.fft(x)` vs `FFTW.fft(x)`, neither given a pre-built plan. AppleAccelerate reuses a cached vDSP setup after the first call at each size (FFTW builds an `ESTIMATE` plan per call), so for the common "just call `fft`" pattern vDSP now leads at small sizes and stays competitive for Float32 across sizes:
 
 | Type | N | vDSP (μs) | FFTW (μs) | Speedup |
 |------|---|-----------|-----------|---------|
-| ComplexF64 | 1,024 | 3.8 | 8.3 | 2.16× |
-| ComplexF64 | 65,536 | 465 | 263 | 1.77× slower |
-| ComplexF64 | 1,048,576 | 13,531 | 8,883 | 1.52× slower |
-| ComplexF32 | 1,024 | 2.3 | 4.2 | 1.79× |
-| ComplexF32 | 65,536 | 145 | 146 | 1.01× |
-| ComplexF32 | 1,048,576 | 4,704 | 5,403 | 1.15× |
+| ComplexF64 | 1,024 | 3.7 | 5.2 | 1.41× |
+| ComplexF64 | 65,536 | 462 | 261 | 1.77× slower |
+| ComplexF64 | 1,048,576 | 9,800 | 8,646 | 1.13× slower |
+| ComplexF32 | 1,024 | 2.1 | 4.4 | 2.06× |
+| ComplexF32 | 65,536 | 154 | 147 | 1.05× slower |
+| ComplexF32 | 1,048,576 | 4,001 | 6,155 | 1.54× |
 
 !!! note "Benchmark environment"
     FFTW.jl v1.10.0. Pre-planned tables use `FFTW.MEASURE` plans on both sides; the no-plan table calls the convenience functions directly. Source: [`bench_fft.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_fft.jl).
