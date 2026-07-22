@@ -17,6 +17,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Dense linear algebra** via BLAS/LAPACK forwarding through [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — all standard `LinearAlgebra` operations (`lu`, `qr`, `svd`, `cholesky`, `eigen`, etc.) are accelerated transparently — **6–13× faster** GEMM than OpenBLAS on Apple Silicon when both are single-threaded; OpenBLAS narrows the gap with multiple threads, since Accelerate offloads GEMM to the SME/AMX matrix co-processor whose throughput is largely thread-independent while OpenBLAS scales across CPU cores — plus **2–4× faster** factorizations and solves
 - **Sparse linear algebra** via `libSparse` — sparse matrix operations and direct solvers (QR, Cholesky, LDLT) — **faster for Float32 QR** and **Cholesky at N=5000** vs SuiteSparse
 - **Signal Processing** — 1D/2D complex and real FFT (including batched and mixed-radix lengths), DCT, convolution, cross-correlation, biquad filtering, window functions — with pre-planned transforms FFTW is generally faster (roughly 1.5–14× across complex 1D, real, and 2D FFT), but for no-plan convenience calls AppleAccelerate's cached FFT setups make `fft(x)` **faster than FFTW at small sizes and competitive for Float32 throughout**; vDSP's FFT also avoids an FFTW dependency when Accelerate is already loaded
+- **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations (`:relu`, `:sigmoid`, `:tanh`, `:abs`, `:identity`)
 
 ## Installation
 
@@ -29,22 +30,39 @@ Pkg.add("AppleAccelerate")
 
 ## Quick start
 
+An example from each major subsystem (every function lives under the `AppleAccelerate.`
+prefix — the package intentionally exports nothing, so it never shadows `Base`/`LinearAlgebra`):
+
 ```julia
 using AppleAccelerate
-using LinearAlgebra
+using LinearAlgebra, SparseArrays
 
-# All LinearAlgebra is accelerated through LBT
+# --- Dense linear algebra: all of LinearAlgebra is accelerated transparently via LBT ---
 A = randn(1000, 1000)
-F = lu(A)
+F = lu(A)                                      # BLAS/LAPACK routed to Accelerate
 
-# Accelerated vectorized math
+# --- Vectorized elementwise math (vForce / vDSP) ---
 X = randn(10_000)
-Y = AppleAccelerate.exp(X)
-Y = AppleAccelerate.sin(X)
+Y = AppleAccelerate.exp(X)                     # also sin, cos, log, sqrt, tanh, …
+AppleAccelerate.sincos(X)                      # fused, both results in one pass
 
-# FFT
+# --- Signal processing: FFT / DCT / convolution / biquad filtering ---
 x = randn(ComplexF64, 1024)
-X = AppleAccelerate.fft(x)
+X = AppleAccelerate.fft(x)                      # cached setup; also rfft, fft2d, dct
+
+# --- Complex vector operations (split-complex vDSP) ---
+z = randn(ComplexF64, 1000)
+mags = AppleAccelerate.vmags(z)                 # squared magnitudes (abs2)
+ang  = AppleAccelerate.vphase(z)                # phase angles
+
+# --- Sparse direct & iterative solvers (libSparse): Cholesky / LDLᵀ / LU / QR / CG / GMRES ---
+S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
+As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
+xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
+
+# --- Neural-network primitives (BNNS) ---
+W = rand(Float32, 4, 3); v = rand(Float32, 3, 8)
+C = AppleAccelerate.bnns_matmul(W, v)           # α·(W*v), Float32
 ```
 
 ## Documentation
