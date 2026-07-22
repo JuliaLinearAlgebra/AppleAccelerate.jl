@@ -96,16 +96,12 @@ surface and what users reach for — not everything that exists. Register-width 
 (rationale in `vmath.jl` `VMATH_COVERAGE`); document any such intentional exclusion
 so the next person doesn't re-investigate it.
 
-**Do NOT wrap deprecated API.** Check each candidate's availability attribute in the SDK
-header (`__API_DEPRECATED(...)`, `API_DEPRECATED`, "deprecated" in the doc comment) and
-skip anything Apple has retired — wrapping it just to pad a coverage number is a net
-negative: it adds maintenance burden against something Apple is removing and steers users
-onto the wrong path. Wrap the **modern replacement** instead (e.g. the whole `BNNSFilter*`
-layer create/apply API is deprecated as of macOS 15 in favor of the **BNNS Graph** API — wrap
-Graph, not the legacy filters; the CoreGraphics/CoreVideo-interop vImage functions similarly).
-When you compute a coverage %, measure it against the *worth-wrapping* surface (excluding
-deprecated + design-excluded families), and state that denominator — don't let a raw
-symbol count pressure you into shipping deprecated wrappers.
+**Do NOT wrap deprecated API.** Check the SDK header's availability attribute
+(`__API_DEPRECATED`, "deprecated" in the doc comment) and skip what Apple retired — wrap the
+**modern replacement** instead (e.g. the `BNNSFilter*` layer API is deprecated in macOS 15
+for the **BNNS Graph** API — wrap Graph). Measure coverage % against the *worth-wrapping*
+surface (excluding deprecated + design-excluded), and state that denominator; don't ship
+deprecated wrappers to pad a symbol count.
 
 ## Phase 2 — Generate / extend the FFI bindings
 
@@ -212,19 +208,13 @@ the `@docs` block, and ideally a runnable `@example`. New capability area → ne
 rely on (`I = [...]` shadows `LinearAlgebra.I`). Keep README headline claims in sync
 with `benchmarks.md`.
 
-**ALWAYS build the docs locally before pushing — `julia --project=docs docs/make.jl` — and
-confirm it exits 0.** The Documentation build is a **separate CI gate from `Pkg.test()`**:
-a green test suite says nothing about the docs, and a docs failure blocks the PR. The most
-common failure (it has bitten multiple PRs) is Documenter's `cross_references` check:
-**every name you `@ref` must also appear in an `@docs` block**, or the build aborts with
-`Cannot resolve @ref for ...`. That includes refs in a page's cross-ref *table*, refs inside
-a **docstring's own body** (e.g. a "See also [`foo!`](@ref)" line — `foo!` must be `@docs`'d
-too), and functions that share a docstring via `@doc (@doc x) y` (both `x` and `y` need
-their own `@docs` entry to be linkable). `@example`/`jldoctest` blocks are also *executed*
-during the build, so a runtime error or a wrong expected output fails it. When you add a new
-page, wire it into `docs/make.jl` AND make sure every `@ref` it introduces resolves — a
-subagent that "didn't build docs" is the usual cause of a red Documentation check on an
-otherwise-green PR.
+**ALWAYS build docs locally before pushing (`julia --project=docs docs/make.jl`, exit 0).**
+It's a **separate CI gate from `Pkg.test()`** — a green suite says nothing about docs. The
+usual failure: Documenter's `cross_references` check aborts unless **every `@ref`'d name is
+also in an `@docs` block** — including refs in a docstring body ("See also [`foo!`](@ref)")
+and both names of a shared `@doc (@doc x) y`. `@example`/doctest blocks also *run* during
+the build. "Didn't build docs" is the usual cause of a red Documentation check on a
+green-tests PR.
 
 ## Phase 6 — Benchmark
 
