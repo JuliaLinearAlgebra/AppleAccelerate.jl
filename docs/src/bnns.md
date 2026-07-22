@@ -31,6 +31,10 @@ N-D op wrappers map a column-major Julia `Array` onto a `BNNSDataLayout{N}DLastM
 descriptor with explicit strides, so **BNNS axis `k` corresponds to Julia
 dimension `k+1`** (axis 0 is the contiguous/fastest axis).
 
+```@docs
+AppleAccelerate.BNNSArray
+```
+
 ## Matrix multiply
 
 [`bnns_matmul`](@ref AppleAccelerate.bnns_matmul) computes `alpha * (A * B)` via
@@ -50,6 +54,11 @@ C2 = AppleAccelerate.bnns_matmul(A, B; alpha = 2.0f0)  # == 2 .* (A * B)
 nothing # hide
 ```
 
+```@docs
+AppleAccelerate.bnns_matmul
+AppleAccelerate.bnns_matmul!
+```
+
 ## Activations
 
 [`bnns_activation`](@ref AppleAccelerate.bnns_activation) applies a pointwise
@@ -63,6 +72,11 @@ x = Float32[-2, -1, 0, 1, 2]
 y = AppleAccelerate.bnns_activation(:sigmoid, x)
 @assert y ≈ 1f0 ./ (1f0 .+ exp.(-x))
 nothing # hide
+```
+
+```@docs
+AppleAccelerate.bnns_activation
+AppleAccelerate.bnns_activation!
 ```
 
 ## Tensor manipulation
@@ -169,6 +183,7 @@ AppleAccelerate.BNNSGraphCompileOptions
 AppleAccelerate.BNNSGraph
 AppleAccelerate.BNNSGraphContext
 AppleAccelerate.bnns_graph_execute!
+AppleAccelerate.bnns_graph_context_workspace_size
 ```
 
 The compile-options accessors
