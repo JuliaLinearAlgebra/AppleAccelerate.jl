@@ -216,6 +216,12 @@ and both names of a shared `@doc (@doc x) y`. `@example`/doctest blocks also *ru
 the build. "Didn't build docs" is the usual cause of a red Documentation check on a
 green-tests PR.
 
+**Keep the PR description in sync with all its commits.** When a PR grows past its first
+commit — a follow-up fix, or a later commit that *removes* something an earlier one added —
+update the PR title/body to describe the net final state, not just the opening commit.
+Reviewers read the description, not the commit-by-commit diff; a stale one (e.g. still
+advertising code a later commit deleted) misleads. List the commits' net effect.
+
 ## Phase 6 — Benchmark
 
 Add cases to the matching `test/bench/bench_*.jl` (or a new one, registered in
