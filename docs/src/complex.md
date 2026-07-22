@@ -75,6 +75,9 @@ The complex-valued docstrings for `vneg` and `vabs` are rendered alongside the r
 | [`zmmul`](@ref AppleAccelerate.zmmul) | Complex matrix multiply: `A * B` |
 | [`zmma`](@ref AppleAccelerate.zmma) | Complex matrix multiply-add: `A * B + C` |
 | [`zmms`](@ref AppleAccelerate.zmms) | Complex matrix multiply-subtract: `A * B - C` |
+| [`zmsm`](@ref AppleAccelerate.zmsm) | Complex matrix multiply and reverse-subtract: `C - A*B` |
+| [`zvmmaa`](@ref AppleAccelerate.zvmmaa) | Elementwise multiply-multiply-add-add: `A*B + C*D + E` |
+| [`zrdesamp`](@ref AppleAccelerate.zrdesamp) | Complex-real decimating resample/correlation |
 
 ## Coordinate conversion
 
@@ -134,6 +137,9 @@ AppleAccelerate.zconv
 AppleAccelerate.zmmul
 AppleAccelerate.zmma
 AppleAccelerate.zmms
+AppleAccelerate.zmsm
+AppleAccelerate.zvmmaa
+AppleAccelerate.zrdesamp
 AppleAccelerate.ctoz
 AppleAccelerate.ztoc
 ```
