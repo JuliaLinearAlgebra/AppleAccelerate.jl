@@ -35,9 +35,10 @@ B = AASparseMatrix(I, J, V, 3, 3)
 nothing # hide
 ```
 
-The `SparseMatrixCSC` constructor automatically detects symmetric and triangular
-structure and sets the appropriate Apple Accelerate attributes. The COO constructor
-uses Accelerate's `SparseConvertFromCoordinate` and accepts `Float32`/`Float64` values.
+The `SparseMatrixCSC` constructor automatically detects symmetric/Hermitian and
+triangular structure and sets the appropriate Apple Accelerate attributes. The COO
+constructor uses Accelerate's `SparseConvertFromCoordinate` and accepts
+`Float32`/`Float64` and (macOS 15.5+) `ComplexF32`/`ComplexF64` values.
 
 ### Matrix operations
 
@@ -48,6 +49,7 @@ uses Accelerate's `SparseConvertFromCoordinate` and accepts `Float32`/`Float64` 
 | `alpha * A * x` | Scaled sparse multiply |
 | [`muladd!`](@ref AppleAccelerate.muladd!) | Multiply-add: `y += A * x` or `y += alpha * A * x` |
 | `transpose(A)` | Transpose (sets flag, no copy) |
+| `adjoint(A)` / `A'` | Conjugate transpose (complex; equals `transpose` for real) |
 
 ### Query functions
 
@@ -59,6 +61,37 @@ uses Accelerate's `SparseConvertFromCoordinate` and accepts `Float32`/`Float64` 
 | `istriu(A)` | Check if upper triangular |
 | `istril(A)` | Check if lower triangular |
 | `A[i, j]` | Element access |
+
+## Complex-valued matrices
+
+The **entire** sparse surface accepts `ComplexF32`/`ComplexF64` in addition to
+`Float32`/`Float64` (complex requires **macOS 15.5+**): the `SparseMatrixCSC` and
+COO constructors, direct factorizations (Cholesky/LDLᵀ/LU/QR), `solve`/`solve!`/
+`ldiv!`, `refactor!`, `SparseMultiply`/`muladd!`, transpose/adjoint, the iterative
+solvers (`:cg`/`:gmres`/`:lsmr`) with preconditioners, sub-factor extraction, the
+preallocated-workspace solve, partial-LU update, and introspection.
+
+Complex matrices differ from real ones in two ways:
+
+  - **Cholesky and CG use the Hermitian path.** For a complex matrix, `cholesky(A)`
+    and `solve(A, b; method = :cg)` require `A` to be **Hermitian** positive-definite
+    (`A == A'`), and dispatch to libSparse's Hermitian factorization — not the
+    (complex-)symmetric one. A `SparseMatrixCSC{Complex}` that satisfies `ishermitian`
+    is auto-tagged Hermitian when wrapped.
+  - **`adjoint` (`A'`) and `transpose` are distinct.** `adjoint` conjugates as well as
+    transposes; both are attribute-flag views that share the underlying CSC data.
+
+```@example sparse_complex
+using AppleAccelerate, SparseArrays, LinearAlgebra
+import AppleAccelerate: AASparseMatrix, cholesky, solve
+
+M = sprandn(ComplexF64, 60, 60, 0.05)
+H = AASparseMatrix(SparseMatrixCSC(M * M' + 60I))   # Hermitian positive-definite
+b = randn(ComplexF64, 60)
+x = solve(cholesky(H), b)                            # Hermitian Cholesky
+@assert x ≈ Matrix(H) \ b
+nothing # hide
+```
 
 ## AAFactorization
 
