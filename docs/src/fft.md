@@ -153,7 +153,9 @@ nothing # hide
 
 ```@docs
 AppleAccelerate.fftradix3
+AppleAccelerate.fftradix5
 AppleAccelerate.fft16
+AppleAccelerate.fft32
 AppleAccelerate.plan_dft_interleaved
 AppleAccelerate.dft_interleaved
 AppleAccelerate.idft_interleaved
