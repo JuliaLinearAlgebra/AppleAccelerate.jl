@@ -1,4 +1,4 @@
-# Complex Array Operations
+# Complex Array Operations (vDSP)
 
 AppleAccelerate wraps [vDSP](https://developer.apple.com/documentation/accelerate/vdsp)'s split-complex (`vDSP_z*`) functions for `Vector{Complex{Float32}}` and `Vector{Complex{Float64}}`. These extend existing function names (e.g., `vneg`, `vabs`, `vmul`) with methods that dispatch on complex element types — no naming conflicts with the real-valued versions on the [Array Operations](array.md) page.
 
