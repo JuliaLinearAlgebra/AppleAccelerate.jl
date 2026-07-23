@@ -1,38 +1,27 @@
 # BNNS (Basic Neural Network Subroutines) idiomatic wrappers.
 #
-# This module wraps a broad slice (~90%) of Apple's BNNS API exposed by the raw
-# `LibAccelerate` layer — tensor ops, reductions/clipping, random generation,
-# nearest neighbors, the whole BNNS Graph compiler pipeline, the classic layer
-# filters, and the optimizer step. The numerically important helpers are
-# cross-validated against plain-Julia references; the deprecated layer-create /
-# gradient wrappers are thin passthroughs over the raw parameter structs.
+# This module wraps the Apple-CURRENT (non-deprecated) slice of BNNS exposed by
+# the raw `LibAccelerate` layer: dense array descriptors (`BNNSArray`), the
+# stateless tensor ops that remain current (`bnns_transpose`, `bnns_copy!`), the
+# DirectApply reduction / top-k kernels (`bnns_reduce`, `bnns_topk`,
+# `bnns_in_topk`), random generation, nearest neighbors, layout/size queries, and
+# the full BNNS Graph compiler pipeline. The numerically important helpers are
+# cross-validated against plain-Julia references.
 #
-# A handful of exotic, training-only entry points are left to the raw layer:
-# multi-head attention (forward+backward), the LSTM training-cache path, the
-# two-input/fused/loss backward variants, and the fully-connected sparsification
-# helpers. They need training caches or opaque multi-kilobyte parameter blocks
-# that cannot be validated generically.
-#
-# NOTE: The legacy per-filter layer create/apply API (`BNNSFilter*`) is DEPRECATED by
-# Apple as of macOS 15.0 / iOS 18.0 and is intentionally NOT wrapped here — target the
-# BNNS Graph API (below) instead. The pre-existing `bnns_matmul` / `bnns_activation`
-# convenience helpers still call deprecated BNNS primitives internally and may emit
-# C-level deprecation warnings; the descriptor, tensor-op, reduction, DirectApply,
-# random, optimizer, nearest-neighbor, and Graph wrappers here are current API.
+# NOTE: Every classic and DirectApply BNNS entry point that Apple DEPRECATED in
+# macOS 15.0 / iOS 18.0 is intentionally NOT wrapped here — target the BNNS Graph
+# API (below) instead. That excluded set includes `BNNSMatMul`, `BNNSTile`,
+# `BNNSGather`/`BNNSScatter` (and their ND forms), `BNNSCompareTensor`,
+# `BNNSBandPart`, `BNNSShuffle`, the clip / `BNNSComputeNorm` family,
+# `BNNSOptimizerStep`, the `BNNSDirectApply{ActivationBatch,BroadcastMatMul,
+# Quantizer}` kernels, and the whole `BNNSFilter*` layer create/apply API.
 #
 # Apple docs: https://developer.apple.com/documentation/accelerate/bnns
 
 using .LibAccelerate:
     BNNSNDArrayDescriptor, BNNSDataType, BNNSDataLayout,
     BNNSDataTypeFloat32, BNNSDataTypeInt32,
-    BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix,
-    BNNSActivation, BNNSActivationFunction,
-    BNNSActivationFunctionIdentity, BNNSActivationFunctionRectifiedLinear,
-    BNNSActivationFunctionSigmoid, BNNSActivationFunctionTanh,
-    BNNSActivationFunctionAbs,
-    BNNSLayerParametersActivation, BNNSFilterParameters,
-    BNNSFilterCreateLayerActivation, BNNSFilterApply, BNNSFilterDestroy,
-    BNNSMatMul, BNNSMatMulWorkspaceSize
+    BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix
 
 # Alias the raw layer so the many BNNS enum values, structs and ccall wrappers can
 # be reached without an unwieldy explicit import list. All new wrappers below go
@@ -70,11 +59,6 @@ this constructor reports the array using a column-major-friendly BNNS layout:
 Only `Float32` (and `Int32`) dense, contiguous arrays are supported here; other
 element types or strided/transposed arrays should use the raw `LibAccelerate`
 layer directly.
-
-See also [`bnns_matmul`](@ref), [`bnns_activation`](@ref).
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
 """
 struct BNNSArray{T,N}
     desc::BNNSNDArrayDescriptor
@@ -116,153 +100,6 @@ function BNNSArray(A::Array{T}) where {T}
         0.0f0,                     # data_bias
     )
     return BNNSArray{T,ndims(A)}(desc, A)
-end
-
-# --- Matrix multiply ---------------------------------------------------------
-
-"""
-    bnns_matmul(A::Matrix{Float32}, B::Matrix{Float32}; alpha = 1.0f0) -> Matrix{Float32}
-
-Compute `alpha * (A * B)` using BNNS (`BNNSMatMul`). `A` is `m×k`, `B` is `k×n`,
-and the result is `m×n`. Equivalent to `alpha .* (A * B)`.
-
-See also [`bnns_matmul!`](@ref).
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
-"""
-function bnns_matmul(A::AbstractMatrix{BNNSFloat}, B::AbstractMatrix{BNNSFloat};
-                     alpha::Real = 1.0f0)
-    m = size(A, 1)
-    n = size(B, 2)
-    C = Matrix{BNNSFloat}(undef, m, n)
-    return bnns_matmul!(C, A, B; alpha)
-end
-
-"""
-    bnns_matmul!(C, A, B; alpha = 1.0f0) -> C
-
-In-place matrix multiply: `C .= alpha .* (A * B)`. All arguments are `Float32`
-matrices with conforming dimensions. Returns `C`.
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
-"""
-function bnns_matmul!(C::AbstractMatrix{BNNSFloat}, A::AbstractMatrix{BNNSFloat},
-                      B::AbstractMatrix{BNNSFloat}; alpha::Real = 1.0f0)
-    m, k = size(A)
-    k2, n = size(B)
-    k == k2 || throw(DimensionMismatch("A is $(size(A)), B is $(size(B))"))
-    size(C) == (m, n) || throw(DimensionMismatch("C is $(size(C)), expected ($m, $n)"))
-
-    Ac = A isa Array ? A : Array(A)
-    Bc = B isa Array ? B : Array(B)
-    # BNNSArray requires a dense `Array`; if C is a view (e.g. a batched slice),
-    # compute into a temporary and copy the result back at the end.
-    Cc = C isa Array{BNNSFloat,2} ? C : Matrix{BNNSFloat}(undef, m, n)
-
-    da = BNNSArray(Ac)
-    db = BNNSArray(Bc)
-    dc = BNNSArray(Cc)
-    fp = BNNSFilterParameters(UInt32(0), Csize_t(0), C_NULL, C_NULL)
-
-    GC.@preserve Ac Bc Cc da db dc begin
-        ra = Ref(da.desc); rb = Ref(db.desc); rc = Ref(dc.desc); rfp = Ref(fp)
-        # BNNSMatMul computes out = alpha * inputA * inputB (no transpose).
-        ws = BNNSMatMulWorkspaceSize(false, false, Float32(alpha), ra, rb, rc, rfp)
-        workspace = ws > 0 ? Vector{UInt8}(undef, Int(ws)) : UInt8[]
-        GC.@preserve workspace begin
-            wptr = isempty(workspace) ? C_NULL : pointer(workspace)
-            status = BNNSMatMul(false, false, Float32(alpha), ra, rb, rc, wptr, rfp)
-            status == 0 || error("BNNSMatMul failed with status $status")
-        end
-    end
-    Cc === C || copyto!(C, Cc)
-    return C
-end
-
-# --- Pointwise activation ----------------------------------------------------
-
-"""
-    bnns_activation(f::Symbol, X::AbstractArray{Float32}; alpha=0.0f0, beta=0.0f0) -> AbstractArray{Float32}
-
-Apply a pointwise activation function `f` to every element of `X` using the BNNS
-activation-layer filter API, returning a new array. Supported `f`:
-
-  * `:identity`
-  * `:relu`     — rectified linear
-  * `:sigmoid`
-  * `:tanh`
-  * `:abs`
-
-`alpha`/`beta` are passed to BNNS for activations that take parameters (e.g. leaky
-variants); they are ignored by the activations listed above.
-
-See also [`bnns_activation!`](@ref).
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
-"""
-function bnns_activation(f::Symbol, X::AbstractArray{BNNSFloat};
-                         alpha::Real = 0.0f0, beta::Real = 0.0f0)
-    Y = similar(Array(X))
-    return bnns_activation!(f, Y, X; alpha, beta)
-end
-
-const _BNNS_ACT = Dict(
-    :identity => BNNSActivationFunctionIdentity,
-    :relu     => BNNSActivationFunctionRectifiedLinear,
-    :sigmoid  => BNNSActivationFunctionSigmoid,
-    :tanh     => BNNSActivationFunctionTanh,
-    :abs      => BNNSActivationFunctionAbs,
-)
-
-"""
-    bnns_activation!(f::Symbol, Y::AbstractArray{Float32}, X::AbstractArray{Float32}; alpha=0.0f0, beta=0.0f0) -> Y
-
-In-place pointwise activation: `Y .= f.(X)`. See [`bnns_activation`](@ref) for the
-list of supported `f`. `X` and `Y` must have the same shape. Returns `Y`.
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
-"""
-function bnns_activation!(f::Symbol, Y::AbstractArray{BNNSFloat}, X::AbstractArray{BNNSFloat};
-                          alpha::Real = 0.0f0, beta::Real = 0.0f0)
-    size(Y) == size(X) || throw(DimensionMismatch("Y is $(size(Y)), X is $(size(X))"))
-    haskey(_BNNS_ACT, f) ||
-        throw(ArgumentError("BNNS: unsupported activation $(repr(f)); supported: $(sort(collect(keys(_BNNS_ACT))))"))
-
-    # Activation is fully pointwise; treat the data as a flat vector so the
-    # descriptor layout is trivial and identical for any array shape.
-    Xc = X isa Vector ? X : vec(Array(X))
-    Yc = (Y isa Vector) ? Y : Vector{BNNSFloat}(undef, length(Y))
-
-    di = BNNSArray(Xc)
-    do_ = BNNSArray(Yc)
-    act = BNNSActivation(BNNSActivationFunction(_BNNS_ACT[f]),
-                         Float32(alpha), Float32(beta),
-                         Int32(0), Int32(0), Int32(0),
-                         C_NULL, C_NULL, C_NULL)
-    fp = BNNSFilterParameters(UInt32(0), Csize_t(0), C_NULL, C_NULL)
-
-    GC.@preserve Xc Yc di do_ begin
-        lp = BNNSLayerParametersActivation(di.desc, do_.desc, act, UInt32(0))
-        filter = GC.@preserve lp fp begin
-            BNNSFilterCreateLayerActivation(Ref(lp), Ref(fp))
-        end
-        filter == C_NULL && error("BNNSFilterCreateLayerActivation returned NULL")
-        try
-            status = BNNSFilterApply(filter, pointer(Xc), pointer(Yc))
-            status == 0 || error("BNNSFilterApply failed with status $status")
-        finally
-            BNNSFilterDestroy(filter)
-        end
-    end
-
-    if !(Y isa Vector)
-        copyto!(Y, reshape(Yc, size(Y)))
-    end
-    return Y
 end
 
 # =============================================================================
@@ -324,43 +161,6 @@ _bnns_check(status, name) =
 # =============================================================================
 
 """
-    bnns_tile(A::Array, reps) -> Array
-
-Tile `A` by integer repeats `reps` (a tuple/vector, one entry per dimension),
-equivalent to `repeat(A, reps...)`, via `BNNSTile`. `Float32`/integer arrays are
-supported.
-
-!!! warning
-    Deprecated by Apple (macOS 15+); prefer the BNNS Graph API for new code.
-"""
-function bnns_tile(A::Array{T}, reps) where {T}
-    r = ntuple(i -> i <= ndims(A) ? Int(reps[i]) : 1, ndims(A))
-    O = Array{T}(undef, ntuple(i -> size(A, i) * r[i], ndims(A)))
-    di = _desc(A); do_ = _desc(O)
-    GC.@preserve A O begin
-        _bnns_check(LA.BNNSTile(Ref(di), Ref(do_), C_NULL), "BNNSTile")
-    end
-    return O
-end
-
-"""
-    bnns_tile_backward(out_delta::Array, insize) -> Array
-
-Reduce a tiled gradient `out_delta` back to the untiled shape `insize` by summing
-the contributions from each tile, via `BNNSTileBackward`. This is the adjoint of
-[`bnns_tile`](@ref).
-"""
-function bnns_tile_backward(out_delta::Array{T}, insize) where {T}
-    isz = ntuple(i -> Int(insize[i]), ndims(out_delta))
-    ind = Array{T}(undef, isz)
-    di = _desc(ind); do_ = _desc(out_delta)
-    GC.@preserve ind out_delta begin
-        _bnns_check(LA.BNNSTileBackward(Ref(di), Ref(do_), C_NULL), "BNNSTileBackward")
-    end
-    return ind
-end
-
-"""
     bnns_transpose(A::Array, dim0, dim1) -> Array
 
 Swap Julia dimensions `dim0` and `dim1` of `A` (1-based) via `BNNSTranspose`,
@@ -377,80 +177,6 @@ function bnns_transpose(A::Array{T}, dim0::Integer, dim1::Integer) where {T}
     return O
 end
 
-const _BNNS_RELOP = Dict(
-    :(==) => LA.BNNSRelationalOperatorEqual, :eq => LA.BNNSRelationalOperatorEqual,
-    :< => LA.BNNSRelationalOperatorLess, :lt => LA.BNNSRelationalOperatorLess,
-    :<= => LA.BNNSRelationalOperatorLessEqual, :le => LA.BNNSRelationalOperatorLessEqual,
-    :> => LA.BNNSRelationalOperatorGreater, :gt => LA.BNNSRelationalOperatorGreater,
-    :>= => LA.BNNSRelationalOperatorGreaterEqual, :ge => LA.BNNSRelationalOperatorGreaterEqual,
-    :(!=) => LA.BNNSRelationalOperatorNotEqual, :ne => LA.BNNSRelationalOperatorNotEqual,
-)
-
-"""
-    bnns_compare(op::Symbol, A::Array{Float32}, B::Array{Float32}) -> Array{Bool}
-
-Element-wise relational comparison `A op B` via `BNNSCompareTensor`, returning a
-`Bool` array. `op` is one of `:eq (==)`, `:lt (<)`, `:le (<=)`, `:gt (>)`,
-`:ge (>=)`, `:ne (!=)`.
-"""
-function bnns_compare(op::Symbol, A::Array{Float32}, B::Array{Float32})
-    haskey(_BNNS_RELOP, op) ||
-        throw(ArgumentError("BNNS: unsupported comparison $(repr(op))"))
-    size(A) == size(B) || throw(DimensionMismatch("A is $(size(A)), B is $(size(B))"))
-    O = Array{Bool}(undef, size(A))
-    da = _desc(A); db = _desc(B); do_ = _desc(O)
-    GC.@preserve A B O begin
-        _bnns_check(LA.BNNSCompareTensor(Ref(da), Ref(db),
-                    LA.BNNSRelationalOperator(_BNNS_RELOP[op]), Ref(do_)),
-                    "BNNSCompareTensor")
-    end
-    return O
-end
-
-"""
-    bnns_band_part(A::Matrix, num_lower, num_upper) -> Matrix
-
-Keep only the central band of `A` via `BNNSBandPart`: entries more than
-`num_lower` below or `num_upper` above the diagonal (in Julia's column-major
-sense) are zeroed. A negative count keeps the entire lower/upper triangle, so
-`bnns_band_part(A, -1, 0)` is `tril(A)` and `bnns_band_part(A, 0, -1)` is
-`triu(A)`.
-
-!!! note
-    BNNS counts bands in row-major orientation, so the underlying
-    `num_lower`/`num_upper` are swapped internally to give the Julia-native
-    `tril`/`triu` meaning documented here.
-"""
-function bnns_band_part(A::Array{T}, num_lower::Integer, num_upper::Integer) where {T}
-    O = similar(A)
-    di = _desc(A); do_ = _desc(O)
-    # BNNS band orientation is row-major (transposed vs Julia col-major): pass the
-    # counts swapped so callers get the intuitive tril/triu semantics.
-    GC.@preserve A O begin
-        _bnns_check(LA.BNNSBandPart(Cint(num_upper), Cint(num_lower),
-                    Ref(di), Ref(do_), C_NULL), "BNNSBandPart")
-    end
-    return O
-end
-
-"""
-    bnns_gather(dim::Integer, input::Array, indices::Array{Int32}) -> Array
-
-Gather slices of `input` along Julia dimension `dim` using 0-based `indices`
-(as BNNS/C expects) via `BNNSGather`, i.e. `selectdim(input, dim, indices.+1)`
-stacked along `dim`. `indices` is a 1-D `Int32` vector.
-"""
-function bnns_gather(dim::Integer, input::Array{T}, indices::Array{Int32}) where {T}
-    osz = collect(size(input)); osz[dim] = length(indices)
-    O = Array{T}(undef, osz...)
-    di = _desc(input); dind = _desc(indices); do_ = _desc(O)
-    GC.@preserve input indices O begin
-        _bnns_check(LA.BNNSGather(Csize_t(dim - 1), Ref(di), Ref(dind), Ref(do_), C_NULL),
-                    "BNNSGather")
-    end
-    return O
-end
-
 const _BNNS_REDUCE = Dict(
     :max => LA.BNNSReduceFunctionMax, :min => LA.BNNSReduceFunctionMin,
     :sum => LA.BNNSReduceFunctionSum, :mean => LA.BNNSReduceFunctionMean,
@@ -458,80 +184,6 @@ const _BNNS_REDUCE = Dict(
     :l2 => LA.BNNSReduceFunctionL2Norm, :product => LA.BNNSReduceFunctionProduct,
     :logsumexp => LA.BNNSReduceFunctionLogSumExp,
 )
-
-"""
-    bnns_scatter(dim::Integer, op::Symbol, input::Array, indices::Array{Int32}, output::Array) -> output
-
-Scatter `input` into a copy of `output` along Julia dimension `dim` at 0-based
-`indices`, combining collisions with reduce `op` (`:sum`, `:max`, `:min`, ...)
-via `BNNSScatter`. `output` is updated in place and returned.
-"""
-function bnns_scatter(dim::Integer, op::Symbol, input::Array{T},
-                      indices::Array{Int32}, output::Array{T}) where {T}
-    haskey(_BNNS_REDUCE, op) || throw(ArgumentError("BNNS: unsupported reduce $(repr(op))"))
-    di = _desc(input); dind = _desc(indices); do_ = _desc(output)
-    GC.@preserve input indices output begin
-        _bnns_check(LA.BNNSScatter(Csize_t(dim - 1), LA.BNNSReduceFunction(_BNNS_REDUCE[op]),
-                    Ref(di), Ref(dind), Ref(do_), C_NULL), "BNNSScatter")
-    end
-    return output
-end
-
-"""
-    bnns_gather_nd(input::Array, indices::Array{Int32}, output::Array) -> output
-
-N-dimensional gather (`BNNSGatherND`): `indices` holds coordinate vectors along
-its first (fastest) axis and `output` collects `input[coord...]`. Thin wrapper —
-supply pre-shaped descriptors' backing arrays; `output` is filled and returned.
-"""
-function bnns_gather_nd(input::Array{T}, indices::Array{Int32}, output::Array{T}) where {T}
-    di = _desc(input); dind = _desc(indices); do_ = _desc(output)
-    GC.@preserve input indices output begin
-        _bnns_check(LA.BNNSGatherND(Ref(di), Ref(dind), Ref(do_), C_NULL), "BNNSGatherND")
-    end
-    return output
-end
-
-"""
-    bnns_scatter_nd(op::Symbol, input::Array, indices::Array{Int32}, output::Array) -> output
-
-N-dimensional scatter (`BNNSScatterND`), the adjoint of [`bnns_gather_nd`](@ref),
-combining collisions with reduce `op`. `output` is updated in place and returned.
-"""
-function bnns_scatter_nd(op::Symbol, input::Array{T}, indices::Array{Int32},
-                         output::Array{T}) where {T}
-    haskey(_BNNS_REDUCE, op) || throw(ArgumentError("BNNS: unsupported reduce $(repr(op))"))
-    di = _desc(input); dind = _desc(indices); do_ = _desc(output)
-    GC.@preserve input indices output begin
-        _bnns_check(LA.BNNSScatterND(LA.BNNSReduceFunction(_BNNS_REDUCE[op]),
-                    Ref(di), Ref(dind), Ref(do_), C_NULL), "BNNSScatterND")
-    end
-    return output
-end
-
-const _BNNS_SHUFFLE = Dict(
-    :pixel_shuffle => LA.BNNSShuffleTypePixelShuffleNCHW,
-    :pixel_unshuffle => LA.BNNSShuffleTypePixelUnshuffleNCHW,
-    :depth_to_space => LA.BNNSShuffleTypeDepthToSpaceNCHW,
-    :space_to_depth => LA.BNNSShuffleTypeSpaceToDepthNCHW,
-)
-
-"""
-    bnns_shuffle(type::Symbol, input::Array, output::Array) -> output
-
-Pixel / depth shuffle (`BNNSShuffle`). `type` is one of `:pixel_shuffle`,
-`:pixel_unshuffle`, `:depth_to_space`, `:space_to_depth` (all NCHW). `output`
-must be pre-sized for the transform and is returned.
-"""
-function bnns_shuffle(type::Symbol, input::Array{T}, output::Array{T}) where {T}
-    haskey(_BNNS_SHUFFLE, type) || throw(ArgumentError("BNNS: unsupported shuffle $(repr(type))"))
-    di = _desc(input); do_ = _desc(output)
-    GC.@preserve input output begin
-        _bnns_check(LA.BNNSShuffle(LA.BNNSShuffleType(_BNNS_SHUFFLE[type]),
-                    Ref(di), Ref(do_), C_NULL), "BNNSShuffle")
-    end
-    return output
-end
 
 """
     bnns_copy!(dest::Array, src::Array) -> dest
@@ -543,89 +195,6 @@ function bnns_copy!(dest::Array{T}, src::Array{T}) where {T}
     ds = _desc(src); dd = _desc(dest)
     GC.@preserve src dest begin
         _bnns_check(LA.BNNSCopy(Ref(dd), Ref(ds), C_NULL), "BNNSCopy")
-    end
-    return dest
-end
-
-# =============================================================================
-# Clipping / norm (stateless kernels)
-# =============================================================================
-
-"""
-    bnns_clip_by_value(src::Array{Float32}, lo, hi) -> Array{Float32}
-
-Element-wise clamp to `[lo, hi]` via `BNNSClipByValue` (`≡ clamp.(src, lo, hi)`).
-"""
-function bnns_clip_by_value(src::Array{Float32}, lo::Real, hi::Real)
-    dest = similar(src)
-    ds = _desc(src); dd = _desc(dest)
-    GC.@preserve src dest begin
-        _bnns_check(LA.BNNSClipByValue(Ref(dd), Ref(ds), Float32(lo), Float32(hi)),
-                    "BNNSClipByValue")
-    end
-    return dest
-end
-
-"""
-    bnns_clip_by_norm(src::Array{Float32}, max_norm; axis_flags=0) -> Array{Float32}
-
-Scale `src` down so its L2 norm does not exceed `max_norm` via `BNNSClipByNorm`
-(`axis_flags` selects the reduction axes as a bitmask; `0` = whole tensor).
-"""
-function bnns_clip_by_norm(src::Array{Float32}, max_norm::Real; axis_flags::Integer = 0)
-    dest = similar(src)
-    ds = _desc(src); dd = _desc(dest)
-    GC.@preserve src dest begin
-        _bnns_check(LA.BNNSClipByNorm(Ref(dd), Ref(ds), Float32(max_norm), UInt32(axis_flags)),
-                    "BNNSClipByNorm")
-    end
-    return dest
-end
-
-"""
-    bnns_clip_by_global_norm(srcs::Vector{<:Array{Float32}}, max_norm; use_norm=0) -> Vector{Array{Float32}}
-
-Rescale a collection of tensors by a single global-norm factor via
-`BNNSClipByGlobalNorm`. When `use_norm <= 0` the global norm is computed from
-`srcs`; otherwise the supplied `use_norm` is used. Returns freshly-allocated
-clipped copies.
-"""
-function bnns_clip_by_global_norm(srcs::Vector{<:Array{Float32}}, max_norm::Real;
-                                  use_norm::Real = 0)
-    n = length(srcs)
-    dests = [similar(s) for s in srcs]
-    sdescs = [Ref(_desc(s)) for s in srcs]
-    ddescs = [Ref(_desc(d)) for d in dests]
-    GC.@preserve srcs dests sdescs ddescs begin
-        sptrs = [Base.unsafe_convert(Ptr{BNNSNDArrayDescriptor}, r) for r in sdescs]
-        dptrs = [Base.unsafe_convert(Ptr{BNNSNDArrayDescriptor}, r) for r in ddescs]
-        GC.@preserve sptrs dptrs begin
-            _bnns_check(LA.BNNSClipByGlobalNorm(pointer(dptrs), pointer(sptrs),
-                        Csize_t(n), Float32(max_norm), Float32(use_norm)),
-                        "BNNSClipByGlobalNorm")
-        end
-    end
-    return dests
-end
-
-"""
-    bnns_compute_norm(src::Array{Float32}; axis_flags=0) -> Array{Float32}
-
-L2 norm reduction over the axes selected by the `axis_flags` bitmask via
-`BNNSComputeNorm` (`axis_flags = 0` reduces the whole tensor to a scalar). The
-reduced axes collapse to length 1 in the returned array.
-"""
-function bnns_compute_norm(src::Array{Float32}; axis_flags::Integer = 0)
-    if axis_flags == 0
-        dest = zeros(Float32, ntuple(_ -> 1, ndims(src)))
-    else
-        osz = ntuple(i -> (axis_flags & (1 << (i - 1))) != 0 ? 1 : size(src, i), ndims(src))
-        dest = zeros(Float32, osz)
-    end
-    ds = _desc(src); dd = _desc(dest)
-    GC.@preserve src dest begin
-        _bnns_check(LA.BNNSComputeNorm(Ref(dd), Ref(ds),
-                    LA.BNNSNormType(LA.BNNSL2Norm), UInt32(axis_flags)), "BNNSComputeNorm")
     end
     return dest
 end
@@ -675,29 +244,6 @@ end
 # =============================================================================
 # DirectApply family (stateless kernels operating on descriptors)
 # =============================================================================
-
-"""
-    bnns_broadcast_matmul(A, B; transA=false, transB=false, alpha=1f0) -> Array{Float32}
-
-Batched / broadcasting matrix multiply `alpha * A * B` via
-`BNNSDirectApplyBroadcastMatMul`. For 2-D inputs this equals
-`alpha .* (A * B)`; higher-rank inputs multiply the trailing two axes and
-broadcast the batch axes.
-"""
-function bnns_broadcast_matmul(A::Array{Float32}, B::Array{Float32};
-                               transA::Bool = false, transB::Bool = false,
-                               alpha::Real = 1.0f0)
-    m = transA ? size(A, 2) : size(A, 1)
-    n = transB ? size(B, 1) : size(B, 2)
-    batch = ntuple(i -> max(size(A, i + 2), size(B, i + 2)), max(ndims(A), ndims(B)) - 2)
-    O = Array{Float32}(undef, m, n, batch...)
-    da = _desc(A); db = _desc(B); do_ = _desc(O)
-    GC.@preserve A B O begin
-        LA.BNNSDirectApplyBroadcastMatMul(transA, transB, Float32(alpha),
-            Ref(da), Ref(db), Ref(do_), C_NULL)
-    end
-    return O
-end
 
 """
     bnns_topk(input::Array{Float32}, K; dim=1) -> (values, indices)
@@ -1296,106 +842,3 @@ function bnns_in_topk(input::Array{Float32}, targets::Array{Int32}, K::Integer; 
     end
     return out
 end
-
-# Activation-struct helper shared by the DirectApply activation kernel.
-_default_fp() = LA.BNNSFilterParameters(UInt32(0), Csize_t(0), C_NULL, C_NULL)
-const _BNNS_ACT_ALL = Dict(
-    :identity => LA.BNNSActivationFunctionIdentity,
-    :relu => LA.BNNSActivationFunctionRectifiedLinear,
-    :sigmoid => LA.BNNSActivationFunctionSigmoid,
-    :tanh => LA.BNNSActivationFunctionTanh,
-    :abs => LA.BNNSActivationFunctionAbs,
-    :gelu => LA.BNNSActivationFunctionGELU,
-    :softmax => LA.BNNSActivationFunctionSoftmax,
-)
-function _activation_struct(f::Symbol; alpha = 0.0f0, beta = 0.0f0)
-    haskey(_BNNS_ACT_ALL, f) || throw(ArgumentError("BNNS: unsupported activation $(repr(f))"))
-    LA.BNNSActivation(BNNSActivationFunction(_BNNS_ACT_ALL[f]), Float32(alpha), Float32(beta),
-                      Int32(0), Int32(0), Int32(0), C_NULL, C_NULL, C_NULL)
-end
-
-"""
-    bnns_activation_batch!(func::Symbol, out::Array{Float32}, inp::Array{Float32}; alpha=0f0, beta=0f0) -> out
-
-Apply a pointwise activation over a batch directly (`BNNSDirectApplyActivationBatch`),
-without an explicit filter handle. `func` is any activation supported by
-[`bnns_activation`](@ref) (`:identity`, `:relu`, `:sigmoid`, `:tanh`, `:abs`).
-"""
-function bnns_activation_batch!(func::Symbol, out::Array{Float32}, inp::Array{Float32};
-                                alpha = 0.0f0, beta = 0.0f0)
-    di = _desc(inp); do_ = _desc(out)
-    act = _activation_struct(func; alpha, beta)
-    lp = Ref(LA.BNNSLayerParametersActivation(di, do_, act, UInt32(0)))
-    fp = Ref(_default_fp())
-    GC.@preserve inp out lp fp begin
-        _bnns_check(LA.BNNSDirectApplyActivationBatch(
-            Base.unsafe_convert(Ptr{LA.BNNSLayerParametersActivation}, lp),
-            Base.unsafe_convert(Ptr{LA.BNNSFilterParameters}, fp),
-            Csize_t(1), Csize_t(0), Csize_t(0)), "BNNSDirectApplyActivationBatch")
-    end
-    return out
-end
-
-const _QUANT_FN = Dict(:quantize => LA.BNNSQuantizerFunctionQuantize,
-                       :dequantize => LA.BNNSQuantizerFunctionDequantize)
-
-"""
-    bnns_quantizer!(func::Symbol, out::Array, inp::Array, scale::Array{Float32}, bias::Array{Float32}; axis_mask=0) -> out
-
-Quantize or dequantize `in` into `out` with per-`axis_mask` `scale`/`bias`
-(`BNNSDirectApplyQuantizer`). `func` is `:quantize` or `:dequantize`.
-"""
-function bnns_quantizer!(func::Symbol, out::Array, inp::Array, scale::Array{Float32},
-                         bias::Array{Float32}; axis_mask::Integer = 0)
-    haskey(_QUANT_FN, func) || throw(ArgumentError("BNNS: func must be :quantize/:dequantize"))
-    di = _desc(inp); do_ = _desc(out); ds = _desc(scale); db = _desc(bias)
-    lp = Ref(LA.BNNSLayerParametersQuantization(Csize_t(axis_mask),
-        LA.BNNSQuantizerFunction(_QUANT_FN[func]), di, do_, ds, db))
-    fp = Ref(_default_fp())
-    GC.@preserve inp out scale bias lp fp begin
-        _bnns_check(LA.BNNSDirectApplyQuantizer(
-            Base.unsafe_convert(Ptr{LA.BNNSLayerParametersQuantization}, lp),
-            Base.unsafe_convert(Ptr{LA.BNNSFilterParameters}, fp),
-            Csize_t(1), Csize_t(0), Csize_t(0)), "BNNSDirectApplyQuantizer")
-    end
-    return out
-end
-
-# =============================================================================
-# Optimizer step (stateless kernel over parameter/gradient/accumulator lists)
-# =============================================================================
-
-"""
-    bnns_optimizer_step_sgd!(params, grads, accumulators, fields::BNNSOptimizerSGDMomentumFields) -> params
-
-Apply one SGD-with-momentum update (`BNNSOptimizerStep`,
-`BNNSOptimizerFunctionSGDMomentum`) across the parallel lists of parameter,
-gradient and momentum-accumulator `Array{Float32}`s, updating each in place.
-`fields` is a raw `LibAccelerate.BNNSOptimizerSGDMomentumFields`.
-"""
-function bnns_optimizer_step_sgd!(params::Vector{<:Array{Float32}},
-                                  grads::Vector{<:Array{Float32}},
-                                  accumulators::Vector{<:Array{Float32}},
-                                  fields::LA.BNNSOptimizerSGDMomentumFields)
-    n = length(params)
-    (length(grads) == n && length(accumulators) == n) ||
-        throw(DimensionMismatch("params/grads/accumulators length mismatch"))
-    pd = [Ref(_desc(x)) for x in params]
-    gd = [Ref(_desc(x)) for x in grads]
-    ad = [Ref(_desc(x)) for x in accumulators]
-    fr = Ref(fields); fp = Ref(_default_fp())
-    GC.@preserve params grads accumulators pd gd ad fr fp begin
-        pp = [Base.unsafe_convert(Ptr{BNNSNDArrayDescriptor}, r) for r in pd]
-        gp = [Base.unsafe_convert(Ptr{BNNSNDArrayDescriptor}, r) for r in gd]
-        ap = [Base.unsafe_convert(Ptr{BNNSNDArrayDescriptor}, r) for r in ad]
-        GC.@preserve pp gp ap begin
-            _bnns_check(LA.BNNSOptimizerStep(
-                LA.BNNSOptimizerFunction(LA.BNNSOptimizerFunctionSGDMomentum),
-                Ptr{Cvoid}(Base.unsafe_convert(Ptr{LA.BNNSOptimizerSGDMomentumFields}, fr)),
-                Csize_t(n), pointer(pp), pointer(gp), pointer(ap),
-                Base.unsafe_convert(Ptr{LA.BNNSFilterParameters}, fp)), "BNNSOptimizerStep")
-        end
-    end
-    return params
-end
-

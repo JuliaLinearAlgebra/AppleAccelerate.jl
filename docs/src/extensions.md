@@ -19,7 +19,7 @@ AppleAccelerate is built in two layers:
   offset and enum value in sync with the SDK automatically.
 
 - **Idiomatic layer — the hand-written `src/*.jl` files.** These provide the
-  ergonomic Julia API (`AppleAccelerate.exp`, `integrate`, `bnns_matmul`,
+  ergonomic Julia API (`AppleAccelerate.exp`, `integrate`, `bnns_reduce`,
   `AASparseMatrix`, …). They own the niceties — Julia functions, keyword options,
   tidy return values, broadcasting — and call into `LibAccelerate` for the actual
   ABI work, never naming a C field offset or enum integer themselves.

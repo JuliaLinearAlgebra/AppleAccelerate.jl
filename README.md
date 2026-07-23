@@ -80,15 +80,13 @@ As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
 xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
 ```
 
-### Neural-network primitives (BNNS) — a tiny 2-layer MLP forward pass
+### Neural-network primitives (BNNS) — reductions & top-k
 
 ```julia
 using AppleAccelerate
-W1, b1 = randn(Float32, 16, 8), randn(Float32, 16)   # layer 1: 8 → 16
-W2, b2 = randn(Float32, 4, 16), randn(Float32, 4)    # layer 2: 16 → 4
-x = randn(Float32, 8)
-h = AppleAccelerate.bnns_activation(:relu, AppleAccelerate.bnns_matmul(W1, reshape(x, :, 1)) .+ b1)
-logits = AppleAccelerate.bnns_matmul(W2, h) .+ b2     # 4-class output
+logits = randn(Float32, 4, 6)                                 # 4 classes × 6 samples
+sums      = AppleAccelerate.bnns_reduce(:sum, logits; dim = 1)  # column-wise reduction
+vals, idx = AppleAccelerate.bnns_topk(logits, 2; dim = 1)       # top-2 classes per sample
 ```
 
 ### Image processing (vImage)
