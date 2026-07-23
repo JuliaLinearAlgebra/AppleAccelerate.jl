@@ -2,12 +2,15 @@
 
 AppleAccelerate wraps a broad slice of Apple's
 [BNNS (Basic Neural Network Subroutines)](https://developer.apple.com/documentation/accelerate/bnns)
-library — around 90% of the ~136 `BNNS*` C entry points. The wrappers are
-**`Float32`-centric**, matching BNNS's native precision for inference. Numerically
-verified helpers (tensor ops, reductions, clipping, random generation, nearest
-neighbors, the fully-connected layer, the optimizer step) are cross-checked here
-against plain-Julia references; the remaining thin wrappers expose the rest of the
-surface with exact FFI signatures for callers who need them.
+library — 83 of the ~136 `BNNS*` C entry points. Most of what is left unwrapped is
+the **deprecated** classic filter/layer construction API (superseded by the Graph
+API, see the deprecation note below); of the modern, non-deprecated surface roughly
+90% is covered. The wrappers are **`Float32`-centric**, matching BNNS's native
+precision for inference. Numerically verified helpers (matrix multiply, activations,
+tensor ops, reductions, clipping, random generation, nearest neighbors, the
+optimizer step) are cross-checked here against plain-Julia references; the remaining
+thin wrappers expose the rest of the surface with exact FFI signatures for callers
+who need them.
 
 ```@setup bnns
 using AppleAccelerate
@@ -200,11 +203,21 @@ AppleAccelerate.bnns_optimizer_step_sgd!
 
 ## What's left to the raw layer
 
-A handful of exotic, training-only entry points are left to the raw
-`AppleAccelerate.LibAccelerate` layer: multi-head attention
-(`BNNSApplyMultiheadAttention` and its backward), the LSTM training-cache path,
-the two-input / fused / loss backward variants, and the fully-connected
-sparsification helpers (`BNNSNDArrayFullyConnectedSparsifySparse{COO,CSR}`).
-These need training caches or opaque multi-kilobyte parameter blocks that cannot
-be validated generically.
+Two groups of entry points are left to the raw `AppleAccelerate.LibAccelerate`
+layer:
+
+- **The deprecated classic filter/layer API** — the `BNNSFilterCreate*` /
+  `BNNSFilterCreateLayer*` constructors and their `*FilterApply*` /
+  `BNNSFusedFilterApply*` execute paths (including the two-input / fused / loss /
+  normalization / pooling / permute batch variants). This is the largest unwrapped
+  block; it is superseded by the BNNS Graph API (above) and is intentionally
+  not given an idiomatic wrapper.
+- **Exotic, training-only entry points** that need training caches or opaque
+  multi-kilobyte parameter blocks that cannot be validated generically: multi-head
+  attention (`BNNSApplyMultiheadAttention` and its backward), the LSTM
+  training-cache path (`BNNSComputeLSTMTrainingCacheCapacity`,
+  `BNNSDirectApplyLSTMBatchTrainingCaching` / `…Backward`),
+  `BNNSComputeNormBackward`, image crop/resize (`BNNSCropResize` /
+  `BNNSCropResizeBackward`), and the fully-connected sparsification helpers
+  (`BNNSNDArrayFullyConnectedSparsifySparse{COO,CSR}`).
 ```
