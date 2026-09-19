@@ -63,10 +63,10 @@ when you can — they're faster.
 ```julia
 using AppleAccelerate
 using AppleAccelerate.SIMDMath: log
-function logsum_strided(X, stride)
+function weighted_logsum(X, W)   # no temporary for log.(X), unlike the array API
     u = zero(eltype(X))
-    @simd for i in 1:stride:length(X)
-        @inbounds u += log(X[i])
+    @simd for i in eachindex(X, W)
+        @inbounds u += W[i] * log(X[i])
     end
     u
 end

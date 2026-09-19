@@ -25,14 +25,17 @@ nothing # hide
 You can also build straight from coordinate (COO) triplets with 1-based indices,
 like `SparseArrays.sparse(I, J, V, m, n)` (duplicate coordinates are summed):
 
-```@example sparse_coo
-using AppleAccelerate, SparseArrays
-import AppleAccelerate: AASparseMatrix
+```jldoctest; setup = :(using AppleAccelerate, SparseArrays)
+julia> rows = [1, 2, 3, 1]; cols = [1, 2, 3, 3]; vals = [10.0, 20.0, 30.0, 5.0];
 
-I = [1, 2, 3, 1]; J = [1, 2, 3, 3]; V = [10.0, 20.0, 30.0, 5.0]
-B = AASparseMatrix(I, J, V, 3, 3)
-@assert SparseMatrixCSC(B) ≈ sparse(I, J, V, 3, 3)
-nothing # hide
+julia> B = AppleAccelerate.AASparseMatrix(rows, cols, vals, 3, 3)
+3×3 AppleAccelerate.AASparseMatrix{Float64}:
+ 10.0   0.0   5.0
+  0.0  20.0   0.0
+  0.0   0.0  30.0
+
+julia> SparseMatrixCSC(B) == sparse(rows, cols, vals, 3, 3)
+true
 ```
 
 The `SparseMatrixCSC` constructor automatically detects symmetric/Hermitian and

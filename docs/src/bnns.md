@@ -70,13 +70,22 @@ and plain copies.
 | [`bnns_transpose`](@ref AppleAccelerate.bnns_transpose) | swap two axes |
 | [`bnns_copy!`](@ref AppleAccelerate.bnns_copy!) | copy, optionally converting the element type |
 
-```@example bnns
-M = Float32[1 2 3; 4 5 6]
-@assert AppleAccelerate.bnns_transpose(M, 1, 2) == permutedims(M, (2, 1))
-@assert AppleAccelerate.bnns_copy!(zeros(Float32, 2, 3), M) == M
-H = AppleAccelerate.bnns_copy!(zeros(Float16, 2, 3), M)     # Float32 -> Float16
-@assert H == Float16.(M)
-nothing # hide
+```jldoctest; setup = :(using AppleAccelerate)
+julia> M = Float32[1 2 3; 4 5 6];
+
+julia> AppleAccelerate.bnns_transpose(M, 1, 2)
+3×2 Matrix{Float32}:
+ 1.0  4.0
+ 2.0  5.0
+ 3.0  6.0
+
+julia> AppleAccelerate.bnns_copy!(zeros(Float32, 2, 3), M) == M
+true
+
+julia> AppleAccelerate.bnns_copy!(zeros(Float16, 2, 3), M)     # converting copy: Float32 -> Float16
+2×3 Matrix{Float16}:
+ 1.0  2.0  3.0
+ 4.0  5.0  6.0
 ```
 
 ```@docs

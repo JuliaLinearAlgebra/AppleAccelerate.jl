@@ -1,3 +1,6 @@
 [deps]
 AppleAccelerate = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

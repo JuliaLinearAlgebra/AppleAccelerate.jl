@@ -1,9 +1,14 @@
 using Documenter
 using AppleAccelerate
 
+# Docstring doctests run as if `using AppleAccelerate` had been typed first. Doctests in
+# the manual pages carry their own `setup = :(using AppleAccelerate)`.
+DocMeta.setdocmeta!(AppleAccelerate, :DocTestSetup, :(using AppleAccelerate); recursive = true)
+
 makedocs(;
     sitename = "AppleAccelerate.jl",
     modules = [AppleAccelerate],
+    doctest = true,
     pages = [
         "Introduction" => "index.md",
         "Array Operations (vDSP / vForce)" => "array.md",
