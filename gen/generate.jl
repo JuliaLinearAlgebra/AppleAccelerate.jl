@@ -204,6 +204,56 @@ function strip_dead_symbol_wrappers!(path)
     return removed
 end
 
+# Post-process: honour `__asm__("_symbol")` labels. A C declaration such as
+#
+#     int BNNSGraphContextExecute(bnns_graph_context_t context, …) __asm__("_BNNSGraphContextExecute_v2");
+#
+# keeps the source-level name but links against a *different* exported symbol. Apple uses
+# this in bnns_graph.h to move an API to a new ABI: the header's argument list is the `_v2`
+# one, while the un-suffixed symbol is still exported with the OLD argument list. Clang.jl
+# ignores the label and emits `@ccall libacc.BNNSGraphContextExecute(<v2 arguments>)`, which
+# resolves — so the dead-symbol pass cannot catch it — and then crashes at the first call.
+# Scan every in-scope header for asm labels and retarget the matching `@ccall`s. The Julia
+# function keeps its header name; only the linked symbol changes. Idempotent.
+function collect_asm_labels(dirs)
+    # `name ( … ) [attributes] __asm__("_label")` with no `;`/`{`/`}` in between.
+    pat = r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*?)\)[^;{}()]*?__asm(?:__)?\s*\(\s*\"_([A-Za-z_][A-Za-z0-9_$]*)\"\s*\)"s
+    labels = Dict{String,String}()
+    for dir in dirs, (root, _, files) in walkdir(dir), f in files
+        endswith(f, ".h") || continue
+        # Drop comments first: doc comments contain call-like text (`min(a, b)`) that
+        # would otherwise be taken for the declaration an asm label belongs to.
+        text = replace(read(joinpath(root, f), String), r"/\*.*?\*/"s => " ", r"//[^\n]*" => " ")
+        for m in eachmatch(pat, text)
+            name, label = m.captures[1], m.captures[3]
+            name == label && continue
+            get!(labels, name, label) == label || error(
+                "conflicting __asm__ labels for `$name`: `$(labels[name])` vs `$label`")
+        end
+    end
+    return labels
+end
+
+function apply_asm_labels!(path, labels)
+    lines = readlines(path)
+    ccallsym = r"(@ccall\s+libacc\.)([A-Za-z_][A-Za-z0-9_]*)(?=\()"
+    final = Set(values(labels))
+    applied = String[]
+    for i in eachindex(lines)
+        m = match(ccallsym, lines[i])
+        m === nothing && continue
+        sym = m.captures[2]
+        if haskey(labels, sym)
+            lines[i] = replace(lines[i], ccallsym => SubstitutionString("\\1" * labels[sym]); count = 1)
+            push!(applied, sym)
+        elseif sym in final
+            push!(applied, sym)             # already retargeted by an earlier run
+        end
+    end
+    write(path, join(lines, "\n") * "\n")
+    return applied
+end
+
 # Post-process: correct the double-precision complex typedefs. Apple's headers define the
 # complex element types via anonymous `_Complex` typedefs (e.g. `typedef _Complex double
 # __double_complex_t;`). Clang.jl mis-resolves these anonymous-`_Complex` typedefs and emits
@@ -244,6 +294,15 @@ removed > 0 || error(
     "Clang.jl's emitted wrapper format changed and the pass no-oped. Inspect $out_path " *
     "and update the pass (or, if BLAS really is no longer pulled in, update this check).")
 @info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"
+
+labels = collect_asm_labels((VECLIB, VIMAGE))
+relabelled = apply_asm_labels!(out_path, labels)
+isempty(relabelled) && error(
+    "apply_asm_labels! retargeted no `@ccall`s. bnns_graph.h redirects its entry points to " *
+    "`_v2` symbols with `__asm__` labels, so a zero count means either the label regex no " *
+    "longer matches the headers or the `@ccall libacc.<sym>` pattern drifted — and the " *
+    "BNNSGraph bindings in $out_path link against the old, ABI-incompatible symbols.")
+@info "Retargeted $(length(relabelled)) wrappers to their __asm__-labelled symbols" relabelled
 
 dead = strip_dead_symbol_wrappers!(out_path)
 isempty(dead) && error(
