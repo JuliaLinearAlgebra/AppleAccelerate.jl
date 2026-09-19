@@ -5,6 +5,71 @@ using LinearAlgebra
 import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refactor!, solve, solve!
 
 @testset "Sparse Linear Algebra" begin
+    # sparse.jl keeps field-typed, element-type-parametric mirrors of the libSparse
+    # structs that contain the `SparseAttributes_t` bitfield (Clang.jl can only emit
+    # those as alignment-1 byte blobs). The generated `LibAccelerate` layer is the
+    # source of truth for their layout; this pins every mirror to it, so a
+    # regenerated SDK that moves a field fails here instead of corrupting calls.
+    @testset "libSparse ABI parity with LibAccelerate" begin
+        AA = AppleAccelerate
+        LA = AA.LibAccelerate
+        # Byte offset of field `f` in generated type G: blobs expose it through
+        # getproperty on a (null) pointer, field-typed structs through fieldoffset.
+        function rawoffset(G, f)
+            fieldnames(G) == (:data,) || return Int(fieldoffset(G, findfirst(==(f), fieldnames(G))))
+            p = getproperty(Ptr{G}(0), f)
+            return Int(UInt(p isa Tuple ? p[1] : p))
+        end
+        function check_layout(H, G)
+            @test sizeof(H) == sizeof(G)
+            for (i, f) in enumerate(fieldnames(H))
+                @test Int(fieldoffset(H, i)) == rawoffset(G, f)
+            end
+        end
+        check_layout(AA.SparseMatrixStructure, LA.SparseMatrixStructure)
+        check_layout(AA.SparseNumericFactorOptions, LA.SparseNumericFactorOptions)
+        check_layout(AA.SparseSymbolicFactorOptions, LA.SparseSymbolicFactorOptions)
+        check_layout(AA.SparseOpaqueSymbolicFactorization, LA.SparseOpaqueSymbolicFactorization)
+        @test sizeof(AA.SparseIterativeMethod) == sizeof(LA.SparseIterativeMethod)
+        @test Int(fieldoffset(AA.SparseIterativeMethod, 3)) == rawoffset(LA.SparseIterativeMethod, :options)
+        for (T, suff) in AA._RAW_SUFFIX
+            raw(name) = getfield(LA, Symbol(name, :_, suff))
+            check_layout(AA.SparseMatrix{T}, raw(:SparseMatrix))
+            check_layout(AA.DenseMatrix{T}, raw(:DenseMatrix))
+            check_layout(AA.DenseVector{T}, raw(:DenseVector))
+            check_layout(AA.SparseOpaqueFactorization{T}, raw(:SparseOpaqueFactorization))
+            check_layout(AA.SparseOpaqueSubfactor{T}, raw(:SparseOpaqueSubfactor))
+            check_layout(AA.SparseOpaquePreconditioner{T}, raw(:SparseOpaquePreconditioner))
+            # The private entry points sparse.jl reaches through LibAccelerate exist.
+            for fn in (:_SparseCreatePreconditioner, :_SparseReleaseOpaquePreconditioner,
+                       :_SparseGetOptionsFromNumericFactor, :_SparseRefactorSymmetric,
+                       :_SparseRefactorQR, :_SparseRefactorLU)
+                @test isdefined(LA, Symbol(fn, :_, suff))
+            end
+        end
+        # Option structs used straight from the generated layer.
+        @test AA.SparseCGOptions === LA.SparseCGOptions
+        @test AA.SparseGMRESOptions === LA.SparseGMRESOptions
+        @test AA.SparseLSMROptions === LA.SparseLSMROptions
+
+        # Bitfield positions/widths of the attribute word (real and complex).
+        bits(G, f) = getproperty(Ptr{G}(0), f)[2:3]
+        @test bits(LA.SparseAttributes_t, :transpose) == (AA._SHIFT_TRANSPOSE, 1)
+        @test bits(LA.SparseAttributes_t, :triangle)  == (AA._SHIFT_TRIANGLE, 1)
+        @test bits(LA.SparseAttributes_t, :kind)      == (AA._SHIFT_KIND, AA._WIDTH_KIND_REAL)
+        @test bits(LA.SparseAttributes_t, :_allocatedBySparse) == (AA._SHIFT_ALLOCATED, 1)
+        @test bits(LA.SparseAttributesComplex_t, :kind) == (AA._SHIFT_KIND, AA._WIDTH_KIND_COMPLEX)
+        @test bits(LA.SparseAttributesComplex_t, :conjugate_transpose) == (AA._SHIFT_CONJUGATE_TRANSPOSE, 1)
+        @test bits(LA.SparseAttributesComplex_t, :_allocatedBySparse) == (AA._SHIFT_ALLOCATED, 1)
+
+        # The umbrella framework re-exports libSparse, so the generated bindings
+        # (bound to `libacc`) and the hand-bound ones (LIBSPARSE) hit the same code.
+        hacc, hsp = AA.Libdl.dlopen(AA.libacc), AA.Libdl.dlopen(AA.LIBSPARSE)
+        for s in (:_SparseRefactorQR_Double, :_SparseGetOptionsFromSymbolicFactor)
+            @test AA.Libdl.dlsym(hacc, s) == AA.Libdl.dlsym(hsp, s)
+        end
+    end
+
     @testset "attribute bitfields" begin
         AA = AppleAccelerate
         # Independent C bitfields must not share bits with each other.
