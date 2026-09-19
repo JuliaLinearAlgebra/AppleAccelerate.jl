@@ -28,17 +28,22 @@ This is the non-array counterpart to [Array Operations](array.md). Where
 In those situations the realistic alternative is a scalar `Base` loop, and `SIMDMath`
 is roughly **2–4x faster for `Float32`** and **1.2–2x for `Float64`**.
 
-```julia
+```@example simdmath
+using AppleAccelerate
 using AppleAccelerate.SIMDMath: log
 
-# strided access: vForce would need a gather into a temporary first
-function logsum_strided(X, stride)
+# weights applied on the fly: vForce would need a temporary for log.(X) first
+function weighted_logsum(X, W)
     u = zero(eltype(X))
-    @simd for i in 1:stride:length(X)
-        @inbounds u += log(X[i])
+    @simd for i in eachindex(X, W)
+        @inbounds u += W[i] * log(X[i])
     end
     u
 end
+
+X = collect(1.0:1000.0)
+W = fill(0.5, 1000)
+weighted_logsum(X, W) ≈ sum(W .* Base.log.(X))
 ```
 
 ## Accuracy
@@ -75,12 +80,18 @@ in practice means `@simd` and usually `@inbounds`. Nothing warns you if it does 
 
 To check, look for the symbol in the generated code:
 
-```julia
+```@example simdmath
 using InteractiveUtils
-@code_native logsum_strided(rand(1000), 3)   # expect a call to _simd_log_d2
+asm = sprint(code_native, weighted_logsum, (Vector{Float64}, Vector{Float64}))  # what `@code_native` prints
+occursin("_simd_log_d2", asm)   # the scalar `log` became a 2-lane SIMD call
 ```
 
 `Float32` runs 4 lanes at a time (`_simd_*_f4`), `Float64` runs 2 (`_simd_*_d2`).
+
+!!! note "Strided loops"
+    A stride that is a compile-time constant (`for i in 1:3:length(X)`) vectorises. A
+    stride only known at run time (`for i in 1:stride:length(X)`) does **not** — the
+    loop vectoriser gives up on the unknown-stride gather and the call stays scalar.
 
 ## Available functions
 
