@@ -54,7 +54,8 @@ Since these functions only have `Float32`/`Float64` methods, every other `log(2)
 AppleAccelerate.SIMDMath.@simdmath) confines the substitution to one expression
 instead, and imports nothing:
 
-```julia
+```@example simdmacro
+using AppleAccelerate
 using AppleAccelerate.SIMDMath: @simdmath
 
 function weighted_logsum(X, W)
@@ -64,6 +65,9 @@ function weighted_logsum(X, W)
     end
     u
 end
+
+X = rand(1000) .+ 1; W = rand(1000)
+weighted_logsum(X, W) ≈ sum(W .* log.(X) .^ W)
 ```
 
 It can go outside or inside `@simd`. It does not add `@simd` or `@inbounds` for you,

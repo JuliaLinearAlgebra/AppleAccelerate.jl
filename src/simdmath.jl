@@ -355,16 +355,24 @@ end
 Rewrite the math calls inside `expr` to their `SIMDMath` equivalents, without
 importing anything into the enclosing module:
 
-```julia
-using AppleAccelerate.SIMDMath: @simdmath
+```jldoctest
+julia> using AppleAccelerate.SIMDMath: @simdmath
 
-function weighted_logsum(X, W)
-    u = zero(eltype(X))
-    @simdmath @simd for i in eachindex(X, W)
-        @inbounds u += W[i] * log(X[i])^W[i]
-    end
-    u
-end
+julia> function weighted_logsum(X, W)
+           u = zero(eltype(X))
+           @simdmath @simd for i in eachindex(X, W)
+               @inbounds u += W[i] * log(X[i])^W[i]
+           end
+           u
+       end;
+
+julia> X = [1.5, 2.5, 3.5, 4.5]; W = [0.5, 1.0, 1.5, 2.0];
+
+julia> weighted_logsum(X, W) ≈ sum(W .* log.(X) .^ W)   # `log` and `^` are SIMDMath's here
+true
+
+julia> @simdmath rem(7, 4)                              # not Float32/Float64: falls back to Base
+3
 ```
 
 This is the alternative to `using AppleAccelerate.SIMDMath: log`, which replaces
