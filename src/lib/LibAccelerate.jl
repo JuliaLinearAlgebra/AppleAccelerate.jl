@@ -28,14 +28,17 @@ struct bnns_graph_compile_options_t
     size::Csize_t
 end
 
-struct bnns_graph_shape_t
+struct bnns_user_message_data_t
     data::Ptr{Cvoid}
     size::Csize_t
 end
 
-struct bnns_user_message_data_t
-    data::Ptr{Cvoid}
-    size::Csize_t
+# bnns_graph_shape_t is NOT one of the `{ data, size }` handles above: it is
+# `{ size_t rank; uint64_t *shape; }` — the count comes first. Clang.jl drops it for the same
+# trailing-availability-attribute reason, so define it here with the header's field order.
+struct bnns_graph_shape_t
+    rank::Csize_t
+    shape::Ptr{UInt64}
 end
 
 # bnns_graph_argument_t holds an anonymous union of three pointer types
@@ -5492,7 +5495,7 @@ function BNNSGraphCompileOptionsGetOutputFD(options)
 end
 
 function BNNSGraphCompileFromFile(filename, _function, options)
-    @ccall libacc.BNNSGraphCompileFromFile(filename::Ptr{Cchar}, _function::Ptr{Cchar}, options::bnns_graph_compile_options_t)::bnns_graph_t
+    @ccall libacc.BNNSGraphCompileFromFile_v2(filename::Ptr{Cchar}, _function::Ptr{Cchar}, options::bnns_graph_compile_options_t)::bnns_graph_t
 end
 
 function BNNSGraphGetInputCount(graph, _function)
@@ -5512,11 +5515,11 @@ function BNNSGraphGetFunctionCount(graph)
 end
 
 function BNNSGraphGetInputNames(graph, _function, input_names_count, input_names)
-    @ccall libacc.BNNSGraphGetInputNames(graph::bnns_graph_t, _function::Ptr{Cchar}, input_names_count::Csize_t, input_names::Ptr{Ptr{Cchar}})::Cint
+    @ccall libacc.BNNSGraphGetInputNames_v2(graph::bnns_graph_t, _function::Ptr{Cchar}, input_names_count::Csize_t, input_names::Ptr{Ptr{Cchar}})::Cint
 end
 
 function BNNSGraphGetOutputNames(graph, _function, output_names_count, output_names)
-    @ccall libacc.BNNSGraphGetOutputNames(graph::bnns_graph_t, _function::Ptr{Cchar}, output_names_count::Csize_t, output_names::Ptr{Ptr{Cchar}})::Cint
+    @ccall libacc.BNNSGraphGetOutputNames_v2(graph::bnns_graph_t, _function::Ptr{Cchar}, output_names_count::Csize_t, output_names::Ptr{Ptr{Cchar}})::Cint
 end
 
 function BNNSGraphGetArgumentNames(graph, _function, argument_names_count, argument_names)
@@ -5563,11 +5566,15 @@ function BNNSGraphContextMakeStreaming(graph, _function, initial_states_count, i
 end
 
 function BNNSGraphContextDestroy(context)
-    @ccall libacc.BNNSGraphContextDestroy(context::bnns_graph_context_t)::Cvoid
+    @ccall libacc.BNNSGraphContextDestroy_v2(context::bnns_graph_context_t)::Cvoid
 end
 
 function BNNSGraphContextSetDynamicShapes(context, _function, shapes_count, shapes)
-    @ccall libacc.BNNSGraphContextSetDynamicShapes(context::bnns_graph_context_t, _function::Ptr{Cchar}, shapes_count::Csize_t, shapes::Ptr{bnns_graph_shape_t})::Cint
+    @ccall libacc.BNNSGraphContextSetDynamicShapes_v2(context::bnns_graph_context_t, _function::Ptr{Cchar}, shapes_count::Csize_t, shapes::Ptr{bnns_graph_shape_t})::Cint
+end
+
+function BNNSGraphContextSetBatchSize(context, _function, batch_size)
+    @ccall libacc.BNNSGraphContextSetBatchSize_v2(context::bnns_graph_context_t, _function::Ptr{Cchar}, batch_size::UInt64)::Cint
 end
 
 function BNNSGraphContextSetArgumentType(context, argument_type)
@@ -5583,11 +5590,11 @@ function BNNSGraphContextSetStreamingAdvanceCount(context, advance_count)
 end
 
 function BNNSGraphContextExecute(context, _function, argument_count, arguments, workspace_size, workspace)
-    @ccall libacc.BNNSGraphContextExecute(context::bnns_graph_context_t, _function::Ptr{Cchar}, argument_count::Csize_t, arguments::Ptr{bnns_graph_argument_t}, workspace_size::Csize_t, workspace::Ptr{Cchar})::Cint
+    @ccall libacc.BNNSGraphContextExecute_v2(context::bnns_graph_context_t, _function::Ptr{Cchar}, argument_count::Csize_t, arguments::Ptr{bnns_graph_argument_t}, workspace_size::Csize_t, workspace::Ptr{Cchar})::Cint
 end
 
 function BNNSGraphContextGetWorkspaceSize(context, _function)
-    @ccall libacc.BNNSGraphContextGetWorkspaceSize(context::bnns_graph_context_t, _function::Ptr{Cchar})::Csize_t
+    @ccall libacc.BNNSGraphContextGetWorkspaceSize_v2(context::bnns_graph_context_t, _function::Ptr{Cchar})::Csize_t
 end
 
 function BNNSGraphContextGetTensor(context, _function, argument, fill_known_dynamic_shapes, tensor)
@@ -5596,6 +5603,14 @@ end
 
 function BNNSGraphTensorFillStrides(graph, _function, argument, tensor)
     @ccall libacc.BNNSGraphTensorFillStrides(graph::bnns_graph_t, _function::Ptr{Cchar}, argument::Ptr{Cchar}, tensor::Ptr{BNNSTensor})::Cint
+end
+
+function BNNSGraphContextSetWorkspaceAllocationCallback(context, realloc, free, user_memory_context_size, user_memory_context)
+    @ccall libacc.BNNSGraphContextSetWorkspaceAllocationCallback_v2(context::bnns_graph_context_t, realloc::bnns_graph_realloc_fn_t, free::bnns_graph_free_all_fn_t, user_memory_context_size::Csize_t, user_memory_context::Ptr{Cvoid})::Cint
+end
+
+function BNNSGraphContextSetOutputAllocationCallback(context, realloc, free, user_memory_context_size, user_memory_context)
+    @ccall libacc.BNNSGraphContextSetOutputAllocationCallback_v2(context::bnns_graph_context_t, realloc::bnns_graph_realloc_fn_t, free::bnns_graph_free_all_fn_t, user_memory_context_size::Csize_t, user_memory_context::Ptr{Cvoid})::Cint
 end
 
 function BNNSGraphContextSetMessageLogCallback(context, log_callback_fn, additional_logging_arguments)
