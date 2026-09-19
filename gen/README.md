@@ -53,7 +53,11 @@ transformation finds zero matches instead of silently no-opping.
 
 Generates the in-scope headers listed in [`generate.jl`](./generate.jl): vDSP,
 vForce, vBasicOps, vfp, vectorOps, vBigNum, `Sparse/Solve.h` (the C solver API),
-BNNS (+ graph), and Quadrature — ~900 functions, 110+ structs, 60 enums. Extend
+BNNS (+ graph), Quadrature, and the array-based vImage headers (`vImage_Types.h`,
+`Alpha.h`, `BasicImageTypes.h`, `Conversion.h`, `Convolution.h`, `Geometry.h`,
+`Histogram.h`, `Morphology.h`, `Transform.h`) — ~1400 functions (~540 of them vImage),
+140+ structs, 70+ enums. vImage is a separate sub-framework binary, but the Accelerate
+umbrella re-exports its symbols, so its wrappers share `libacc` with everything else. Extend
 coverage by appending headers to that list.
 
 **Intentionally excluded:**
@@ -62,15 +66,27 @@ coverage by appending headers to that list.
   post-processes the output to strip the `cblas_*`/`catlas_*`/`clapack_*` wrappers.
 - `LinearAlgebra/` — C++ generics, not C-mappable.
 - `Sparse/BLAS.h` dense×sparse multiply — C++ name-mangled (hand-wrapped elsewhere).
-- vImage — a separate Accelerate sub-framework (not part of vecLib), not currently
-  in scope.
+- `vImage/vImage_Utilities.h`, `vImage/vImage_CVUtilities.h` — CoreGraphics / CoreVideo
+  interop (`CGImage`, `CVPixelBuffer`); no array-based surface, and they pull in the whole
+  CG/CV header graph. The vImage operation headers are listed individually (not via the
+  `vImage.h` umbrella) to keep these out.
 
 ## Known limitations
 
-- A few vDSP functions whose signatures use `arm_neon`/`simd` vector types or
-  CoreFoundation-gated availability are dropped by libclang under the default GCC
-  artifact include path (we capture ~93% of vDSP, all the pointer/length array
-  ops). These SIMD-typed overloads are not part of the idiomatic surface anyway.
+- A few vDSP functions whose signatures use `arm_neon`/`simd` vector types are dropped by
+  libclang under the default GCC artifact include path (we capture ~93% of vDSP, all the
+  pointer/length array ops). These SIMD-typed overloads are not part of the idiomatic
+  surface anyway.
+- `Sparse/Solve.h` includes the whole `<Accelerate/Accelerate.h>` umbrella when it
+  resolves, which reaches CoreGraphics → CoreFoundation → libdispatch and aborts Clang.jl
+  (`no definition for dispatch_queue_t's underlying type`). `generate.jl` pre-defines the
+  umbrella's include guard and force-includes `cblas.h` instead, so scope is decided only
+  by the `headers` list.
+- Struct alignment attributes are not carried over. The two opaque vImage Y'CbCr info
+  blobs are `aligned(16)` in C but come out as `NTuple{128,UInt8}`; `src/vimage.jl` keeps
+  its own 16-byte-aligned definition for those and passes them as untyped pointers.
+- Exported *data* symbols (e.g. `kvImage_YpCbCrToARGBMatrix_ITU_R_601_4`) are not emitted;
+  `src/vimage.jl` reads them with `dlsym`.
 
 ## Files
 

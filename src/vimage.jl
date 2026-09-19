@@ -3,12 +3,13 @@
 # vImage is a large, extremely regular C API: each *operation* (Scale, Rotate,
 # Convolve, Dilate, Premultiply, PermuteChannels, format Convert, …) is provided
 # for ~a dozen pixel formats (Planar8, PlanarF, ARGB8888, ARGBFFFF, …). There are
-# ~480 operation functions. Clang.jl cannot parse the vImage headers (they drag in
-# CoreGraphics/CoreVideo and an unparseable arm_neon.h), so — exactly like the C++
-# libSparse symbols in sparse.jl — these bindings are written by hand with `ccall`
-# straight against the Accelerate framework binary.
+# ~540 operation functions. Like the rest of the package this file is the idiomatic
+# layer only: every C call goes through the Clang.jl-generated `LibAccelerate.vImage*`
+# binding, and the descriptor structs, error codes and flags below are the generated
+# definitions (re-exposed under `AppleAccelerate.`), so no ABI detail is transcribed
+# by hand. The few exceptions are marked where they occur.
 #
-# The bindings are generated with `@eval` loops over (operation, pixel-format) so a
+# The wrappers are generated with `@eval` loops over (operation, pixel-format) so a
 # handful of loops cover hundreds of C functions.
 #
 # ---------------------------------------------------------------------------
@@ -36,9 +37,6 @@
 #
 # Apple docs: https://developer.apple.com/documentation/accelerate/vimage
 
-# vImage symbols live in the Accelerate framework binary.
-const vimage_lib = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
-
 # --- Core types --------------------------------------------------------------
 
 """
@@ -49,12 +47,7 @@ Mirror of the C `vImage_Buffer` descriptor: `data::Ptr{Cvoid}`, `height`, `width
 passed to vImage functions by `Ref`. The struct only borrows the array's pointer, so
 the backing array must be kept alive (`GC.@preserve`) for the duration of any call.
 """
-struct vImage_Buffer
-    data::Ptr{Cvoid}
-    height::Csize_t
-    width::Csize_t
-    rowBytes::Csize_t
-end
+const vImage_Buffer = LibAccelerate.vImage_Buffer
 
 """
     vImage_AffineTransform
@@ -62,9 +55,7 @@ end
 Single-precision 3×2 affine transform (`a b; c d; tx ty`) used by
 `affineWarp_*` geometry functions. See also [`vImage_AffineTransform_Double`](@ref).
 """
-struct vImage_AffineTransform
-    a::Cfloat; b::Cfloat; c::Cfloat; d::Cfloat; tx::Cfloat; ty::Cfloat
-end
+const vImage_AffineTransform = LibAccelerate.vImage_AffineTransform
 
 """
     vImage_AffineTransform_Double
@@ -72,47 +63,46 @@ end
 Double-precision variant of [`vImage_AffineTransform`](@ref), used by the
 `affineWarpD_*` functions.
 """
-struct vImage_AffineTransform_Double
-    a::Cdouble; b::Cdouble; c::Cdouble; d::Cdouble; tx::Cdouble; ty::Cdouble
-end
+const vImage_AffineTransform_Double = LibAccelerate.vImage_AffineTransform_Double
 
 """
     vImage_PerspectiveTransform
 
 Single-precision 3×3 projective transform used by `perspectiveWarp_*` functions.
+(Apple's header spells the C type `vImage_PerpsectiveTransform`; the generated layer
+keeps that spelling, this alias fixes it.)
 """
-struct vImage_PerspectiveTransform
-    a::Cfloat; b::Cfloat; c::Cfloat; d::Cfloat; tx::Cfloat; ty::Cfloat
-    vx::Cfloat; vy::Cfloat; v::Cfloat
-end
+const vImage_PerspectiveTransform = LibAccelerate.vImage_PerpsectiveTransform
 
 # vImage_Error is a pointer-sized signed integer; 0 = success, <0 = error,
 # >0 = temp-buffer size (when kvImageGetTempBufferSize is set).
-const vImage_Error = Cssize_t
-const vImage_Flags = UInt32
+const vImage_Error = LibAccelerate.vImage_Error
+const vImage_Flags = LibAccelerate.vImage_Flags
 
 # --- Error codes -------------------------------------------------------------
+# Values come from the generated enum; they are kept as plain `Int`s because they are
+# compared against the `vImage_Error` (`Cssize_t`) a call returns.
 
-const kvImageNoError                     = 0
-const kvImageRoiLargerThanInputBuffer    = -21766
-const kvImageInvalidKernelSize           = -21767
-const kvImageInvalidEdgeStyle            = -21768
-const kvImageInvalidOffset_X             = -21769
-const kvImageInvalidOffset_Y             = -21770
-const kvImageMemoryAllocationError       = -21771
-const kvImageNullPointerArgument         = -21772
-const kvImageInvalidParameter            = -21773
-const kvImageBufferSizeMismatch          = -21774
-const kvImageUnknownFlagsBit             = -21775
-const kvImageInternalError               = -21776
-const kvImageInvalidRowBytes             = -21777
-const kvImageInvalidImageFormat          = -21778
-const kvImageColorSyncIsAbsent           = -21779
-const kvImageOutOfPlaceOperationRequired = -21780
-const kvImageInvalidImageObject          = -21781
-const kvImageInvalidCVImageFormat        = -21782
-const kvImageUnsupportedConversion       = -21783
-const kvImageCoreVideoIsAbsent           = -21784
+const kvImageNoError                     = Int(LibAccelerate.kvImageNoError)
+const kvImageRoiLargerThanInputBuffer    = Int(LibAccelerate.kvImageRoiLargerThanInputBuffer)
+const kvImageInvalidKernelSize           = Int(LibAccelerate.kvImageInvalidKernelSize)
+const kvImageInvalidEdgeStyle            = Int(LibAccelerate.kvImageInvalidEdgeStyle)
+const kvImageInvalidOffset_X             = Int(LibAccelerate.kvImageInvalidOffset_X)
+const kvImageInvalidOffset_Y             = Int(LibAccelerate.kvImageInvalidOffset_Y)
+const kvImageMemoryAllocationError       = Int(LibAccelerate.kvImageMemoryAllocationError)
+const kvImageNullPointerArgument         = Int(LibAccelerate.kvImageNullPointerArgument)
+const kvImageInvalidParameter            = Int(LibAccelerate.kvImageInvalidParameter)
+const kvImageBufferSizeMismatch          = Int(LibAccelerate.kvImageBufferSizeMismatch)
+const kvImageUnknownFlagsBit             = Int(LibAccelerate.kvImageUnknownFlagsBit)
+const kvImageInternalError               = Int(LibAccelerate.kvImageInternalError)
+const kvImageInvalidRowBytes             = Int(LibAccelerate.kvImageInvalidRowBytes)
+const kvImageInvalidImageFormat          = Int(LibAccelerate.kvImageInvalidImageFormat)
+const kvImageColorSyncIsAbsent           = Int(LibAccelerate.kvImageColorSyncIsAbsent)
+const kvImageOutOfPlaceOperationRequired = Int(LibAccelerate.kvImageOutOfPlaceOperationRequired)
+const kvImageInvalidImageObject          = Int(LibAccelerate.kvImageInvalidImageObject)
+const kvImageInvalidCVImageFormat        = Int(LibAccelerate.kvImageInvalidCVImageFormat)
+const kvImageUnsupportedConversion       = Int(LibAccelerate.kvImageUnsupportedConversion)
+const kvImageCoreVideoIsAbsent           = Int(LibAccelerate.kvImageCoreVideoIsAbsent)
 
 const _VIMAGE_ERRSTR = Dict{Int,String}(
     kvImageNoError => "no error",
@@ -146,32 +136,32 @@ vimage_error_string(code::Integer) = get(_VIMAGE_ERRSTR, Int(code), "unknown err
 
 # --- Flags -------------------------------------------------------------------
 
-const kvImageNoFlags                = vImage_Flags(0)
-const kvImageLeaveAlphaUnchanged    = vImage_Flags(1)
-const kvImageCopyInPlace            = vImage_Flags(2)
-const kvImageBackgroundColorFill    = vImage_Flags(4)
-const kvImageEdgeExtend             = vImage_Flags(8)
-const kvImageDoNotTile              = vImage_Flags(16)
-const kvImageHighQualityResampling  = vImage_Flags(32)
-const kvImageTruncateKernel         = vImage_Flags(64)
-const kvImageGetTempBufferSize      = vImage_Flags(128)
-const kvImagePrintDiagnosticsToConsole = vImage_Flags(256)
-const kvImageNoAllocate             = vImage_Flags(512)
-const kvImageHDRContent             = vImage_Flags(1024)
-const kvImageDoNotClamp             = vImage_Flags(2048)
-const kvImageUseFP16Accumulator     = vImage_Flags(4096)
+const kvImageNoFlags                = vImage_Flags(LibAccelerate.kvImageNoFlags)
+const kvImageLeaveAlphaUnchanged    = vImage_Flags(LibAccelerate.kvImageLeaveAlphaUnchanged)
+const kvImageCopyInPlace            = vImage_Flags(LibAccelerate.kvImageCopyInPlace)
+const kvImageBackgroundColorFill    = vImage_Flags(LibAccelerate.kvImageBackgroundColorFill)
+const kvImageEdgeExtend             = vImage_Flags(LibAccelerate.kvImageEdgeExtend)
+const kvImageDoNotTile              = vImage_Flags(LibAccelerate.kvImageDoNotTile)
+const kvImageHighQualityResampling  = vImage_Flags(LibAccelerate.kvImageHighQualityResampling)
+const kvImageTruncateKernel         = vImage_Flags(LibAccelerate.kvImageTruncateKernel)
+const kvImageGetTempBufferSize      = vImage_Flags(LibAccelerate.kvImageGetTempBufferSize)
+const kvImagePrintDiagnosticsToConsole = vImage_Flags(LibAccelerate.kvImagePrintDiagnosticsToConsole)
+const kvImageNoAllocate             = vImage_Flags(LibAccelerate.kvImageNoAllocate)
+const kvImageHDRContent             = vImage_Flags(LibAccelerate.kvImageHDRContent)
+const kvImageDoNotClamp             = vImage_Flags(LibAccelerate.kvImageDoNotClamp)
+const kvImageUseFP16Accumulator     = vImage_Flags(LibAccelerate.kvImageUseFP16Accumulator)
 
 # --- Pixel type aliases (documentation / convenience) ------------------------
 
-const Pixel_8       = UInt8
-const Pixel_F       = Float32
-const Pixel_16U     = UInt16
-const Pixel_16S     = Int16
-const Pixel_16Q12   = Int16
-const Pixel_8888    = NTuple{4,UInt8}
-const Pixel_FFFF    = NTuple{4,Float32}
-const Pixel_ARGB_16U = NTuple{4,UInt16}
-const Pixel_ARGB_16S = NTuple{4,Int16}
+const Pixel_8       = LibAccelerate.Pixel_8
+const Pixel_F       = LibAccelerate.Pixel_F
+const Pixel_16U     = LibAccelerate.Pixel_16U
+const Pixel_16S     = LibAccelerate.Pixel_16S
+const Pixel_16Q12   = LibAccelerate.Pixel_16Q12
+const Pixel_8888    = LibAccelerate.Pixel_8888
+const Pixel_FFFF    = LibAccelerate.Pixel_FFFF
+const Pixel_ARGB_16U = LibAccelerate.Pixel_ARGB_16U
+const Pixel_ARGB_16S = LibAccelerate.Pixel_ARGB_16S
 
 # --- Exceptions --------------------------------------------------------------
 
@@ -256,9 +246,7 @@ for sfx in (:Planar8, :Planar16S, :Planar16U, :PlanarF, :ARGB8888, :ARGB16U,
         function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, vImage_Flags),
-                    sb, db, C_NULL, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -301,9 +289,7 @@ for op in (:HorizontalReflect, :VerticalReflect)
             function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                        sb, db, vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -341,9 +327,8 @@ for sfx in (:Planar8, :Planar16U, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S,
                            backColor = zero($T), flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, UInt8, $T, vImage_Flags),
-                        sb, db, UInt8(rotationConstant & 3), $T(backColor), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, UInt8(rotationConstant & 3), $T(backColor),
+                        vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -356,9 +341,8 @@ for sfx in (:Planar8, :Planar16U, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S,
                 bc = convert(Vector{$T}, collect(backColor))
                 GC.@preserve src dest bc begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, UInt8, Ptr{$T}, vImage_Flags),
-                        sb, db, UInt8(rotationConstant & 3), pointer(bc), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, UInt8(rotationConstant & 3), pointer(bc),
+                        vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -400,9 +384,8 @@ for sfx in (:Planar8, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S, :ARGBFFFF,
                              backColor = zero($T), flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Cfloat, $T, vImage_Flags),
-                    sb, db, C_NULL, Cfloat(angle), $T(backColor), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, Cfloat(angle), $T(backColor),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -413,9 +396,8 @@ for sfx in (:Planar8, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S, :ARGBFFFF,
             bc = convert(Vector{$T}, collect(backColor))
             GC.@preserve src dest bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Cfloat, Ptr{$T}, vImage_Flags),
-                    sb, db, C_NULL, Cfloat(angle), pointer(bc), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, Cfloat(angle), pointer(bc),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -447,9 +429,7 @@ for (op, TT) in ((:AffineWarp, :vImage_AffineTransform), (:AffineWarpD, :vImage_
                 tref = Ref(transform)
                 GC.@preserve src dest tref begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{$TT}, $T, vImage_Flags),
-                        sb, db, C_NULL, tref, $T(backColor), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, C_NULL, tref, $T(backColor), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -460,9 +440,7 @@ for (op, TT) in ((:AffineWarp, :vImage_AffineTransform), (:AffineWarpD, :vImage_
                 tref = Ref(transform); bc = convert(Vector{$T}, collect(backColor))
                 GC.@preserve src dest tref bc begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{$TT}, Ptr{$T}, vImage_Flags),
-                        sb, db, C_NULL, tref, pointer(bc), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, C_NULL, tref, pointer(bc), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -497,9 +475,8 @@ for sfx in (:Planar8, :Planar16U, :Planar16F, :ARGB8888, :ARGB16U, :ARGB16F)
             tref = Ref(transform)
             GC.@preserve src dest tref begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{vImage_PerspectiveTransform}, Int32, $T, vImage_Flags),
-                    sb, db, C_NULL, tref, Int32(interpolation), $T(backColor), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, tref, Int32(interpolation), $T(backColor),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -511,9 +488,8 @@ for sfx in (:Planar8, :Planar16U, :Planar16F, :ARGB8888, :ARGB16U, :ARGB16F)
             tref = Ref(transform); bc = convert(Vector{$T}, collect(backColor))
             GC.@preserve src dest tref bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{vImage_PerspectiveTransform}, Int32, Ptr{$T}, vImage_Flags),
-                    sb, db, C_NULL, tref, Int32(interpolation), pointer(bc), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, tref, Int32(interpolation), pointer(bc),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -533,13 +509,12 @@ perspectiveWarp_Planar8
 
 # ResamplingFilter (opaque, caller-owned) used by the shear functions.
 function _new_resampling_filter(scale::Real, flags::Integer)
-    f = ccall((:vImageNewResamplingFilter, vimage_lib), Ptr{Cvoid},
-              (Cfloat, vImage_Flags), Cfloat(scale), vImage_Flags(flags))
+    f = LibAccelerate.vImageNewResamplingFilter(Cfloat(scale), vImage_Flags(flags))
     f == C_NULL && throw(vImageError(kvImageMemoryAllocationError, "vImageNewResamplingFilter"))
     return f
 end
 _destroy_resampling_filter(f::Ptr{Cvoid}) =
-    ccall((:vImageDestroyResamplingFilter, vimage_lib), Cvoid, (Ptr{Cvoid},), f)
+    LibAccelerate.vImageDestroyResamplingFilter(f)
 
 # ---- Horizontal / Vertical shear (float + double) -----------------------------------
 # (src, dest, offX, offY, translate, shearSlope, ResamplingFilter, backColor, flags)
@@ -565,9 +540,7 @@ for (op, CT) in ((:HorizontalShear, Cfloat), (:VerticalShear, Cfloat),
                 try
                     GC.@preserve src dest begin
                         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                        err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Csize_t, Csize_t, $CT, $CT, Ptr{Cvoid}, $T, vImage_Flags),
-                            sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY), $CT(translate), $CT(shearSlope),
+                        err = LibAccelerate.$sym(sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY), $CT(translate), $CT(shearSlope),
                             filt, $T(backColor), vImage_Flags(flags))
                     end
                     _check(err, $(String(sym)))
@@ -585,9 +558,7 @@ for (op, CT) in ((:HorizontalShear, Cfloat), (:VerticalShear, Cfloat),
                 try
                     GC.@preserve src dest bc begin
                         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                        err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Csize_t, Csize_t, $CT, $CT, Ptr{Cvoid}, Ptr{$T}, vImage_Flags),
-                            sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY), $CT(translate), $CT(shearSlope),
+                        err = LibAccelerate.$sym(sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY), $CT(translate), $CT(shearSlope),
                             filt, pointer(bc), vImage_Flags(flags))
                     end
                     _check(err, $(String(sym)))
@@ -630,10 +601,7 @@ for op in (:Dilate, :Erode)
                 kh, kw = size(k)  # kernel stored (height, width) row-major; symmetric use is typical
                 GC.@preserve src dest k begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Csize_t, Csize_t,
-                         Ptr{UInt8}, Csize_t, Csize_t, vImage_Flags),
-                        sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                    err = LibAccelerate.$sym(sb, db, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                         pointer(k), Csize_t(kh), Csize_t(kw), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
@@ -667,10 +635,7 @@ for op in (:Max, :Min)
                            flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                         Csize_t, Csize_t, vImage_Flags),
-                        sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                    err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                         Csize_t(kernelHeight), Csize_t(kernelWidth), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
@@ -717,10 +682,7 @@ for sfx in _CONV_INT
         $prep
         GC.@preserve src dest k bc begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Int16}, UInt32, UInt32, Int32, $bctyp, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(k), UInt32(kh), UInt32(kw), Int32(divisor), $bcarg, vImage_Flags(flags))
         end
         _check(err, $(String(sym)))
@@ -744,10 +706,7 @@ for sfx in _CONV_FLT
         $prep
         GC.@preserve src dest k bc begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Cfloat}, UInt32, UInt32, $bctyp, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(k), UInt32(kh), UInt32(kw), $bcarg, vImage_Flags(flags))
         end
         _check(err, $(String(sym)))
@@ -785,10 +744,7 @@ for sfx in _CONV_INT
         $prep
         GC.@preserve src dest k bc begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Int16}, UInt32, UInt32, Int32, Int32, $bctyp, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(k), UInt32(kh), UInt32(kw), Int32(divisor), Int32(bias), $bcarg, vImage_Flags(flags))
         end
         _check(err, $(String(sym)))
@@ -812,10 +768,7 @@ for sfx in _CONV_FLT
         $prep
         GC.@preserve src dest k bc begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Cfloat}, UInt32, UInt32, Cfloat, $bctyp, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(k), UInt32(kh), UInt32(kw), Cfloat(bias), $bcarg, vImage_Flags(flags))
         end
         _check(err, $(String(sym)))
@@ -847,10 +800,7 @@ for op in (:BoxConvolve, :TentConvolve)
                                  flags::Integer = kvImageEdgeExtend)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                         UInt32, UInt32, $T, vImage_Flags),
-                        sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                    err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                         UInt32(kernelHeight), UInt32(kernelWidth), $T(backColor), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
@@ -863,10 +813,7 @@ for op in (:BoxConvolve, :TentConvolve)
                 bc = convert(Vector{$T}, collect(backColor))
                 GC.@preserve src dest bc begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                         UInt32, UInt32, Ptr{$T}, vImage_Flags),
-                        sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                    err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                         UInt32(kernelHeight), UInt32(kernelWidth), pointer(bc), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
@@ -901,8 +848,7 @@ function histogramCalculation_Planar8(src::AbstractMatrix{UInt8})
     hist = zeros(Csize_t, 256)
     GC.@preserve src hist begin
         sb = Ref(vimage_buffer(src))
-        err = ccall((:vImageHistogramCalculation_Planar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{Csize_t}, vImage_Flags), sb, pointer(hist), kvImageNoFlags)
+        err = LibAccelerate.vImageHistogramCalculation_Planar8(sb, pointer(hist), kvImageNoFlags)
     end
     _check(err, "vImageHistogramCalculation_Planar8")
     return Int.(hist)
@@ -918,9 +864,8 @@ function histogramCalculation_PlanarF(src::AbstractMatrix{Float32}, entries::Int
     hist = zeros(Csize_t, entries)
     GC.@preserve src hist begin
         sb = Ref(vimage_buffer(src))
-        err = ccall((:vImageHistogramCalculation_PlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{Csize_t}, Cuint, Cfloat, Cfloat, vImage_Flags),
-            sb, pointer(hist), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), kvImageNoFlags)
+        err = LibAccelerate.vImageHistogramCalculation_PlanarF(sb, pointer(hist), Cuint(entries),
+            Cfloat(minVal), Cfloat(maxVal), kvImageNoFlags)
     end
     _check(err, "vImageHistogramCalculation_PlanarF")
     return Int.(hist)
@@ -937,9 +882,7 @@ function histogramCalculation_ARGB8888(src::AbstractArray{UInt8,3})
         ptrs = [pointer(c) for c in chans]
         GC.@preserve ptrs begin
             sb = Ref(vimage_buffer(src))
-            err = ccall((:vImageHistogramCalculation_ARGB8888, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{Ptr{Csize_t}}, vImage_Flags),
-                sb, pointer(ptrs), kvImageNoFlags)
+            err = LibAccelerate.vImageHistogramCalculation_ARGB8888(sb, pointer(ptrs), kvImageNoFlags)
         end
     end
     _check(err, "vImageHistogramCalculation_ARGB8888")
@@ -958,9 +901,8 @@ function histogramCalculation_ARGBFFFF(src::AbstractArray{Float32,3}, entries::I
         ptrs = [pointer(c) for c in chans]
         GC.@preserve ptrs begin
             sb = Ref(vimage_buffer(src))
-            err = ccall((:vImageHistogramCalculation_ARGBFFFF, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{Ptr{Csize_t}}, Cuint, Cfloat, Cfloat, vImage_Flags),
-                sb, pointer(ptrs), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), kvImageNoFlags)
+            err = LibAccelerate.vImageHistogramCalculation_ARGBFFFF(sb, pointer(ptrs),
+                Cuint(entries), Cfloat(minVal), Cfloat(maxVal), kvImageNoFlags)
         end
     end
     _check(err, "vImageHistogramCalculation_ARGBFFFF")
@@ -977,9 +919,7 @@ for op in (:Equalization, :ContrastStretch)
             function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                        sb, db, vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -998,9 +938,8 @@ for op in (:Equalization, :ContrastStretch)
                            minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Cuint, Cfloat, Cfloat, vImage_Flags),
-                        sb, db, C_NULL, Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, C_NULL, Cuint(entries), Cfloat(minVal),
+                        Cfloat(maxVal), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -1026,9 +965,8 @@ function endsInContrastStretch_Planar8!(dest::AbstractMatrix{UInt8}, src::Abstra
                                         flags::Integer = kvImageNoFlags)
     GC.@preserve src dest begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageEndsInContrastStretch_Planar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Cuint, Cuint, vImage_Flags),
-            sb, db, Cuint(percentLow), Cuint(percentHigh), vImage_Flags(flags))
+        err = LibAccelerate.vImageEndsInContrastStretch_Planar8(sb, db, Cuint(percentLow),
+            Cuint(percentHigh), vImage_Flags(flags))
     end
     _check(err, "vImageEndsInContrastStretch_Planar8")
     return dest
@@ -1048,9 +986,8 @@ function endsInContrastStretch_ARGB8888!(dest::AbstractArray{UInt8,3}, src::Abst
     pl = convert(Vector{Cuint}, collect(percentLow)); ph = convert(Vector{Cuint}, collect(percentHigh))
     GC.@preserve src dest pl ph begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageEndsInContrastStretch_ARGB8888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cuint}, Ptr{Cuint}, vImage_Flags),
-            sb, db, pointer(pl), pointer(ph), vImage_Flags(flags))
+        err = LibAccelerate.vImageEndsInContrastStretch_ARGB8888(sb, db, pointer(pl), pointer(ph),
+            vImage_Flags(flags))
     end
     _check(err, "vImageEndsInContrastStretch_ARGB8888")
     return dest
@@ -1071,9 +1008,8 @@ function histogramSpecification_Planar8!(dest::AbstractMatrix{UInt8}, src::Abstr
     length(dh) == 256 || throw(DimensionMismatch("desiredHistogram must have 256 entries"))
     GC.@preserve src dest dh begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageHistogramSpecification_Planar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Csize_t}, vImage_Flags),
-            sb, db, pointer(dh), vImage_Flags(flags))
+        err = LibAccelerate.vImageHistogramSpecification_Planar8(sb, db, pointer(dh),
+            vImage_Flags(flags))
     end
     _check(err, "vImageHistogramSpecification_Planar8")
     return dest
@@ -1104,9 +1040,7 @@ for op in (:PremultiplyData, :UnpremultiplyData, :ClipToAlpha)
             function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
                 GC.@preserve src dest begin
                     sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                        sb, db, vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, db, vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -1128,9 +1062,7 @@ for op in (:PremultiplyData, :UnpremultiplyData, :ClipToAlpha)
                            flags::Integer = kvImageNoFlags)
                 GC.@preserve src alpha dest begin
                     sb = Ref(vimage_buffer(src)); ab = Ref(vimage_buffer(alpha)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                        sb, ab, db, vImage_Flags(flags))
+                    err = LibAccelerate.$sym(sb, ab, db, vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -1180,9 +1112,7 @@ for (op, cname) in ((:PremultipliedAlphaBlend, :PremultipliedAlphaBlend),
                            flags::Integer = kvImageNoFlags)
                 GC.@preserve srcTop srcBottom dest begin
                     tb = Ref(vimage_buffer(srcTop)); bb = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                        tb, bb, db, vImage_Flags(flags))
+                    err = LibAccelerate.$sym(tb, bb, db, vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -1204,9 +1134,7 @@ for op in (:PremultipliedAlphaBlendMultiply, :PremultipliedAlphaBlendScreen,
                        srcBottom::AbstractArray{UInt8,3}; flags::Integer = kvImageNoFlags)
             GC.@preserve srcTop srcBottom dest begin
                 tb = Ref(vimage_buffer(srcTop)); bb = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    tb, bb, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(tb, bb, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1235,10 +1163,7 @@ function alphaBlend_Planar8!(dest::AbstractMatrix{UInt8}, srcTop::AbstractMatrix
         t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
         b = Ref(vimage_buffer(srcBottom)); ba = Ref(vimage_buffer(srcBottomAlpha))
         al = Ref(vimage_buffer(alpha)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageAlphaBlend_Planar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer},
-             Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            t, ta, b, ba, al, db, vImage_Flags(flags))
+        err = LibAccelerate.vImageAlphaBlend_Planar8(t, ta, b, ba, al, db, vImage_Flags(flags))
     end
     _check(err, "vImageAlphaBlend_Planar8")
     return dest
@@ -1269,9 +1194,8 @@ function matrixMultiply_ARGB8888!(dest::AbstractArray{UInt8,3}, src::AbstractArr
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
         prep = isempty(prev) ? Ptr{Int16}(C_NULL) : pointer(prev)
         postp = isempty(postv) ? Ptr{Int32}(C_NULL) : pointer(postv)
-        err = ccall((:vImageMatrixMultiply_ARGB8888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Int16}, Int32, Ptr{Int16}, Ptr{Int32}, vImage_Flags),
-            sb, db, pointer(mflat), Int32(divisor), prep, postp, vImage_Flags(flags))
+        err = LibAccelerate.vImageMatrixMultiply_ARGB8888(sb, db, pointer(mflat), Int32(divisor),
+            prep, postp, vImage_Flags(flags))
     end
     _check(err, "vImageMatrixMultiply_ARGB8888")
     return dest
@@ -1297,9 +1221,8 @@ function matrixMultiply_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::AbstractA
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
         prep = isempty(prev) ? Ptr{Cfloat}(C_NULL) : pointer(prev)
         postp = isempty(postv) ? Ptr{Cfloat}(C_NULL) : pointer(postv)
-        err = ccall((:vImageMatrixMultiply_ARGBFFFF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
-            sb, db, pointer(mflat), prep, postp, vImage_Flags(flags))
+        err = LibAccelerate.vImageMatrixMultiply_ARGBFFFF(sb, db, pointer(mflat), prep, postp,
+            vImage_Flags(flags))
     end
     _check(err, "vImageMatrixMultiply_ARGBFFFF")
     return dest
@@ -1325,9 +1248,8 @@ for (sfx, T, BT) in ((:Planar8, UInt8, UInt8), (:PlanarF, Float32, Cfloat),
             ec = convert(Vector{Cfloat}, collect(exponentialCoeffs)); lc = convert(Vector{Cfloat}, collect(linearCoeffs))
             GC.@preserve src dest ec lc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Cfloat, Ptr{Cfloat}, $BT, vImage_Flags),
-                    sb, db, pointer(ec), Cfloat(gamma), pointer(lc), $BT(boundary), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(ec), Cfloat(gamma), pointer(lc),
+                    $BT(boundary), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1358,9 +1280,7 @@ for (sfx, DT, TBL) in ((:Planar8toPlanar16, UInt16, UInt16), (:Planar8toPlanarF,
             length(t) == 256 || throw(DimensionMismatch("table must have 256 entries"))
             GC.@preserve src dest t begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{$TBL}, vImage_Flags),
-                    sb, db, pointer(t), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(t), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1385,9 +1305,8 @@ for (sfx, T, nch) in ((:Planar8, UInt8, 1), (:Planar16U, UInt16, 1),
                                           newValue; connectivity::Integer = 4, flags::Integer = kvImageNoFlags)
             GC.@preserve srcDest begin
                 sb = Ref(vimage_buffer(srcDest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t, $T, Cint, vImage_Flags),
-                    sb, C_NULL, Csize_t(seedX), Csize_t(seedY), $T(newValue), Cint(connectivity), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, C_NULL, Csize_t(seedX), Csize_t(seedY), $T(newValue),
+                    Cint(connectivity), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return srcDest
@@ -1399,9 +1318,8 @@ for (sfx, T, nch) in ((:Planar8, UInt8, 1), (:Planar16U, UInt16, 1),
             GC.@preserve srcDest nv begin
                 sb = Ref(vimage_buffer(srcDest))
                 # Pixel_8888/Pixel_ARGB_16U passed by value as a 4-element array -> pointer
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t, Ptr{$T}, Cint, vImage_Flags),
-                    sb, C_NULL, Csize_t(seedX), Csize_t(seedY), pointer(nv), Cint(connectivity), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, C_NULL, Csize_t(seedX), Csize_t(seedY), pointer(nv),
+                    Cint(connectivity), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return srcDest
@@ -1433,9 +1351,7 @@ for (sfx, np) in ((:ARGB8888, 4), (:ARGB16U, 4), (:ARGBFFFF, 4), (:ARGB16F, 4), 
             length(pm) == $np || throw(DimensionMismatch("permuteMap must have $($np) entries"))
             GC.@preserve src dest pm begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, vImage_Flags),
-                    sb, db, pointer(pm), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(pm), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1464,9 +1380,7 @@ for sfx in (:ARGB8888, :ARGB16U, :ARGBFFFF)
                        flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Clong, vImage_Flags),
-                    sb, db, Clong(channelIndex), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, Clong(channelIndex), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1496,9 +1410,7 @@ for sfx in (:ARGB8888, :ARGB16U, :ARGB16S, :ARGBFFFF, :CbCr8, :CbCr16U, :CbCr16S
             length(c) == $nch || throw(DimensionMismatch("color must have $($nch) entries"))
             GC.@preserve dest c begin
                 db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{$T}, vImage_Flags),
-                    db, pointer(c), vImage_Flags(flags))
+                err = LibAccelerate.$sym(db, pointer(c), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1523,9 +1435,7 @@ for sfx in (:Planar8, :PlanarF, :Planar16S, :Planar16U, :Planar16F)
         function $(Symbol(fn, "!"))(dest::AbstractMatrix{$T}, scalar; flags::Integer = kvImageNoFlags)
             GC.@preserve dest begin
                 db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    ($ST, Ptr{vImage_Buffer}, vImage_Flags),
-                    $ST(scalar), db, vImage_Flags(flags))
+                err = LibAccelerate.$sym($ST(scalar), db, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1547,9 +1457,7 @@ function tableLookUp_Planar8!(dest::AbstractMatrix{UInt8}, src::AbstractMatrix{U
     t = table isa Vector{UInt8} ? table : convert(Vector{UInt8}, table)
     GC.@preserve src dest t begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageTableLookUp_Planar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, vImage_Flags),
-            sb, db, pointer(t), vImage_Flags(flags))
+        err = LibAccelerate.vImageTableLookUp_Planar8(sb, db, pointer(t), vImage_Flags(flags))
     end
     _check(err, "vImageTableLookUp_Planar8")
     return dest
@@ -1592,9 +1500,7 @@ for sym in _CONVERT_SS
         function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    sb, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1620,9 +1526,8 @@ for sym in (:vImageConvert_Planar8toPlanarF, :vImageConvert_PlanarFtoPlanar8, :v
                        minFloat::Real = 0f0, flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Cfloat, Cfloat, vImage_Flags),
-                    sb, db, Cfloat(maxFloat), Cfloat(minFloat), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, Cfloat(maxFloat), Cfloat(minFloat),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1652,9 +1557,7 @@ for sym in (:vImageConvert_16SToF, :vImageConvert_16UToF, :vImageConvert_FTo16S,
                        scale::Real = 1f0, flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Cfloat, Cfloat, vImage_Flags),
-                    sb, db, Cfloat(offset), Cfloat(scale), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, Cfloat(offset), Cfloat(scale), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1673,9 +1576,7 @@ convert_16UToF!
 function copyBuffer!(dest::AbstractArray, src::AbstractArray; pixelSize::Integer, flags::Integer = kvImageNoFlags)
     GC.@preserve src dest begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageCopyBuffer, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Csize_t, vImage_Flags),
-            sb, db, Csize_t(pixelSize), vImage_Flags(flags))
+        err = LibAccelerate.vImageCopyBuffer(sb, db, Csize_t(pixelSize), vImage_Flags(flags))
     end
     _check(err, "vImageCopyBuffer")
     return dest
@@ -1700,9 +1601,7 @@ for (sfx, DT) in ((:ARGB8888ToRGB888, UInt8), (:RGBA8888ToRGB888, UInt8), (:BGRA
             bc = convert(Vector{$T}, collect(backgroundColor))
             GC.@preserve src dest bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{$T}, Bool, vImage_Flags),
-                    sb, db, pointer(bc), isImagePremultiplied, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(bc), isImagePremultiplied, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1726,9 +1625,7 @@ for (sfx, T) in ((:ARGB8888toPlanar8, UInt8), (:ARGBFFFFtoPlanarF, Float32))
             GC.@preserve src destA destR destG destB begin
                 sb = Ref(vimage_buffer(src)); a = Ref(vimage_buffer(destA)); r = Ref(vimage_buffer(destR))
                 g = Ref(vimage_buffer(destG)); b = Ref(vimage_buffer(destB))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    sb, a, r, g, b, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, a, r, g, b, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return (destA, destR, destG, destB)
@@ -1743,9 +1640,7 @@ for (sfx, T) in ((:Planar8toARGB8888, UInt8), (:PlanarFtoARGBFFFF, Float32))
             GC.@preserve dest srcA srcR srcG srcB begin
                 a = Ref(vimage_buffer(srcA)); r = Ref(vimage_buffer(srcR)); g = Ref(vimage_buffer(srcG))
                 b = Ref(vimage_buffer(srcB)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    a, r, g, b, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(a, r, g, b, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1782,9 +1677,8 @@ for sym in _CONVERT_1010102
             pm = convert(Vector{UInt8}, collect(permuteMap))
             GC.@preserve src dest pm begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Int32, Int32, Ptr{UInt8}, vImage_Flags),
-                    sb, db, Int32(rangeMin), Int32(rangeMax), pointer(pm), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, Int32(rangeMin), Int32(rangeMax), pointer(pm),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1817,9 +1711,7 @@ for sfx in (:Planar8, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S, :ARGBFFFF)
             tref = Ref(transform)
             GC.@preserve src dest tref begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{vImage_AffineTransform_Double}, $T, vImage_Flags),
-                    sb, db, C_NULL, tref, $T(backColor), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, tref, $T(backColor), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1830,9 +1722,7 @@ for sfx in (:Planar8, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S, :ARGBFFFF)
             tref = Ref(transform); bc = convert(Vector{$T}, collect(backColor))
             GC.@preserve src dest tref bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{vImage_AffineTransform_Double}, Ptr{$T}, vImage_Flags),
-                    sb, db, C_NULL, tref, pointer(bc), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, C_NULL, tref, pointer(bc), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1863,10 +1753,7 @@ for (sfx, BT, nch) in ((:Planar8, UInt16, 1), (:Planar16U, UInt16, 1), (:PlanarF
             kx = convert(Vector{Cfloat}, kernelX); ky = convert(Vector{Cfloat}, kernelY)
             GC.@preserve src dest kx ky begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                     Ptr{Cfloat}, UInt32, Ptr{Cfloat}, UInt32, Cfloat, $BT, vImage_Flags),
-                    sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                     pointer(kx), UInt32(length(kx)), pointer(ky), UInt32(length(ky)),
                     Cfloat(bias), $BT(backColor), vImage_Flags(flags))
             end
@@ -1882,10 +1769,7 @@ for (sfx, BT, nch) in ((:Planar8, UInt16, 1), (:Planar16U, UInt16, 1), (:PlanarF
             bc = convert(Vector{UInt8}, collect(backColor))
             GC.@preserve src dest kx ky bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                     Ptr{Cfloat}, UInt32, Ptr{Cfloat}, UInt32, Cfloat, Ptr{UInt8}, vImage_Flags),
-                    sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+                err = LibAccelerate.$sym(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                     pointer(kx), UInt32(length(kx)), pointer(ky), UInt32(length(ky)),
                     Cfloat(bias), pointer(bc), vImage_Flags(flags))
             end
@@ -1917,9 +1801,7 @@ for sfx in (:ARGB8888, :RGBA8888, :ARGB16U, :RGBA16U, :ARGB16Q12, :RGBA16Q12, :A
             bc = convert(Vector{$T}, collect(backgroundColor))
             GC.@preserve src dest bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{$T}, Bool, vImage_Flags),
-                    sb, db, pointer(bc), isImagePremultiplied, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(bc), isImagePremultiplied, vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -1947,9 +1829,7 @@ for op in (:OverwriteChannels, :SelectChannels)
                            copyMask::Integer; flags::Integer = kvImageNoFlags)
                 GC.@preserve newSrc origSrc dest begin
                     nb = Ref(vimage_buffer(newSrc)); ob = Ref(vimage_buffer(origSrc)); db = Ref(vimage_buffer(dest))
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, UInt8, vImage_Flags),
-                        nb, ob, db, UInt8(copyMask), vImage_Flags(flags))
+                    err = LibAccelerate.$sym(nb, ob, db, UInt8(copyMask), vImage_Flags(flags))
                 end
                 _check(err, $(String(sym)))
                 return dest
@@ -1980,9 +1860,7 @@ for sfx in (:ARGB8888, :ARGB16U, :ARGBFFFF)
             px = convert(Vector{$T}, collect(pixel))
             GC.@preserve src dest px begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{$T}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, UInt8, vImage_Flags),
-                    pointer(px), sb, db, UInt8(copyMask), vImage_Flags(flags))
+                err = LibAccelerate.$sym(pointer(px), sb, db, UInt8(copyMask), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -2010,9 +1888,7 @@ for (sfx, ST) in ((:ARGB8888, UInt8), (:ARGBFFFF, Cfloat))
                        flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    ($ST, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, UInt8, vImage_Flags),
-                    $ST(scalar), sb, db, UInt8(copyMask), vImage_Flags(flags))
+                err = LibAccelerate.$sym($ST(scalar), sb, db, UInt8(copyMask), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -2034,9 +1910,8 @@ for sfx in (:ARGB8888, :ARGB16U, :ARGBFFFF)
             pm = convert(Vector{UInt8}, collect(permuteMap)); bc = convert(Vector{$T}, collect(backgroundColor))
             GC.@preserve src dest pm bc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, UInt8, Ptr{$T}, vImage_Flags),
-                    sb, db, pointer(pm), UInt8(copyMask), pointer(bc), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(pm), UInt8(copyMask), pointer(bc),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -2061,9 +1936,8 @@ function tableLookUp_ARGB8888!(dest::AbstractArray{UInt8,3}, src::AbstractArray{
     all(t -> length(t) == 256, (a, r, g, b)) || throw(DimensionMismatch("each table must have 256 entries"))
     GC.@preserve src dest a r g b begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageTableLookUp_ARGB8888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, vImage_Flags),
-            sb, db, pointer(a), pointer(r), pointer(g), pointer(b), vImage_Flags(flags))
+        err = LibAccelerate.vImageTableLookUp_ARGB8888(sb, db, pointer(a), pointer(r), pointer(g),
+            pointer(b), vImage_Flags(flags))
     end
     _check(err, "vImageTableLookUp_ARGB8888")
     return dest
@@ -2082,8 +1956,7 @@ function lookupTable_8to64U!(dest::AbstractMatrix{UInt64}, src::AbstractMatrix{U
     t = convert(Vector{UInt64}, collect(table)); length(t) == 256 || throw(DimensionMismatch("table must have 256 entries"))
     GC.@preserve src dest t begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageLookupTable_8to64U, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt64}, vImage_Flags), sb, db, pointer(t), vImage_Flags(flags))
+        err = LibAccelerate.vImageLookupTable_8to64U(sb, db, pointer(t), vImage_Flags(flags))
     end
     _check(err, "vImageLookupTable_8to64U"); return dest
 end
@@ -2091,8 +1964,7 @@ function lookupTable_PlanarFtoPlanar8!(dest::AbstractMatrix{UInt8}, src::Abstrac
     t = convert(Vector{UInt8}, collect(table)); length(t) == 4096 || throw(DimensionMismatch("table must have 4096 entries"))
     GC.@preserve src dest t begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageLookupTable_PlanarFtoPlanar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, vImage_Flags), sb, db, pointer(t), vImage_Flags(flags))
+        err = LibAccelerate.vImageLookupTable_PlanarFtoPlanar8(sb, db, pointer(t), vImage_Flags(flags))
     end
     _check(err, "vImageLookupTable_PlanarFtoPlanar8"); return dest
 end
@@ -2100,8 +1972,7 @@ function lookupTable_Planar16!(dest::AbstractMatrix{UInt16}, src::AbstractMatrix
     t = convert(Vector{UInt16}, collect(table)); length(t) == 0x10000 || throw(DimensionMismatch("table must have 65536 entries"))
     GC.@preserve src dest t begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageLookupTable_Planar16, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt16}, vImage_Flags), sb, db, pointer(t), vImage_Flags(flags))
+        err = LibAccelerate.vImageLookupTable_Planar16(sb, db, pointer(t), vImage_Flags(flags))
     end
     _check(err, "vImageLookupTable_Planar16"); return dest
 end
@@ -2130,9 +2001,8 @@ for (sym, T, DT, BT) in (
             ec = convert(Vector{Cfloat}, collect(exponentialCoeffs)); lc = convert(Vector{Cfloat}, collect(linearCoeffs))
             GC.@preserve src dest ec lc begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Cfloat, Ptr{Cfloat}, $BT, vImage_Flags),
-                    sb, db, pointer(ec), Cfloat(gamma), pointer(lc), $BT(boundary), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, pointer(ec), Cfloat(gamma), pointer(lc),
+                    $BT(boundary), vImage_Flags(flags))
             end
             _check(err, $(String(sym)))
             return dest
@@ -2157,9 +2027,8 @@ function matrixMultiply_ARGB8888ToPlanar8!(dest::AbstractMatrix{UInt8}, src::Abs
     GC.@preserve src dest m prev begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
         prep = isempty(prev) ? Ptr{Int16}(C_NULL) : pointer(prev)
-        err = ccall((:vImageMatrixMultiply_ARGB8888ToPlanar8, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Int16}, Int32, Ptr{Int16}, Int32, vImage_Flags),
-            sb, db, pointer(m), Int32(divisor), prep, Int32(postBias), vImage_Flags(flags))
+        err = LibAccelerate.vImageMatrixMultiply_ARGB8888ToPlanar8(sb, db, pointer(m),
+            Int32(divisor), prep, Int32(postBias), vImage_Flags(flags))
     end
     _check(err, "vImageMatrixMultiply_ARGB8888ToPlanar8"); return dest
 end
@@ -2170,9 +2039,8 @@ function matrixMultiply_ARGBFFFFToPlanarF!(dest::AbstractMatrix{Float32}, src::A
     GC.@preserve src dest m prev begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
         prep = isempty(prev) ? Ptr{Cfloat}(C_NULL) : pointer(prev)
-        err = ccall((:vImageMatrixMultiply_ARGBFFFFToPlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Ptr{Cfloat}, Cfloat, vImage_Flags),
-            sb, db, pointer(m), prep, Cfloat(postBias), vImage_Flags(flags))
+        err = LibAccelerate.vImageMatrixMultiply_ARGBFFFFToPlanarF(sb, db, pointer(m), prep,
+            Cfloat(postBias), vImage_Flags(flags))
     end
     _check(err, "vImageMatrixMultiply_ARGBFFFFToPlanarF"); return dest
 end
@@ -2191,9 +2059,7 @@ for (sfx, T) in ((:Planar8toRGB888, UInt8), (:PlanarFtoRGBFFF, Float32), (:Plana
                                    blue::AbstractMatrix{$T}; flags::Integer = kvImageNoFlags)
         GC.@preserve dest red green blue begin
             r = Ref(vimage_buffer(red)); g = Ref(vimage_buffer(green)); b = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                r, g, b, db, vImage_Flags(flags))
+            err = LibAccelerate.$sym(r, g, b, db, vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -2204,9 +2070,7 @@ for (sfx, T) in ((:RGB888toPlanar8, UInt8), (:RGBFFFtoPlanarF, Float32), (:RGB16
                                    blue::AbstractMatrix{$T}; flags::Integer = kvImageNoFlags)
         GC.@preserve src red green blue begin
             sb = Ref(vimage_buffer(src)); r = Ref(vimage_buffer(red)); g = Ref(vimage_buffer(green)); b = Ref(vimage_buffer(blue))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                sb, r, g, b, vImage_Flags(flags))
+            err = LibAccelerate.$sym(sb, r, g, b, vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return (red, green, blue)
     end
@@ -2215,9 +2079,7 @@ function convert_Planar16UtoARGB16U(dest::AbstractArray{UInt16,3}, a::AbstractMa
                                     g::AbstractMatrix{UInt16}, b::AbstractMatrix{UInt16}; flags::Integer = kvImageNoFlags)
     GC.@preserve dest a r g b begin
         ab = Ref(vimage_buffer(a)); rb = Ref(vimage_buffer(r)); gb = Ref(vimage_buffer(g)); bb = Ref(vimage_buffer(b)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageConvert_Planar16UtoARGB16U, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            ab, rb, gb, bb, db, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_Planar16UtoARGB16U(ab, rb, gb, bb, db, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_Planar16UtoARGB16U"); return dest
 end
@@ -2225,9 +2087,7 @@ function convert_ARGB16UtoPlanar16U(src::AbstractArray{UInt16,3}, a::AbstractMat
                                     g::AbstractMatrix{UInt16}, b::AbstractMatrix{UInt16}; flags::Integer = kvImageNoFlags)
     GC.@preserve src a r g b begin
         sb = Ref(vimage_buffer(src)); ab = Ref(vimage_buffer(a)); rb = Ref(vimage_buffer(r)); gb = Ref(vimage_buffer(g)); bb = Ref(vimage_buffer(b))
-        err = ccall((:vImageConvert_ARGB16UtoPlanar16U, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            sb, ab, rb, gb, bb, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_ARGB16UtoPlanar16U(sb, ab, rb, gb, bb, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_ARGB16UtoPlanar16U"); return (a, r, g, b)
 end
@@ -2249,9 +2109,7 @@ for sfx in (:RGB565toARGB8888, :RGB565toRGBA8888, :RGB565toBGRA8888)
                          flags::Integer = kvImageNoFlags)
         GC.@preserve src dest begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (UInt8, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                UInt8(alpha), sb, db, vImage_Flags(flags))
+            err = LibAccelerate.$sym(UInt8(alpha), sb, db, vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -2267,16 +2125,12 @@ for (sfx, T, AT) in ((:RGB888toARGB8888, UInt8, UInt8), (:RGB888toRGBA8888, UInt
         if alphaPlane === nothing
             GC.@preserve rgbSrc dest begin
                 sb = Ref(vimage_buffer(rgbSrc)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Bool, vImage_Flags),
-                    sb, C_NULL, $AT(alpha), db, premultiply, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, C_NULL, $AT(alpha), db, premultiply, vImage_Flags(flags))
             end
         else
             GC.@preserve rgbSrc dest alphaPlane begin
                 sb = Ref(vimage_buffer(rgbSrc)); ab = Ref(vimage_buffer(alphaPlane)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Bool, vImage_Flags),
-                    sb, ab, $AT(alpha), db, premultiply, vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, ab, $AT(alpha), db, premultiply, vImage_Flags(flags))
             end
         end
         _check(err, $(String(sym))); return dest
@@ -2300,9 +2154,8 @@ for (sfx, T) in ((:ARGB16UToARGB8888, UInt8), (:ARGB8888ToARGB16U, UInt16), (:RG
         pm = convert(Vector{UInt8}, collect(permuteMap)); bc = convert(Vector{$T}, collect(backgroundColor))
         GC.@preserve src dest pm bc begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, UInt8, Ptr{$T}, vImage_Flags),
-                sb, db, pointer(pm), UInt8(copyMask), pointer(bc), vImage_Flags(flags))
+            err = LibAccelerate.$sym(sb, db, pointer(pm), UInt8(copyMask), pointer(bc),
+                vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -2323,9 +2176,8 @@ function convert_ARGB8888toPlanarF(src::AbstractArray{UInt8,3}, a::AbstractMatri
     mx = convert(Vector{Cfloat}, collect(maxFloat)); mn = convert(Vector{Cfloat}, collect(minFloat))
     GC.@preserve src a r g b mx mn begin
         sb = Ref(vimage_buffer(src)); ab = Ref(vimage_buffer(a)); rb = Ref(vimage_buffer(r)); gb = Ref(vimage_buffer(g)); bb = Ref(vimage_buffer(b))
-        err = ccall((:vImageConvert_ARGB8888toPlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
-            sb, ab, rb, gb, bb, pointer(mx), pointer(mn), vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_ARGB8888toPlanarF(sb, ab, rb, gb, bb, pointer(mx),
+            pointer(mn), vImage_Flags(flags))
     end
     _check(err, "vImageConvert_ARGB8888toPlanarF"); return (a, r, g, b)
 end
@@ -2349,9 +2201,8 @@ for (sfx, AT) in ((:XRGB2101010ToARGB8888, UInt8), (:XRGB2101010ToARGB16Q12, Int
         pm = convert(Vector{UInt8}, collect(permuteMap))
         GC.@preserve src dest pm begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Int32, Int32, Ptr{UInt8}, vImage_Flags),
-                sb, $AT(alpha), db, Int32(rangeMin), Int32(rangeMax), pointer(pm), vImage_Flags(flags))
+            err = LibAccelerate.$sym(sb, $AT(alpha), db, Int32(rangeMin), Int32(rangeMax),
+                pointer(pm), vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -2371,13 +2222,14 @@ convert_XRGB2101010ToARGB8888!
 # Y'CbCr conversion is a "setup + execute" family: a *matrix* + *pixel range* + input
 # and output *format codes* are baked once into an opaque info struct by a
 # `GenerateConversion` call, and that info struct is then handed to the per-pixel
-# convert routines. See the struct byte-layouts (verified against vImage_Types.h and
-# empirically):
-#   * vImage_YpCbCrToARGBMatrix : 5 × Float32           (20 bytes)
-#   * vImage_ARGBToYpCbCrMatrix : 8 × Float32           (32 bytes)
-#   * vImage_YpCbCrPixelRange   : 8 × Int32             (32 bytes)
-#   * vImage_YpCbCrToARGB / vImage_ARGBToYpCbCr : opaque[128], 16-byte aligned.
-# The opaque info blobs are represented as NTuple{8,UInt128} (128 bytes, 16-aligned).
+# convert routines. The matrix and pixel-range structs are the generated definitions.
+#
+# The two opaque info blobs (`vImage_YpCbCrToARGB` / `vImage_ARGBToYpCbCr`) are the one
+# struct family kept hand-written: C declares them `uint8_t opaque[128]
+# __attribute__((aligned(16)))`, and Clang.jl emits `NTuple{128,UInt8}`, dropping the
+# alignment. vImage stores SIMD constants in them, so they are represented here as
+# NTuple{8,UInt128} (128 bytes, 16-aligned) and handed to the generated bindings as an
+# untyped pointer via `_blobptr`.
 
 """
     vImage_YpCbCrToARGBMatrix(Yp, Cr_R, Cr_G, Cb_G, Cb_B)
@@ -2388,9 +2240,7 @@ The standard ITU matrices are available as
 [`kvImage_YpCbCrToARGBMatrix_ITU_R_601_4`](@ref AppleAccelerate.kvImage_YpCbCrToARGBMatrix_ITU_R_601_4)
 and `…_709_2`.
 """
-struct vImage_YpCbCrToARGBMatrix
-    Yp::Cfloat; Cr_R::Cfloat; Cr_G::Cfloat; Cb_G::Cfloat; Cb_B::Cfloat
-end
+const vImage_YpCbCrToARGBMatrix = LibAccelerate.vImage_YpCbCrToARGBMatrix
 
 """
     vImage_ARGBToYpCbCrMatrix(R_Yp, G_Yp, B_Yp, R_Cb, G_Cb, B_Cb_R_Cr, G_Cr, B_Cr)
@@ -2400,10 +2250,7 @@ end
 [`kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4`](@ref AppleAccelerate.kvImage_ARGBToYpCbCrMatrix_ITU_R_601_4)
 and `…_709_2`.
 """
-struct vImage_ARGBToYpCbCrMatrix
-    R_Yp::Cfloat; G_Yp::Cfloat; B_Yp::Cfloat; R_Cb::Cfloat
-    G_Cb::Cfloat; B_Cb_R_Cr::Cfloat; G_Cr::Cfloat; B_Cr::Cfloat
-end
+const vImage_ARGBToYpCbCrMatrix = LibAccelerate.vImage_ARGBToYpCbCrMatrix
 
 """
     vImage_YpCbCrPixelRange(Yp_bias, CbCr_bias, YpRangeMax, CbCrRangeMax, YpMax, YpMin, CbCrMax, CbCrMin)
@@ -2412,10 +2259,7 @@ Range and clamping information for a Y'CbCr pixel format (8 × `Int32`). Handy p
 `kvImageYpCbCrPixelRange_VideoRange_8bit_Clamped`,
 `kvImageYpCbCrPixelRange_FullRange_8bit_Clamped`.
 """
-struct vImage_YpCbCrPixelRange
-    Yp_bias::Int32; CbCr_bias::Int32; YpRangeMax::Int32; CbCrRangeMax::Int32
-    YpMax::Int32; YpMin::Int32; CbCrMax::Int32; CbCrMin::Int32
-end
+const vImage_YpCbCrPixelRange = LibAccelerate.vImage_YpCbCrPixelRange
 
 """
     vImage_YpCbCrToARGB
@@ -2439,31 +2283,41 @@ struct vImage_ARGBToYpCbCr
     opaque::NTuple{8,UInt128}
 end
 
-# --- vImageARGBType / vImageYpCbCrType format codes --------------------------
-const kvImageARGB8888   = Cint(0)
-const kvImageARGB16U    = Cint(1)
-const kvImageARGB16Q12  = Cint(2)
+# Raw pointer to a Ref'd info blob; the caller must hold the Ref in `GC.@preserve`.
+_blobptr(r::Ref{T}) where {T} = Ptr{Cvoid}(Base.unsafe_convert(Ptr{T}, r))
 
-const kvImage422CbYpCrYp8                  = Cint(0)
-const kvImage422YpCbYpCr8                  = Cint(1)
-const kvImage422CbYpCrYp8_AA8              = Cint(2)
-const kvImage420Yp8_Cb8_Cr8                = Cint(3)
-const kvImage420Yp8_CbCr8                  = Cint(4)
-const kvImage444AYpCbCr8                   = Cint(5)
-const kvImage444CrYpCb8                    = Cint(6)
-const kvImage444CbYpCrA8                   = Cint(7)
-const kvImage444CrYpCb10                   = Cint(8)
-const kvImage422CrYpCbYpCbYpCbYpCrYpCrYp10 = Cint(9)
-const kvImage422CbYpCrYp16                 = Cint(13)
-const kvImage444AYpCbCr16                  = Cint(14)
+# The generated bindings type the format-code arguments as `@enum`s. `reinterpret` (not the
+# enum constructor) so an out-of-range code still reaches vImage and comes back as a
+# `vImageError`, as it did when the argument was a bare `Cint`.
+_fmtcode(::Type{E}, code::Integer) where {E<:Enum} = reinterpret(E, Cint(code) % UInt32)
+
+# --- vImageARGBType / vImageYpCbCrType format codes --------------------------
+const kvImageARGB8888   = Cint(LibAccelerate.kvImageARGB8888)
+const kvImageARGB16U    = Cint(LibAccelerate.kvImageARGB16U)
+const kvImageARGB16Q12  = Cint(LibAccelerate.kvImageARGB16Q12)
+
+const kvImage422CbYpCrYp8                  = Cint(LibAccelerate.kvImage422CbYpCrYp8)
+const kvImage422YpCbYpCr8                  = Cint(LibAccelerate.kvImage422YpCbYpCr8)
+const kvImage422CbYpCrYp8_AA8              = Cint(LibAccelerate.kvImage422CbYpCrYp8_AA8)
+const kvImage420Yp8_Cb8_Cr8                = Cint(LibAccelerate.kvImage420Yp8_Cb8_Cr8)
+const kvImage420Yp8_CbCr8                  = Cint(LibAccelerate.kvImage420Yp8_CbCr8)
+const kvImage444AYpCbCr8                   = Cint(LibAccelerate.kvImage444AYpCbCr8)
+const kvImage444CrYpCb8                    = Cint(LibAccelerate.kvImage444CrYpCb8)
+const kvImage444CbYpCrA8                   = Cint(LibAccelerate.kvImage444CbYpCrA8)
+const kvImage444CrYpCb10                   = Cint(LibAccelerate.kvImage444CrYpCb10)
+const kvImage422CrYpCbYpCbYpCbYpCrYpCrYp10 = Cint(LibAccelerate.kvImage422CrYpCbYpCbYpCbYpCrYpCrYp10)
+const kvImage422CbYpCrYp16                 = Cint(LibAccelerate.kvImage422CbYpCrYp16)
+const kvImage444AYpCbCr16                  = Cint(LibAccelerate.kvImage444AYpCbCr16)
 
 # --- Standard conversion matrix constants (loaded from the framework) --------
 @inline function _load_const(::Type{T}, name::Symbol) where {T}
+    # Exported *data* symbols: Clang.jl only emits functions, types and macros, so there is
+    # no generated binding for these and they are read from the framework by hand.
     # The symbol is a `const T *` variable. Resolve it via dlsym rather than `cglobal`:
     # `cglobal` requires a compile-time-constant first argument (Julia ≤1.10 rejects a
     # runtime `Symbol`), whereas dlsym takes the name at run time. dlsym returns the
     # address of the symbol (a `Ptr{Ptr{T}}`); load twice to reach the T value.
-    pp = Ptr{Ptr{T}}(Libdl.dlsym(Libdl.dlopen(vimage_lib), name))
+    pp = Ptr{Ptr{T}}(Libdl.dlsym(Libdl.dlopen(LibAccelerate.libacc), name))
     return unsafe_load(unsafe_load(pp))
 end
 
@@ -2501,9 +2355,9 @@ function convert_YpCbCrToARGB_GenerateConversion(matrix::vImage_YpCbCrToARGBMatr
         flags::Integer = kvImageNoFlags)
     out = Ref{vImage_YpCbCrToARGB}(); rm = Ref(matrix); rp = Ref(pixelRange)
     GC.@preserve out rm rp begin
-        err = ccall((:vImageConvert_YpCbCrToARGB_GenerateConversion, vimage_lib), vImage_Error,
-            (Ptr{vImage_YpCbCrToARGBMatrix}, Ptr{vImage_YpCbCrPixelRange}, Ptr{vImage_YpCbCrToARGB}, Cint, Cint, vImage_Flags),
-            rm, rp, out, Cint(ypCbCrType), Cint(argbType), vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_YpCbCrToARGB_GenerateConversion(rm, rp, _blobptr(out),
+            _fmtcode(LibAccelerate.vImageYpCbCrType, ypCbCrType), _fmtcode(LibAccelerate.vImageARGBType, argbType),
+            vImage_Flags(flags))
     end
     _check(err, "vImageConvert_YpCbCrToARGB_GenerateConversion")
     return out[]
@@ -2521,9 +2375,9 @@ function convert_ARGBToYpCbCr_GenerateConversion(matrix::vImage_ARGBToYpCbCrMatr
         flags::Integer = kvImageNoFlags)
     out = Ref{vImage_ARGBToYpCbCr}(); rm = Ref(matrix); rp = Ref(pixelRange)
     GC.@preserve out rm rp begin
-        err = ccall((:vImageConvert_ARGBToYpCbCr_GenerateConversion, vimage_lib), vImage_Error,
-            (Ptr{vImage_ARGBToYpCbCrMatrix}, Ptr{vImage_YpCbCrPixelRange}, Ptr{vImage_ARGBToYpCbCr}, Cint, Cint, vImage_Flags),
-            rm, rp, out, Cint(argbType), Cint(ypCbCrType), vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_ARGBToYpCbCr_GenerateConversion(rm, rp, _blobptr(out),
+            _fmtcode(LibAccelerate.vImageARGBType, argbType), _fmtcode(LibAccelerate.vImageYpCbCrType, ypCbCrType),
+            vImage_Flags(flags))
     end
     _check(err, "vImageConvert_ARGBToYpCbCr_GenerateConversion")
     return out[]
@@ -2543,9 +2397,8 @@ for (sym, hasA, AT) in ((:vImageConvert_444AYpCbCr8ToARGB8888,  false, UInt8),
             pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
             GC.@preserve src dest pm ri begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_YpCbCrToARGB}, Ptr{UInt8}, $AT, vImage_Flags),
-                    sb, db, ri, pointer(pm), $AT(alpha), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, _blobptr(ri), pointer(pm), $AT(alpha),
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2555,9 +2408,7 @@ for (sym, hasA, AT) in ((:vImageConvert_444AYpCbCr8ToARGB8888,  false, UInt8),
             pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
             GC.@preserve src dest pm ri begin
                 sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_YpCbCrToARGB}, Ptr{UInt8}, vImage_Flags),
-                    sb, db, ri, pointer(pm), vImage_Flags(flags))
+                err = LibAccelerate.$sym(sb, db, _blobptr(ri), pointer(pm), vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2574,9 +2425,7 @@ for sym in (:vImageConvert_ARGB8888To444AYpCbCr8, :vImageConvert_ARGB8888To444Cb
         pm = convert(Vector{UInt8}, collect(permuteMap)); ri = Ref(info)
         GC.@preserve src dest pm ri begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_ARGBToYpCbCr}, Ptr{UInt8}, vImage_Flags),
-                sb, db, ri, pointer(pm), vImage_Flags(flags))
+            err = LibAccelerate.$sym(sb, db, _blobptr(ri), pointer(pm), vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -2629,10 +2478,7 @@ function convolveMultiKernel_ARGB8888!(dest::AbstractArray{UInt8,3}, src::Abstra
         kptrs = Ptr{Int16}[pointer(k) for k in ks]
         GC.@preserve kptrs begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall((:vImageConvolveMultiKernel_ARGB8888, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Ptr{Int16}}, UInt32, UInt32, Ptr{Int32}, Ptr{Int32}, Ptr{UInt8}, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.vImageConvolveMultiKernel_ARGB8888(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(kptrs), UInt32(kh), UInt32(kw), pointer(div), pointer(bia), pointer(bc), vImage_Flags(flags))
         end
     end
@@ -2661,10 +2507,7 @@ function convolveMultiKernel_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::Abst
         kptrs = Ptr{Cfloat}[pointer(k) for k in ks]
         GC.@preserve kptrs begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall((:vImageConvolveMultiKernel_ARGBFFFF, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-                 Ptr{Ptr{Cfloat}}, UInt32, UInt32, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
-                sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+            err = LibAccelerate.vImageConvolveMultiKernel_ARGBFFFF(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
                 pointer(kptrs), UInt32(kh), UInt32(kw), pointer(bia), pointer(bc), vImage_Flags(flags))
         end
     end
@@ -2688,10 +2531,7 @@ function convolveFloatKernel_ARGB8888!(dest::AbstractArray{UInt8,3}, src::Abstra
     bc = convert(Vector{UInt8}, collect(backColor))
     GC.@preserve src dest k bc begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageConvolveFloatKernel_ARGB8888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Csize_t, Csize_t,
-             Ptr{Cfloat}, UInt32, UInt32, Cfloat, Ptr{UInt8}, vImage_Flags),
-            sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
+        err = LibAccelerate.vImageConvolveFloatKernel_ARGB8888(sb, db, C_NULL, Csize_t(srcOffsetX), Csize_t(srcOffsetY),
             pointer(k), UInt32(kh), UInt32(kw), Cfloat(bias), pointer(bc), vImage_Flags(flags))
     end
     _check(err, "vImageConvolveFloatKernel_ARGB8888"); return dest
@@ -2725,10 +2565,7 @@ for (sym, T, KT, integer) in ((:vImageMatrixMultiply_Planar8,  UInt8, Int16,   t
                 prep = isempty(prev) ? Ptr{$KT}(C_NULL) : pointer(prev)
                 postp = isempty(postv) ? Ptr{Int32}(C_NULL) : pointer(postv)
                 GC.@preserve sptrs dptrs begin
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{Ptr{vImage_Buffer}}, Ptr{Ptr{vImage_Buffer}}, UInt32, UInt32,
-                         Ptr{$KT}, Int32, Ptr{$KT}, Ptr{Int32}, vImage_Flags),
-                        pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
+                    err = LibAccelerate.$sym(pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
                         pointer(m), Int32(divisor), prep, postp, vImage_Flags(flags))
                 end
             end
@@ -2750,10 +2587,7 @@ for (sym, T, KT, integer) in ((:vImageMatrixMultiply_Planar8,  UInt8, Int16,   t
                 prep = isempty(prev) ? Ptr{Cfloat}(C_NULL) : pointer(prev)
                 postp = isempty(postv) ? Ptr{Cfloat}(C_NULL) : pointer(postv)
                 GC.@preserve sptrs dptrs begin
-                    err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                        (Ptr{Ptr{vImage_Buffer}}, Ptr{Ptr{vImage_Buffer}}, UInt32, UInt32,
-                         Ptr{Cfloat}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
-                        pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
+                    err = LibAccelerate.$sym(pointer(sptrs), pointer(dptrs), UInt32(sp), UInt32(dp),
                         pointer(m), prep, postp, vImage_Flags(flags))
                 end
             end
@@ -2787,9 +2621,7 @@ for sfx in (:Planar8, :PlanarF)
             GC.@preserve srcTop srcTopAlpha srcBottom dest begin
                 t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
                 b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    t, ta, b, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(t, ta, b, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2808,9 +2640,7 @@ for sfx in (:Planar8, :PlanarF)
             GC.@preserve srcTop srcTopAlpha srcBottom dest begin
                 t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
                 b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    t, ta, b, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(t, ta, b, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2830,9 +2660,7 @@ for (sfx, T, AT) in ((:Planar8, UInt8, UInt8), (:PlanarF, Float32, Cfloat))
             GC.@preserve srcTop srcTopAlpha srcBottom dest begin
                 t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
                 b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    t, $AT(constAlpha), ta, b, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(t, $AT(constAlpha), ta, b, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2848,9 +2676,7 @@ for (sfx, T, AT) in ((:ARGB8888, UInt8, UInt8), (:ARGBFFFF, Float32, Cfloat))
                        srcBottom::AbstractArray{$T,3}; flags::Integer = kvImageNoFlags)
             GC.@preserve srcTop srcBottom dest begin
                 t = Ref(vimage_buffer(srcTop)); b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, $AT, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                    t, $AT(constAlpha), b, db, vImage_Flags(flags))
+                err = LibAccelerate.$sym(t, $AT(constAlpha), b, db, vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2880,10 +2706,7 @@ function alphaBlend_PlanarF!(dest::AbstractMatrix{Float32}, srcTop::AbstractMatr
         t = Ref(vimage_buffer(srcTop)); ta = Ref(vimage_buffer(srcTopAlpha))
         b = Ref(vimage_buffer(srcBottom)); ba = Ref(vimage_buffer(srcBottomAlpha))
         al = Ref(vimage_buffer(alpha)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageAlphaBlend_PlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer},
-             Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            t, ta, b, ba, al, db, vImage_Flags(flags))
+        err = LibAccelerate.vImageAlphaBlend_PlanarF(t, ta, b, ba, al, db, vImage_Flags(flags))
     end
     _check(err, "vImageAlphaBlend_PlanarF"); return dest
 end
@@ -2906,9 +2729,8 @@ for sfx in (:ARGB8888, :RGBA8888)
             pm = convert(Vector{UInt8}, collect(permuteMap))
             GC.@preserve srcTop srcBottom dest pm begin
                 t = Ref(vimage_buffer(srcTop)); b = Ref(vimage_buffer(srcBottom)); db = Ref(vimage_buffer(dest))
-                err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                    (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{UInt8}, Bool, vImage_Flags),
-                    t, b, db, pointer(pm), makeDestAlphaOpaque, vImage_Flags(flags))
+                err = LibAccelerate.$sym(t, b, db, pointer(pm), makeDestAlphaOpaque,
+                    vImage_Flags(flags))
             end
             _check(err, $(String(sym))); return dest
         end
@@ -2936,9 +2758,8 @@ function histogramSpecification_PlanarF!(dest::AbstractMatrix{Float32}, src::Abs
     dh = convert(Vector{Csize_t}, collect(desiredHistogram))
     GC.@preserve src dest dh begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageHistogramSpecification_PlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Csize_t}, Cuint, Cfloat, Cfloat, vImage_Flags),
-            sb, db, C_NULL, pointer(dh), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+        err = LibAccelerate.vImageHistogramSpecification_PlanarF(sb, db, C_NULL, pointer(dh),
+            Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
     end
     _check(err, "vImageHistogramSpecification_PlanarF"); return dest
 end
@@ -2953,9 +2774,8 @@ function histogramSpecification_ARGB8888!(dest::AbstractArray{UInt8,3}, src::Abs
         hptrs = Ptr{Csize_t}[pointer(h) for h in hs]
         GC.@preserve hptrs begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall((:vImageHistogramSpecification_ARGB8888, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Ptr{Csize_t}}, vImage_Flags),
-                sb, db, pointer(hptrs), vImage_Flags(flags))
+            err = LibAccelerate.vImageHistogramSpecification_ARGB8888(sb, db, pointer(hptrs),
+                vImage_Flags(flags))
         end
     end
     _check(err, "vImageHistogramSpecification_ARGB8888"); return dest
@@ -2972,9 +2792,8 @@ function histogramSpecification_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::A
         hptrs = Ptr{Csize_t}[pointer(h) for h in hs]
         GC.@preserve hptrs begin
             sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-            err = ccall((:vImageHistogramSpecification_ARGBFFFF, vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Ptr{Csize_t}}, Cuint, Cfloat, Cfloat, vImage_Flags),
-                sb, db, C_NULL, pointer(hptrs), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+            err = LibAccelerate.vImageHistogramSpecification_ARGBFFFF(sb, db, C_NULL,
+                pointer(hptrs), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
         end
     end
     _check(err, "vImageHistogramSpecification_ARGBFFFF"); return dest
@@ -2998,9 +2817,8 @@ function endsInContrastStretch_PlanarF!(dest::AbstractMatrix{Float32}, src::Abst
         minVal::Real = 0f0, maxVal::Real = 1f0, flags::Integer = kvImageNoFlags)
     GC.@preserve src dest begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageEndsInContrastStretch_PlanarF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Cuint, Cuint, Cuint, Cfloat, Cfloat, vImage_Flags),
-            sb, db, C_NULL, Cuint(percentLow), Cuint(percentHigh), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+        err = LibAccelerate.vImageEndsInContrastStretch_PlanarF(sb, db, C_NULL, Cuint(percentLow),
+            Cuint(percentHigh), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
     end
     _check(err, "vImageEndsInContrastStretch_PlanarF"); return dest
 end
@@ -3013,9 +2831,8 @@ function endsInContrastStretch_ARGBFFFF!(dest::AbstractArray{Float32,3}, src::Ab
     pl = convert(Vector{Cuint}, collect(percentLow)); ph = convert(Vector{Cuint}, collect(percentHigh))
     GC.@preserve src dest pl ph begin
         sb = Ref(vimage_buffer(src)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageEndsInContrastStretch_ARGBFFFF, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cvoid}, Ptr{Cuint}, Ptr{Cuint}, Cuint, Cfloat, Cfloat, vImage_Flags),
-            sb, db, C_NULL, pointer(pl), pointer(ph), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
+        err = LibAccelerate.vImageEndsInContrastStretch_ARGBFFFF(sb, db, C_NULL, pointer(pl),
+            pointer(ph), Cuint(entries), Cfloat(minVal), Cfloat(maxVal), vImage_Flags(flags))
     end
     _check(err, "vImageEndsInContrastStretch_ARGBFFFF"); return dest
 end
@@ -3044,9 +2861,7 @@ for (sym, T) in ((:vImageConvert_XRGB8888ToPlanar8, UInt8), (:vImageConvert_BGRX
                        c3::AbstractMatrix{$T}; flags::Integer = kvImageNoFlags)
         GC.@preserve src c1 c2 c3 begin
             sb = Ref(vimage_buffer(src)); p1 = Ref(vimage_buffer(c1)); p2 = Ref(vimage_buffer(c2)); p3 = Ref(vimage_buffer(c3))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-                sb, p1, p2, p3, vImage_Flags(flags))
+            err = LibAccelerate.$sym(sb, p1, p2, p3, vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return (c1, c2, c3)
     end
@@ -3070,9 +2885,7 @@ for (sym, DT, T) in ((:vImageConvert_Planar8ToARGBFFFF, Float32, UInt8),
         mx = convert(Vector{Cfloat}, collect(maxFloat)); mn = convert(Vector{Cfloat}, collect(minFloat))
         GC.@preserve dest alpha red green blue mx mn begin
             ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
-            err = ccall(($(QuoteNode(sym)), vimage_lib), vImage_Error,
-                (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{Cfloat}, Ptr{Cfloat}, vImage_Flags),
-                ab, rb, gb, bb, db, pointer(mx), pointer(mn), vImage_Flags(flags))
+            err = LibAccelerate.$sym(ab, rb, gb, bb, db, pointer(mx), pointer(mn), vImage_Flags(flags))
         end
         _check(err, $(String(sym))); return dest
     end
@@ -3093,9 +2906,7 @@ function convert_Planar16Q12toARGB8888!(dest::AbstractArray{UInt8,3}, alpha::Abs
         red::AbstractMatrix{Int16}, green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}; flags::Integer = kvImageNoFlags)
     GC.@preserve dest alpha red green blue begin
         ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageConvert_Planar16Q12toARGB8888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            ab, rb, gb, bb, db, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_Planar16Q12toARGB8888(ab, rb, gb, bb, db, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_Planar16Q12toARGB8888"); return dest
 end
@@ -3103,9 +2914,7 @@ function convert_Planar16Q12toRGB888!(dest::AbstractArray{UInt8,3}, red::Abstrac
         green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}; flags::Integer = kvImageNoFlags)
     GC.@preserve dest red green blue begin
         rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue)); db = Ref(vimage_buffer(dest))
-        err = ccall((:vImageConvert_Planar16Q12toRGB888, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            rb, gb, bb, db, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_Planar16Q12toRGB888(rb, gb, bb, db, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_Planar16Q12toRGB888"); return dest
 end
@@ -3113,9 +2922,7 @@ function convert_ARGB8888toPlanar16Q12!(alpha::AbstractMatrix{Int16}, red::Abstr
         green::AbstractMatrix{Int16}, blue::AbstractMatrix{Int16}, src::AbstractArray{UInt8,3}; flags::Integer = kvImageNoFlags)
     GC.@preserve src alpha red green blue begin
         sb = Ref(vimage_buffer(src)); ab = Ref(vimage_buffer(alpha)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue))
-        err = ccall((:vImageConvert_ARGB8888toPlanar16Q12, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            sb, ab, rb, gb, bb, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_ARGB8888toPlanar16Q12(sb, ab, rb, gb, bb, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_ARGB8888toPlanar16Q12"); return (alpha, red, green, blue)
 end
@@ -3123,9 +2930,7 @@ function convert_RGB888toPlanar16Q12!(red::AbstractMatrix{Int16}, green::Abstrac
         blue::AbstractMatrix{Int16}, src::AbstractArray{UInt8,3}; flags::Integer = kvImageNoFlags)
     GC.@preserve src red green blue begin
         sb = Ref(vimage_buffer(src)); rb = Ref(vimage_buffer(red)); gb = Ref(vimage_buffer(green)); bb = Ref(vimage_buffer(blue))
-        err = ccall((:vImageConvert_RGB888toPlanar16Q12, vimage_lib), vImage_Error,
-            (Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, Ptr{vImage_Buffer}, vImage_Flags),
-            sb, rb, gb, bb, vImage_Flags(flags))
+        err = LibAccelerate.vImageConvert_RGB888toPlanar16Q12(sb, rb, gb, bb, vImage_Flags(flags))
     end
     _check(err, "vImageConvert_RGB888toPlanar16Q12"); return (red, green, blue)
 end
