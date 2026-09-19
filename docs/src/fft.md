@@ -164,9 +164,11 @@ p
 
 Plans can also be built from a type and a size, and carry the usual introspection:
 
-```@example fft
-pr = AppleAccelerate.rfftplan(Float32, (16, 32))      # 2-D real FFT
-size(pr), AppleAccelerate.output_size(pr), eltype(pr)
+```jldoctest; setup = :(using AppleAccelerate)
+julia> pr = AppleAccelerate.rfftplan(Float32, (16, 32));      # 2-D real FFT
+
+julia> size(pr), AppleAccelerate.output_size(pr), eltype(pr)
+((16, 32), (9, 32), Float32)
 ```
 
 ```@example fft

@@ -191,11 +191,26 @@ Plan a forward complex FFT for arrays shaped like `x` (only the element type and
 - Matrix with `dims = 1` or `2`: independent 1-D transforms of every column or row
   (power-of-two length), like FFTW's `plan_fft(x, dims)`.
 
-```julia
-p = AppleAccelerate.fftplan(x)
-y = p * x                  # allocate the result
-mul!(y, p, x)              # no allocation; `mul!(x, p, x)` transforms in place
-x ≈ p \\ y                  # same as inv(p) * y
+```jldoctest
+julia> using LinearAlgebra: mul!
+
+julia> x = ComplexF64[1, 2, 3, 4];
+
+julia> p = AppleAccelerate.fftplan(x)
+AppleAccelerate.FFTPlan{Float64}: forward FFT, 4 ComplexF64 → 4 ComplexF64 (vDSP_fft)
+
+julia> y = p * x                  # allocate the result
+4-element Vector{ComplexF64}:
+ 10.0 + 0.0im
+ -2.0 + 2.0im
+ -2.0 + 0.0im
+ -2.0 - 2.0im
+
+julia> mul!(similar(x), p, x) == y   # no allocation; `mul!(x, p, x)` transforms in place
+true
+
+julia> p \\ y ≈ x                  # same as inv(p) * y
+true
 ```
 
 See also [`bfftplan`](@ref), [`ifftplan`](@ref), [`rfftplan`](@ref).
