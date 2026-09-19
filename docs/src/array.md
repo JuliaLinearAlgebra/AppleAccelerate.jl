@@ -520,11 +520,13 @@ represents `v / 2^24`. Results are computed and re-encoded at the same scale.
 | [`vrampmuladd_s1_15`](@ref AppleAccelerate.vrampmuladd_s1_15) / [`vrampmuladd_s8_24`](@ref AppleAccelerate.vrampmuladd_s8_24) | Fixed-point ramp-multiply then accumulate |
 | [`vrampmuladd2_s1_15`](@ref AppleAccelerate.vrampmuladd2_s1_15) / [`vrampmuladd2_s8_24`](@ref AppleAccelerate.vrampmuladd2_s8_24) | Fixed-point stereo ramp-multiply then accumulate |
 
-```@example array
-A = Int16[16384, -8192, 4096]   # 0.5, -0.25, 0.125 in Q1.15
-B = Int16[8192, 16384, -16384]  # 0.25, 0.5, -0.5 in Q1.15
-c = AppleAccelerate.dotpr_s1_15(A, B)  # fixed-point dot product, Q1.15-encoded
-nothing # hide
+```jldoctest; setup = :(using AppleAccelerate)
+julia> A = Int16[16384, -8192, 4096];   # 0.5, -0.25, 0.125 in Q1.15
+
+julia> B = Int16[8192, 16384, -16384];  # 0.25, 0.5, -0.5 in Q1.15
+
+julia> AppleAccelerate.dotpr_s1_15(A, B)  # fixed-point dot product: -0.0625 in Q1.15
+-2048
 ```
 
 ```@docs
@@ -607,17 +609,24 @@ integer type is fixed by the function name, so the allocating form is `f(A)`. Fo
 **int → float** the float width is ambiguous, so the allocating form takes it
 explicitly as `f(A, Float64)` (or `Float32`).
 
-```@example array
-X = Float64[-1.7, 0.4, 2.9]
+```jldoctest; setup = :(using AppleAccelerate)
+julia> X = Float64[-1.7, 0.4, 2.9];
 
-I32 = AppleAccelerate.vfix32(X)            # truncate toward zero → Int32[-1, 0, 2]
-R32 = AppleAccelerate.vfixr32(X)           # round to nearest    → Int32[-2, 0, 3]
-Xf  = AppleAccelerate.vflt32(I32, Float64) # back to Float64 (target type required)
+julia> I32 = AppleAccelerate.vfix32(X);    # truncate toward zero
 
-# Mutating variant writes into a preallocated output
-out = Vector{Int32}(undef, length(X))
-AppleAccelerate.vfix32!(out, X)
-nothing # hide
+julia> show(I32)
+Int32[-1, 0, 2]
+
+julia> show(AppleAccelerate.vfixr32(X))    # round to nearest
+Int32[-2, 0, 3]
+
+julia> show(AppleAccelerate.vflt32(I32, Float64))  # back to Float64 (target type required)
+[-1.0, 0.0, 2.0]
+
+julia> out = Vector{Int32}(undef, length(X));
+
+julia> show(AppleAccelerate.vfix32!(out, X))  # mutating variant writes into a preallocated output
+Int32[-1, 0, 2]
 ```
 
 ## Image Convolution

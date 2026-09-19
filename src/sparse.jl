@@ -7,6 +7,35 @@ using Libdl
 # "$(xcrun --show-sdk-path)/System/Library/Frameworks/Accelerate.framework/
 # Versions/A/Frameworks/vecLib.framework/Versions/A/Headers/Sparse/Solve.h"
 
+# ## How this file relates to the generated `LibAccelerate` layer
+#
+# Unlike vDSP/vForce/BNNS, libSparse's *public* C API (`SparseFactor`,
+# `SparseSolve`, `SparseMultiply`, …) is not a set of plain C symbols. In C the
+# header declares them `static inline` (SolveImplementationTyped.h) on top of
+# private `_Sparse*` entry points, and the inline glue is substantial: argument
+# validation, workspace malloc/free through the factor's own allocator, the
+# `userFactorStorage` ownership flag, OS-availability traps. Clang.jl therefore
+# only sees the private `_Sparse*` layer. libSparse.dylib *also* exports the same
+# public API out-of-line as C++-mangled symbols, with all of that glue compiled
+# in — those are what this file calls, so Apple's validation and allocation
+# logic stays Apple's rather than being re-implemented here.
+#
+# What does come from the generated layer:
+#   * every enum/constant value (`Integer(LibAccelerate.X)` below),
+#   * the bitfield-free option structs (`SparseCGOptions`, …) — used directly,
+#   * the private `_Sparse*` calls that take their structs **by pointer**.
+#
+# What stays hand-written, and why:
+#   * the C++-mangled public entry points — absent from the C headers' symbol set;
+#   * the structs containing the `SparseAttributes_t` bitfield. Clang.jl emits
+#     those as opaque `NTuple{N,UInt8}` blobs with alignment 1 (the C structs are
+#     8-aligned), so passing one *by value* through a generated `@ccall` hands the
+#     callee a possibly misaligned copy. The field-typed mirrors here have the
+#     right size, offsets and alignment, and are parametric in the element type,
+#     which the dispatch below relies on. `test/sparse_tests.jl` ("libSparse ABI
+#     parity") checks every mirror against the generated layout, so a regenerated
+#     SDK that moves a field fails the suite instead of silently corrupting calls.
+
 # unused. But if I can find a library that supports C-style structs
 # of packed bitflags with enum fields, then I'll want them.
 #=
@@ -23,55 +52,55 @@ end
 end=#
 
 @enum SparseFactorization_t::UInt8 begin
-    SparseFactorizationCholesky = 0
-    SparseFactorizationLDLT = 1
-    SparseFactorizationLDLTUnpivoted = 2
-    SparseFactorizationLDLTSBK = 3
-    SparseFactorizationLDLTTPP = 4
-    SparseFactorizationQR = 40
-    SparseFactorizationCholeskyAtA = 41
+    SparseFactorizationCholesky = Integer(LibAccelerate.SparseFactorizationCholesky)
+    SparseFactorizationLDLT = Integer(LibAccelerate.SparseFactorizationLDLT)
+    SparseFactorizationLDLTUnpivoted = Integer(LibAccelerate.SparseFactorizationLDLTUnpivoted)
+    SparseFactorizationLDLTSBK = Integer(LibAccelerate.SparseFactorizationLDLTSBK)
+    SparseFactorizationLDLTTPP = Integer(LibAccelerate.SparseFactorizationLDLTTPP)
+    SparseFactorizationQR = Integer(LibAccelerate.SparseFactorizationQR)
+    SparseFactorizationCholeskyAtA = Integer(LibAccelerate.SparseFactorizationCholeskyAtA)
     # LU variants require macOS 15.5+. Calling them on older versions returns
     # SparseParameterError from libSparse, which factor!'s status check surfaces.
-    SparseFactorizationLU = 80
-    SparseFactorizationLUUnpivoted = 81
-    SparseFactorizationLUSPP = 82
-    SparseFactorizationLUTPP = 83
+    SparseFactorizationLU = Integer(LibAccelerate.SparseFactorizationLU)
+    SparseFactorizationLUUnpivoted = Integer(LibAccelerate.SparseFactorizationLUUnpivoted)
+    SparseFactorizationLUSPP = Integer(LibAccelerate.SparseFactorizationLUSPP)
+    SparseFactorizationLUTPP = Integer(LibAccelerate.SparseFactorizationLUTPP)
     SparseFactorizationTBD = 64 # my own addition.
 end
 
 @enum SparseOrder_t::UInt8 begin
-    SparseOrderDefault = 0
-    SparseOrderUser = 1
-    SparseOrderAMD = 2
-    SparseOrderMetis = 3
-    SparseOrderCOLAMD = 4
-    SparseOrderMTMetis = 5 # macOS 26+
+    SparseOrderDefault = Integer(LibAccelerate.SparseOrderDefault)
+    SparseOrderUser = Integer(LibAccelerate.SparseOrderUser)
+    SparseOrderAMD = Integer(LibAccelerate.SparseOrderAMD)
+    SparseOrderMetis = Integer(LibAccelerate.SparseOrderMetis)
+    SparseOrderCOLAMD = Integer(LibAccelerate.SparseOrderCOLAMD)
+    SparseOrderMTMetis = Integer(LibAccelerate.SparseOrderMTMetis) # macOS 26+
 end
 
 @enum SparseScaling_t::UInt8 begin
-    SparseScalingDefault = 0
-    SparseScalingUser = 1
-    SparseScalingEquilibriationInf = 2
+    SparseScalingDefault = Integer(LibAccelerate.SparseScalingDefault)
+    SparseScalingUser = Integer(LibAccelerate.SparseScalingUser)
+    SparseScalingEquilibriationInf = Integer(LibAccelerate.SparseScalingEquilibriationInf)
     # macOS 26+. Hungarian-and-ordering is only valid in a combined
     # symbolic+numeric SparseFactor call, and only for LU. Untested.
-    SparseScalingHungarianScalingOnly = 3
-    SparseScalingHungarianScalingAndOrdering = 4
+    SparseScalingHungarianScalingOnly = Integer(LibAccelerate.SparseScalingHungarianScalingOnly)
+    SparseScalingHungarianScalingAndOrdering = Integer(LibAccelerate.SparseScalingHungarianScalingAndOrdering)
 end
 
 @enum SparseStatus_t::Int32 begin
-    SparseStatusOk = 0
-    SparseStatusFailed = -1
-    SparseMatrixIsSingular = -2
-    SparseInternalError = -3
-    SparseParameterError = -4
+    SparseStatusOk = Integer(LibAccelerate.SparseStatusOK)
+    SparseStatusFailed = Integer(LibAccelerate.SparseFactorizationFailed)
+    SparseMatrixIsSingular = Integer(LibAccelerate.SparseMatrixIsSingular)
+    SparseInternalError = Integer(LibAccelerate.SparseInternalError)
+    SparseParameterError = Integer(LibAccelerate.SparseParameterError)
     SparseYetToBeFactored = -5 # my own addition.
-    SparseStatusReleased = -2147483647
+    SparseStatusReleased = Integer(LibAccelerate.SparseStatusReleased)
 end
 # Apple renamed SparseStatusFailed to SparseFactorizationFailed in newer SDKs.
 const SparseFactorizationFailed = SparseStatusFailed
 
 @enum SparseControl_t::UInt32 begin
-    SparseDefaultControl = 0
+    SparseDefaultControl = Integer(LibAccelerate.SparseDefaultControl)
 end
 
 # Julia can't represent C bitfields directly, so we work at the bit level: define
@@ -243,6 +272,19 @@ SparseOpaqueFactorization(T::Type) = SparseOpaqueFactorization{T}(
 # note: I haven't implemented anything involving Subfactor, Preconditioner, or IterativeMethod
 const LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/"*
                     "vecLib.framework/libSparse.dylib"
+
+# Generated-layer name suffix per element type (`SparseMatrix_Double`, …).
+const _RAW_SUFFIX = ((Cfloat, :Float), (Cdouble, :Double),
+                     (ComplexF32, :Complex_Float), (ComplexF64, :Complex_Double))
+
+# Pointer to the hand-written mirror held in `r`, typed as its generated
+# counterpart `G` so it can be handed to a `LibAccelerate._Sparse*` binding.
+# Only for by-pointer arguments (see the note at the top of this file); the
+# caller must keep `r` rooted across the call.
+function _rawptr(::Type{G}, r::Base.RefValue{H}) where {G,H}
+    sizeof(G) == sizeof(H) || error("libSparse ABI mismatch: $H is $(sizeof(H)) bytes, $G is $(sizeof(G))")
+    return Ptr{G}(Base.unsafe_convert(Ptr{H}, r))
+end
 
 Base.cconvert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes = m
 
@@ -1132,33 +1174,20 @@ AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
 # ============================================================
 # Low-level numeric refactorization kernels
 # ============================================================
-# These call the plain-C `_SparseRefactor*` symbols directly. They recompute the
+# These call the plain-C `_SparseRefactor*` entry points through the generated
+# `LibAccelerate` bindings (every struct argument is by pointer). They recompute the
 # numeric factorization in place, reusing the symbolic factorization (the
 # fill-reducing ordering and sparsity analysis) — the common case in Newton
 # iterations, implicit time stepping, and parameter sweeps where a matrix's
 # values change but its sparsity pattern does not.
 
-const _REFACTOR_SYM = Dict(
-    # (T, kind) => (symbol)
-    (Cfloat,     :Symmetric) => :_SparseRefactorSymmetric_Float,
-    (Cdouble,    :Symmetric) => :_SparseRefactorSymmetric_Double,
-    (ComplexF32, :Symmetric) => :_SparseRefactorSymmetric_Complex_Float,
-    (ComplexF64, :Symmetric) => :_SparseRefactorSymmetric_Complex_Double,
-    # Complex-Hermitian Cholesky/LDLT refactor: libSparse's *Symmetric_Complex*
-    # kernels reject Hermitian factorizations ("only applies to SparseSymmetric
-    # matrices"), so a separate Hermitian family is required. (Real Hermitian ==
-    # symmetric, so real types stay in the :Symmetric family above.)
-    (ComplexF32, :Hermitian) => :_SparseRefactorHermitian_Complex_Float,
-    (ComplexF64, :Hermitian) => :_SparseRefactorHermitian_Complex_Double,
-    (Cfloat,     :QR)        => :_SparseRefactorQR_Float,
-    (Cdouble,    :QR)        => :_SparseRefactorQR_Double,
-    (ComplexF32, :QR)        => :_SparseRefactorQR_Complex_Float,
-    (ComplexF64, :QR)        => :_SparseRefactorQR_Complex_Double,
-    (Cfloat,     :LU)        => :_SparseRefactorLU_Float,
-    (Cdouble,    :LU)        => :_SparseRefactorLU_Double,
-    (ComplexF32, :LU)        => :_SparseRefactorLU_Complex_Float,
-    (ComplexF64, :LU)        => :_SparseRefactorLU_Complex_Double,
-)
+# (T, generated-name suffix, kind). Complex-Hermitian Cholesky/LDLT refactor:
+# libSparse's *Symmetric_Complex* kernels reject Hermitian factorizations ("only
+# applies to SparseSymmetric matrices"), so a separate Hermitian family is
+# required. (Real Hermitian == symmetric, so real types have no :Hermitian entry.)
+const _REFACTOR_KINDS = [(T, suff, kind)
+    for (T, suff) in _RAW_SUFFIX for kind in (:Symmetric, :Hermitian, :QR, :LU)
+    if kind !== :Hermitian || T <: Complex]
 
 # Map a SparseFactorization_t (read from the symbolic factorization) to the
 # refactor family. Mirrors the switch in SparseRefactor (SolveImplementationTyped.h).
@@ -1183,7 +1212,10 @@ _refactor_workspace_size(s::SparseOpaqueSymbolicFactorization, ::Type{<:Union{Cd
 # Low-level refactor: recompute the numeric factorization of `fact` in place
 # using the values of `matrix`. `matrix` must share the sparsity pattern of the
 # matrix `fact` was originally built from. Returns the (mutated) factorization.
-for ((T, kind), sym) in _REFACTOR_SYM
+for (T, suff, kind) in _REFACTOR_KINDS
+    sym = Symbol(:_SparseRefactor, kind, :_, suff)
+    RawMatrix = Symbol(:SparseMatrix_, suff)
+    RawFactor = Symbol(:SparseOpaqueFactorization_, suff)
     @eval function _sparse_refactor!(fact::Base.RefValue{SparseOpaqueFactorization{$T}},
                                      matrix::SparseMatrix{$T},
                                      nfopts::Base.RefValue{SparseNumericFactorOptions},
@@ -1194,18 +1226,16 @@ for ((T, kind), sym) in _REFACTOR_SYM
         # A GC-managed buffer rooted across the ccall via `GC.@preserve`; Julia
         # array data is 16-byte aligned, matching the solver's expectation.
         workspace = Vector{UInt8}(undef, wsize)
-        GC.@preserve workspace begin
-            # The plain-C `_SparseRefactor*` symbols take the matrix BY POINTER
-            # (`SparseMatrix_Double *`), unlike the C++ `SparseFactor` entry point
-            # which takes it by value. Passing the struct by value misaligns the
-            # x86_64 SysV argument registers (it lands on the stack), which crashed
-            # libSparse with SIGILL on Intel macOS while happening to work on arm64
-            # (large structs are passed indirectly there). Pass via `Ref` so ccall
-            # hands over a GC-rooted pointer matching the generated ABI.
-            @ccall LIBSPARSE.$sym(matrix::Ref{SparseMatrix{$T}},
-                                  fact::Ptr{SparseOpaqueFactorization{$T}},
-                                  nfopts::Ptr{SparseNumericFactorOptions},
-                                  pointer(workspace)::Ptr{Cvoid})::Cvoid
+        # `_SparseRefactor*` takes the matrix BY POINTER (`SparseMatrix_Double *`),
+        # unlike the C++ `SparseFactor` entry point which takes it by value. A
+        # hand-typed by-value signature here once crashed libSparse with SIGILL on
+        # Intel macOS; the signature now comes from the generated binding.
+        mref = Ref(matrix)
+        GC.@preserve workspace mref fact nfopts begin
+            LibAccelerate.$sym(_rawptr(LibAccelerate.$RawMatrix, mref),
+                               _rawptr(LibAccelerate.$RawFactor, fact),
+                               _rawptr(LibAccelerate.SparseNumericFactorOptions, nfopts),
+                               pointer(workspace))
         end
         return fact[]
     end
@@ -1538,33 +1568,19 @@ LinearAlgebra.ldlt(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, Spar
 # ============================================================
 # Iterative-solver option structs
 # ============================================================
-# Field-by-field mirrors of libSparse's option structs (verified against the
-# raw layer: sizes 40/48/72, offsets exact). A zeroed field selects the library
+# libSparse's option structs have no bitfields, so Clang.jl emits them field-typed
+# and we use the generated `LibAccelerate` definitions directly. A zeroed field selects the library
 # default (e.g. maxIterations 0 → 100, rtol 0 → sqrt(eps)).
 
 """Options for the conjugate-gradient iterative solver. Zeroed fields select
 libSparse defaults (`maxIterations` 0 → 100, `rtol` 0 → `sqrt(eps)`)."""
-struct SparseCGOptions
-    reportError::Ptr{Cvoid}
-    maxIterations::Cint
-    atol::Cdouble
-    rtol::Cdouble
-    reportStatus::Ptr{Cvoid}
-end
+const SparseCGOptions = LibAccelerate.SparseCGOptions
 SparseCGOptions(; maxIterations::Integer = 0, atol::Real = 0.0, rtol::Real = 0.0) =
     SparseCGOptions(C_NULL, Cint(maxIterations), Float64(atol), Float64(rtol), C_NULL)
 
 """Options for the GMRES iterative solver. `variant` is `0`=DQGMRES (default),
 `1`=GMRES, `2`=FGMRES; `nvec` is the number of orthogonalization vectors."""
-struct SparseGMRESOptions
-    reportError::Ptr{Cvoid}
-    variant::UInt8
-    nvec::Cint
-    maxIterations::Cint
-    atol::Cdouble
-    rtol::Cdouble
-    reportStatus::Ptr{Cvoid}
-end
+const SparseGMRESOptions = LibAccelerate.SparseGMRESOptions
 SparseGMRESOptions(; variant::Integer = 0, nvec::Integer = 0, maxIterations::Integer = 0,
                    atol::Real = 0.0, rtol::Real = 0.0) =
     SparseGMRESOptions(C_NULL, UInt8(variant), Cint(nvec), Cint(maxIterations),
@@ -1573,18 +1589,7 @@ SparseGMRESOptions(; variant::Integer = 0, nvec::Integer = 0, maxIterations::Int
 """Options for the LSMR least-squares iterative solver. `lambda` is the
 (Tikhonov) damping factor; `nvec` the number of local-reorthogonalization
 vectors; `convergenceTest` `0`=default, `1`=Fong-Saunders."""
-struct SparseLSMROptions
-    reportError::Ptr{Cvoid}
-    lambda::Cdouble
-    nvec::Cint
-    convergenceTest::Cint
-    atol::Cdouble
-    rtol::Cdouble
-    btol::Cdouble
-    conditionLimit::Cdouble
-    maxIterations::Cint
-    reportStatus::Ptr{Cvoid}
-end
+const SparseLSMROptions = LibAccelerate.SparseLSMROptions
 SparseLSMROptions(; lambda::Real = 0.0, nvec::Integer = 0, convergenceTest::Integer = 0,
                   atol::Real = 0.0, rtol::Real = 0.0, btol::Real = 0.0,
                   conditionLimit::Real = 0.0, maxIterations::Integer = 0) =
@@ -1617,22 +1622,22 @@ _iter_method(::Val{:gmres}, o::SparseGMRESOptions) = SparseIterativeMethod(Cint(
 _iter_method(::Val{:lsmr},  o::SparseLSMROptions)  = SparseIterativeMethod(Cint(2), Cint(0), _pack_iter_options(o))
 
 @enum SparseIterativeStatus_t::Int32 begin
-    SparseIterativeConverged = 0
-    SparseIterativeMaxIterations = 1
-    SparseIterativeParameterError = -1
-    SparseIterativeIllConditioned = -2
-    SparseIterativeInternalError = -99
+    SparseIterativeConverged = Integer(LibAccelerate.SparseIterativeConverged)
+    SparseIterativeMaxIterations = Integer(LibAccelerate.SparseIterativeMaxIterations)
+    SparseIterativeParameterError = Integer(LibAccelerate.SparseIterativeParameterError)
+    SparseIterativeIllConditioned = Integer(LibAccelerate.SparseIterativeIllConditioned)
+    SparseIterativeInternalError = Integer(LibAccelerate.SparseIterativeInternalError)
 end
 
 # ============================================================
 # Preconditioners (opaque handle)
 # ============================================================
 
-const SparsePreconditioner_t = Cint
-const SparsePreconditionerNone       = SparsePreconditioner_t(0)
-const SparsePreconditionerUser       = SparsePreconditioner_t(1)
-const SparsePreconditionerDiagonal   = SparsePreconditioner_t(2)
-const SparsePreconditionerDiagScaling = SparsePreconditioner_t(3)
+const SparsePreconditioner_t = LibAccelerate.SparsePreconditioner_t
+const SparsePreconditionerNone       = SparsePreconditioner_t(LibAccelerate.SparsePreconditionerNone)
+const SparsePreconditionerUser       = SparsePreconditioner_t(LibAccelerate.SparsePreconditionerUser)
+const SparsePreconditionerDiagonal   = SparsePreconditioner_t(LibAccelerate.SparsePreconditionerDiagonal)
+const SparsePreconditionerDiagScaling = SparsePreconditioner_t(LibAccelerate.SparsePreconditionerDiagScaling)
 
 # Layout mirrors libSparse's SparseOpaquePreconditioner_* (type, mem, apply).
 # All fields are pointers/ints, so the layout is identical for real and complex T
@@ -1651,35 +1656,25 @@ mutable struct AAPreconditioner{T<:vTypes}
     _matrix::AASparseMatrix{T}   # keep the source matrix rooted for the handle's life
 end
 
-const _PRECOND_CREATE = Dict(
-    Cfloat     => :_SparseCreatePreconditioner_Float,
-    Cdouble    => :_SparseCreatePreconditioner_Double,
-    ComplexF32 => :_SparseCreatePreconditioner_Complex_Float,
-    ComplexF64 => :_SparseCreatePreconditioner_Complex_Double,
-)
-const _PRECOND_RELEASE = Dict(
-    Cfloat     => :_SparseReleaseOpaquePreconditioner_Float,
-    Cdouble    => :_SparseReleaseOpaquePreconditioner_Double,
-    ComplexF32 => :_SparseReleaseOpaquePreconditioner_Complex_Float,
-    ComplexF64 => :_SparseReleaseOpaquePreconditioner_Complex_Double,
-)
-
 function _precond_symbol(p::Symbol)
     p === :diagonal    && return SparsePreconditionerDiagonal
     p === :diagscaling && return SparsePreconditionerDiagScaling
     throw(ArgumentError("unknown preconditioner $(repr(p)); use :diagonal or :diagscaling"))
 end
 
-for (T, create) in _PRECOND_CREATE
-    release = _PRECOND_RELEASE[T]
+for (T, suff) in _RAW_SUFFIX
+    create  = Symbol(:_SparseCreatePreconditioner_, suff)
+    release = Symbol(:_SparseReleaseOpaquePreconditioner_, suff)
+    RawMatrix  = Symbol(:SparseMatrix_, suff)
+    RawPrecond = Symbol(:SparseOpaquePreconditioner_, suff)
     @eval function _create_preconditioner(type::SparsePreconditioner_t, A::AASparseMatrix{$T})
         # `_SparseCreatePreconditioner` reads A's structure/data (raw pointers into
         # A's CSC buffers), so keep A rooted across the call.
-        p = GC.@preserve A begin
-            @ccall LIBSPARSE.$create(type::SparsePreconditioner_t,
-                A.matrix::Ref{SparseMatrix{$T}})::SparseOpaquePreconditioner{$T}
+        mref = Ref(A.matrix)
+        raw = GC.@preserve A mref begin
+            LibAccelerate.$create(type, _rawptr(LibAccelerate.$RawMatrix, mref))
         end
-        obj = AAPreconditioner{$T}(p, A)
+        obj = AAPreconditioner{$T}(SparseOpaquePreconditioner{$T}(raw.type, raw.mem, raw.apply), A)
         finalizer(obj) do o
             if o._p.type != SparsePreconditionerNone
                 # Release the internally-allocated backing store. A stack `Ref`
@@ -1687,8 +1682,7 @@ for (T, create) in _PRECOND_CREATE
                 # copy. The finalizer runs once, so there is no double free.
                 pref = Ref(o._p)
                 GC.@preserve pref begin
-                    @ccall LIBSPARSE.$release(
-                        Base.unsafe_convert(Ptr{SparseOpaquePreconditioner{$T}}, pref)::Ptr{SparseOpaquePreconditioner{$T}})::Cvoid
+                    LibAccelerate.$release(_rawptr(LibAccelerate.$RawPrecond, pref))
                 end
             end
         end
@@ -1924,16 +1918,16 @@ end
 # Subfactor extraction & application (Q, R, L, D, P, ...)
 # ============================================================
 
-const SparseSubfactor_t = UInt8
-const SparseSubfactorInvalid = SparseSubfactor_t(0)
-const SparseSubfactorP    = SparseSubfactor_t(1)
-const SparseSubfactorS    = SparseSubfactor_t(2)
-const SparseSubfactorL    = SparseSubfactor_t(3)
-const SparseSubfactorD    = SparseSubfactor_t(4)
-const SparseSubfactorPLPS = SparseSubfactor_t(5)
-const SparseSubfactorQ    = SparseSubfactor_t(6)
-const SparseSubfactorR    = SparseSubfactor_t(7)
-const SparseSubfactorRP   = SparseSubfactor_t(8)
+const SparseSubfactor_t = LibAccelerate.SparseSubfactor_t
+const SparseSubfactorInvalid = SparseSubfactor_t(LibAccelerate.SparseSubfactorInvalid)
+const SparseSubfactorP    = SparseSubfactor_t(LibAccelerate.SparseSubfactorP)
+const SparseSubfactorS    = SparseSubfactor_t(LibAccelerate.SparseSubfactorS)
+const SparseSubfactorL    = SparseSubfactor_t(LibAccelerate.SparseSubfactorL)
+const SparseSubfactorD    = SparseSubfactor_t(LibAccelerate.SparseSubfactorD)
+const SparseSubfactorPLPS = SparseSubfactor_t(LibAccelerate.SparseSubfactorPLPS)
+const SparseSubfactorQ    = SparseSubfactor_t(LibAccelerate.SparseSubfactorQ)
+const SparseSubfactorR    = SparseSubfactor_t(LibAccelerate.SparseSubfactorR)
+const SparseSubfactorRP   = SparseSubfactor_t(LibAccelerate.SparseSubfactorRP)
 
 # 128-byte layout: attributes@0, contents@4, factor@8, wsStatic@112, wsPerRHS@120
 # (verified against the raw layer). Layout is identical for real and complex T
@@ -1955,6 +1949,8 @@ mutable struct AASubfactor{T<:vTypes}
     _parent::AAFactorization{T}
 end
 
+# Hand-bound rather than via `LibAccelerate`: the factorization is passed BY VALUE,
+# and the generated struct is an alignment-1 byte blob (see the top of this file).
 const _SUBF_WS_SYMS = Dict(
     Cfloat     => :_SparseGetWorkspaceRequired_Float,
     Cdouble    => :_SparseGetWorkspaceRequired_Double,
@@ -2080,6 +2076,8 @@ end
 # a from-scratch LU would change, given a small set of modified (row, col)
 # entries. Requires a *pivotless* LU factorization (LUUnpivoted/LUSPP/LUTPP).
 
+# Hand-bound rather than via `LibAccelerate`: `newMatrix` is passed BY VALUE, and
+# the generated struct is an alignment-1 byte blob (see the top of this file).
 const _UPDATE_LU_SYMS = Dict(
     Cfloat     => :_SparseUpdatePartialRefactorLU_Float,
     Cdouble    => :_SparseUpdatePartialRefactorLU_Double,
@@ -2151,18 +2149,22 @@ end
 # Factorization introspection (read options back)
 # ============================================================
 
-const _NUMOPTS_SYMS = Dict(
-    Cfloat     => :_SparseGetOptionsFromNumericFactor_Float,
-    Cdouble    => :_SparseGetOptionsFromNumericFactor_Double,
-    ComplexF32 => :_SparseGetOptionsFromNumericFactor_Complex_Float,
-    ComplexF64 => :_SparseGetOptionsFromNumericFactor_Complex_Double,
-)
-for (T, sym) in _NUMOPTS_SYMS
+# The generated option structs carry the enum fields as raw integers; convert
+# back to the enum-typed mirrors this file exposes.
+_from_raw(o::LibAccelerate.SparseNumericFactorOptions) = SparseNumericFactorOptions(
+    SparseControl_t(o.control), SparseScaling_t(o.scalingMethod), o.scaling,
+    o.pivotTolerance, o.zeroTolerance)
+_from_raw(o::LibAccelerate.SparseSymbolicFactorOptions) = SparseSymbolicFactorOptions(
+    SparseControl_t(o.control), SparseOrder_t(o.orderMethod), Ptr{Cvoid}(o.order),
+    Ptr{Cvoid}(o.ignoreRowsAndColumns), o.malloc, o.free, o.reportError)
+
+for (T, suff) in _RAW_SUFFIX
+    sym = Symbol(:_SparseGetOptionsFromNumericFactor_, suff)
+    RawFactor = Symbol(:SparseOpaqueFactorization_, suff)
     @eval function _numeric_options(f::SparseOpaqueFactorization{$T})
         fref = Ref(f)
         GC.@preserve fref begin
-            @ccall LIBSPARSE.$sym(
-                Base.unsafe_convert(Ptr{SparseOpaqueFactorization{$T}}, fref)::Ptr{SparseOpaqueFactorization{$T}})::SparseNumericFactorOptions
+            return _from_raw(LibAccelerate.$sym(_rawptr(LibAccelerate.$RawFactor, fref)))
         end
     end
 end
@@ -2191,7 +2193,7 @@ function symbolic_options(f::AAFactorization{T}) where {T<:vTypes}
         "symbolic_options requires a completed factorization; call factor! first"))
     symb = Ref(f._factorization.symbolicFactorization)
     GC.@preserve symb begin
-        return @ccall LIBSPARSE._SparseGetOptionsFromSymbolicFactor(
-            Base.unsafe_convert(Ptr{SparseOpaqueSymbolicFactorization}, symb)::Ptr{SparseOpaqueSymbolicFactorization})::SparseSymbolicFactorOptions
+        return _from_raw(LibAccelerate._SparseGetOptionsFromSymbolicFactor(
+            _rawptr(LibAccelerate.SparseOpaqueSymbolicFactorization, symb)))
     end
 end

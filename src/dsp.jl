@@ -965,7 +965,7 @@ mutable struct FFTSetup{T}
     plan::Ptr{Cvoid}
 
     function FFTSetup{Float64}(n::Integer, radix::Integer = 2)
-        @assert ispow2(n) "n must be a power of 2"
+        ispow2(n) || throw(ArgumentError("n must be a power of 2 (got n = $(n))"))
         logn = trailing_zeros(n)
         plan = Ptr{Cvoid}(LibAccelerate.vDSP_create_fftsetupD(logn, radix))
         setup = new{Float64}(plan)
@@ -974,7 +974,7 @@ mutable struct FFTSetup{T}
     end
 
     function FFTSetup{Float32}(n::Integer, radix::Integer = 2)
-        @assert ispow2(n) "n must be a power of 2"
+        ispow2(n) || throw(ArgumentError("n must be a power of 2 (got n = $(n))"))
         logn = trailing_zeros(n)
         plan = Ptr{Cvoid}(LibAccelerate.vDSP_create_fftsetup(logn, radix))
         setup = new{Float32}(plan)
@@ -1049,7 +1049,7 @@ const _SETUP_CACHE_LOCK = ReentrantLock()
 
 # Shared, cached FFTSetup{T} for power-of-2 transforms of size n (keyed by log2n, radix).
 function _cached_fftsetup(::Type{T}, n::Integer, radix::Integer=2) where {T<:Union{Float32,Float64}}
-    @assert ispow2(n) "n must be a power of 2"
+    ispow2(n) || throw(ArgumentError("n must be a power of 2 (got n = $(n))"))
     key = (T, trailing_zeros(n), Int(radix))
     return lock(_SETUP_CACHE_LOCK) do
         get!(() -> FFTSetup{T}(n, radix), _FFT_SETUP_CACHE, key)
@@ -1106,7 +1106,7 @@ end
 
 function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     n = length(r)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
 
     realp = real(r)
@@ -1126,7 +1126,7 @@ end
 
 function _fft1d(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     n = length(r)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
 
     realp = Float32.(real(r))
@@ -1148,7 +1148,7 @@ end
 
 function _fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     nrows, ncols = size(r)
-    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
     log2nc = trailing_zeros(ncols)
 
@@ -1170,7 +1170,7 @@ end
 
 function _fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     nrows, ncols = size(r)
-    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
     log2nc = trailing_zeros(ncols)
 
@@ -1274,7 +1274,7 @@ ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, _cached_
 
 function _fft1d!(x::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     n = length(x)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
 
     realp = real.(x)
@@ -1293,7 +1293,7 @@ end
 
 function _fft1d!(x::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     n = length(x)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
 
     realp = Float32.(real.(x))
@@ -1314,7 +1314,7 @@ end
 
 function _fft2d!(x::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     nrows, ncols = size(x)
-    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
     log2nc = trailing_zeros(ncols)
 
@@ -1335,7 +1335,7 @@ end
 
 function _fft2d!(x::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     nrows, ncols = size(x)
-    @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+    ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
     log2nc = trailing_zeros(ncols)
 
@@ -1411,7 +1411,7 @@ ifft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cache
 
 function _rfft1d(x::Vector{Float64}, setup::FFTSetup{Float64})
     n = length(x)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
 
@@ -1440,7 +1440,7 @@ end
 
 function _rfft1d(x::Vector{Float32}, setup::FFTSetup{Float32})
     n = length(x)
-    @assert ispow2(n) "length of input must be a power of 2"
+    ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
 
@@ -1469,10 +1469,10 @@ end
 # Pack standard complex input back into vDSP format, run inverse, unpack real output.
 
 function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
-    @assert ispow2(n) "output length must be a power of 2"
+    ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
-    @assert length(X) == half + 1 "input must have length n÷2+1"
+    length(X) == half + 1 || throw(DimensionMismatch("input must have length n÷2+1 (got length $(length(X)))"))
 
     # Pack standard complex input into vDSP format
     inp_realp = Vector{Float64}(undef, half)
@@ -1504,10 +1504,10 @@ function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
 end
 
 function _brfft1d(X::Vector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
-    @assert ispow2(n) "output length must be a power of 2"
+    ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
-    @assert length(X) == half + 1 "input must have length n÷2+1"
+    length(X) == half + 1 || throw(DimensionMismatch("input must have length n÷2+1 (got length $(length(X)))"))
 
     inp_realp = Vector{Float32}(undef, half)
     inp_imagp = Vector{Float32}(undef, half)
@@ -1571,8 +1571,8 @@ for (T, SC, fft2d_zrop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zropD)
     @eval begin
         function _rfft2d(x::Matrix{$T}, setup::FFTSetup{$T})
             n1, n2 = size(x)
-            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
-            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
+            n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
             log2n1 = trailing_zeros(n1)
             log2n2 = trailing_zeros(n2)
             h1 = n1 >> 1
@@ -1614,13 +1614,13 @@ for (T, SC, fft2d_zrop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zropD)
 
         function _brfft2d(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T})
             n2 = size(X, 2)
-            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
-            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
+            n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
             log2n1 = trailing_zeros(n1)
             log2n2 = trailing_zeros(n2)
             h1 = n1 >> 1
             h2 = n2 >> 1
-            @assert size(X, 1) == h1 + 1 "input must have size (n1÷2+1)×n2"
+            size(X, 1) == h1 + 1 || throw(DimensionMismatch("input must have size (n1÷2+1)×n2 (got size $(size(X)))"))
 
             # Pack the FFTW-layout coefficients back into the vDSP packed format
             # (inverse of the unpacking above; the redundant upper halves of the
@@ -1845,7 +1845,7 @@ for (T, SC, fftm_zop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fftm_zopD),
             nrows, ncols = size(x)
             n = size(x, dims)                      # transform length
             m = dims == 1 ? ncols : nrows          # number of transforms
-            @assert ispow2(n) "transform length must be a power of 2"
+            ispow2(n) || throw(ArgumentError("transform length must be a power of 2 (got n = $(n))"))
             logn = trailing_zeros(n)
             # Julia is column-major: for column transforms (dims=1) the element
             # stride is 1 and consecutive transforms are nrows apart; for row
@@ -1949,7 +1949,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zoptD, :
     @eval begin
         function _fft1d(r::Vector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             n = length(r)
-            @assert ispow2(n) "length of input must be a power of 2"
+            ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             length(ws.realp) >= n || _ws_too_small(length(ws.realp), n)
             logn = trailing_zeros(n)
             realp = $T.(real.(r)); imagp = $T.(imag.(r))
@@ -1967,7 +1967,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zoptD, :
 
         function _fft1d!(x::Vector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             n = length(x)
-            @assert ispow2(n) "length of input must be a power of 2"
+            ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             length(ws.realp) >= n || _ws_too_small(length(ws.realp), n)
             logn = trailing_zeros(n)
             realp = $T.(real.(x)); imagp = $T.(imag.(x))
@@ -1992,7 +1992,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zoptD,
     @eval begin
         function _fft2d(r::Matrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             nrows, ncols = size(r)
-            @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+            ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
             length(ws.realp) >= nrows*ncols || _ws_too_small(length(ws.realp), nrows*ncols)
             log2nr = trailing_zeros(nrows); log2nc = trailing_zeros(ncols)
             realp = $T.(real.(r)); imagp = $T.(imag.(r))
@@ -2011,7 +2011,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zoptD,
 
         function _fft2d!(x::Matrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             nrows, ncols = size(x)
-            @assert ispow2(nrows) && ispow2(ncols) "dimensions must be powers of 2"
+            ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
             length(ws.realp) >= nrows*ncols || _ws_too_small(length(ws.realp), nrows*ncols)
             log2nr = trailing_zeros(nrows); log2nc = trailing_zeros(ncols)
             realp = $T.(real.(x)); imagp = $T.(imag.(x))
@@ -2086,7 +2086,7 @@ for (T, SC, zropt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zroptD),
     @eval begin
         function _rfft1d(x::Vector{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n = length(x)
-            @assert ispow2(n) "length of input must be a power of 2"
+            ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             half = n >> 1
             length(ws.realp) >= half || _ws_too_small(length(ws.realp), half)
             logn = trailing_zeros(n)
@@ -2110,7 +2110,7 @@ for (T, SC, zropt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zroptD),
         end
 
         function _brfft1d(X::Vector{Complex{$T}}, n::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
-            @assert ispow2(n) "output length must be a power of 2"
+            ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
             half = n >> 1
             length(X) == half + 1 || throw(DimensionMismatch("input must have length n÷2+1"))
             length(ws.realp) >= half || _ws_too_small(length(ws.realp), half)
@@ -2149,8 +2149,8 @@ for (T, SC, zrip, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zripD, 
     @eval begin
         function _rfft1d!(x::Vector{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             n = length(x)
-            @assert ispow2(n) "length of input must be a power of 2"
-            @assert n >= 2 "length must be at least 2"
+            ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
+            n >= 2 || throw(ArgumentError("length must be at least 2 (got n = $(n))"))
             half = n >> 1
             logn = trailing_zeros(n)
             if ws === nothing
@@ -2188,8 +2188,8 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
     @eval begin
         function _rfft2d(x::Matrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n1, n2 = size(x)
-            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
-            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
+            n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
             length(ws.realp) >= (n1 >> 1) * n2 || _ws_too_small(length(ws.realp), (n1 >> 1) * n2)
             log2n1 = trailing_zeros(n1); log2n2 = trailing_zeros(n2)
             h1 = n1 >> 1; h2 = n2 >> 1
@@ -2210,8 +2210,8 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
         # In-place real 2D (zript): C is both input and output.
         function _rfft2d!(x::Matrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n1, n2 = size(x)
-            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
-            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
+            n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
             length(ws.realp) >= (n1 >> 1) * n2 || _ws_too_small(length(ws.realp), (n1 >> 1) * n2)
             log2n1 = trailing_zeros(n1); log2n2 = trailing_zeros(n2)
             h1 = n1 >> 1
@@ -2228,12 +2228,12 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
 
         function _brfft2d(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n2 = size(X, 2)
-            @assert ispow2(n1) && ispow2(n2) "dimensions must be powers of 2"
-            @assert n1 >= 2 && n2 >= 2 "each dimension must be at least 2"
+            ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
+            n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
             length(ws.realp) >= (n1 >> 1) * n2 || _ws_too_small(length(ws.realp), (n1 >> 1) * n2)
             log2n1 = trailing_zeros(n1); log2n2 = trailing_zeros(n2)
             h1 = n1 >> 1
-            @assert size(X, 1) == h1 + 1 "input must have size (n1÷2+1)×n2"
+            size(X, 1) == h1 + 1 || throw(DimensionMismatch("input must have size (n1÷2+1)×n2 (got size $(size(X)))"))
             inp_realp, inp_imagp = _pack_rfft2d(X, n1, n2)
             out_realp = Matrix{$T}(undef, h1, n2); out_imagp = Matrix{$T}(undef, h1, n2)
             wr = ws.realp; wi = ws.imagp
@@ -2344,7 +2344,7 @@ for (T, SC, zip, zipt, zopt) in
             dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
             nrows, ncols = size(x)
             n = size(x, dims); m = dims == 1 ? ncols : nrows
-            @assert ispow2(n) "transform length must be a power of 2"
+            ispow2(n) || throw(ArgumentError("transform length must be a power of 2 (got n = $(n))"))
             logn = trailing_zeros(n)
             elstride, batchstride = dims == 1 ? (1, nrows) : (nrows, 1)
             realp = $T.(real.(x)); imagp = $T.(imag.(x))
@@ -2373,7 +2373,7 @@ for (T, SC, zip, zipt, zopt) in
             dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
             nrows, ncols = size(x)
             n = size(x, dims); m = dims == 1 ? ncols : nrows
-            @assert ispow2(n) "transform length must be a power of 2"
+            ispow2(n) || throw(ArgumentError("transform length must be a power of 2 (got n = $(n))"))
             length(ws.realp) >= nrows*ncols || _ws_too_small(length(ws.realp), nrows*ncols)
             logn = trailing_zeros(n)
             elstride, batchstride = dims == 1 ? (1, nrows) : (nrows, 1)
@@ -2468,7 +2468,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
         # Forward, column transforms; ws===nothing selects zrop, else zropt.
         function _rfftm1(x::Matrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             n1, n2 = size(x)
-            @assert ispow2(n1) && n1 >= 2 "column length must be a power of 2 ≥ 2"
+            ispow2(n1) && n1 >= 2 || throw(ArgumentError("column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
             inr = x[1:2:end, :]; ini = x[2:2:end, :]
             outr = Matrix{$T}(undef, half, n2); outi = Matrix{$T}(undef, half, n2)
@@ -2496,7 +2496,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
         # Forward in-place (x consumed); ws===nothing selects zrip, else zript.
         function _rfftm1!(x::Matrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             n1, n2 = size(x)
-            @assert ispow2(n1) && n1 >= 2 "column length must be a power of 2 ≥ 2"
+            ispow2(n1) && n1 >= 2 || throw(ArgumentError("column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
             inr = x[1:2:end, :]; ini = x[2:2:end, :]
             if ws === nothing
@@ -2518,7 +2518,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
 
         # Inverse, column transforms; ws===nothing selects zrop, else zropt.
         function _brfftm1(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
-            @assert ispow2(n1) && n1 >= 2 "output column length must be a power of 2 ≥ 2"
+            ispow2(n1) && n1 >= 2 || throw(ArgumentError("output column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
             size(X, 1) == half + 1 || throw(DimensionMismatch("input must have $(half+1) rows"))
             m = size(X, 2)
