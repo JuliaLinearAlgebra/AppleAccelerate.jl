@@ -78,6 +78,16 @@ for (T, suffix) in ((Float64, "d2"), (Float32, "f4"))
         g(similar(x), x, y) == plain_loop(similar(x), x, y) || push!(failures, "$label/$T differs from scoped calls")
     end
 end
+# Strided access vectorises only when the stride is a compile-time constant. A stride
+# known only at run time (`for i in 1:stride:length(x)` with `stride::Int`) leaves the
+# call scalar on every LLVM tried so far; that is a vectoriser limitation, not a broken
+# mapping, so it is deliberately not asserted either way here.
+const_stride(x) = (u = zero(eltype(x)); @simd for i in 1:2:length(x); @inbounds u += SM.log(x[i]); end; u)
+for (T, suffix) in ((Float64, "d2"), (Float32, "f4"))
+    io = IOBuffer()
+    code_native(io, const_stride, (Vector{T},); debuginfo = :none)
+    occursin(Regex("\\b__simd_log_$(suffix)\\b"), String(take!(io))) || push!(failures, "constant stride/$T -> _simd_log_$(suffix)")
+end
 print(join(failures, ","))
 """
 
