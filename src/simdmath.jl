@@ -84,17 +84,21 @@ Unlike the array functions in `AppleAccelerate` proper (which wrap vForce and ne
 a whole array to work on), these are *scalar* functions called from inside a `@simd`
 loop:
 
-```julia
-using AppleAccelerate.SIMDMath: log
+```jldoctest simdmath
+julia> using AppleAccelerate.SIMDMath: log
 
-# strided access — vForce cannot be used here without gathering into a temporary
-function logsum_strided(X, stride)
-    u = zero(eltype(X))
-    @simd for i in 1:stride:length(X)
-        @inbounds u += log(X[i])
-    end
-    u
-end
+julia> function weighted_logsum(X, W)  # no temporary for log.(X), unlike the array API
+           u = zero(eltype(X))
+           @simd for i in eachindex(X, W)
+               @inbounds u += W[i] * log(X[i])
+           end
+           u
+       end;
+
+julia> X = collect(1.0:1000.0); W = fill(0.5, 1000);
+
+julia> weighted_logsum(X, W) ≈ sum(W .* Base.log.(X))
+true
 ```
 
 # When to use this — and when not to

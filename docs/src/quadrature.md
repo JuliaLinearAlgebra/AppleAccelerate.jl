@@ -33,8 +33,12 @@ r = AppleAccelerate.integrate(x -> x^2, 0, 1)
 r.value, r.abserr
 ```
 
-```@example quad
-AppleAccelerate.integrate(sin, 0, π).value   # ≈ 2
+```jldoctest; setup = :(using AppleAccelerate)
+julia> round(AppleAccelerate.integrate(sin, 0, π).value; digits = 8)
+2.0
+
+julia> AppleAccelerate.integrate(sin, 0, π).status == AppleAccelerate.LibAccelerate.QUADRATURE_SUCCESS
+true
 ```
 
 ### Integrators

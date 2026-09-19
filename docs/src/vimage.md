@@ -37,7 +37,7 @@ Build a raw descriptor with [`vimage_buffer`](@ref AppleAccelerate.vimage_buffer
   `ccall`) and checks the returned `vImage_Error`, throwing
   [`vImageError`](@ref AppleAccelerate.vImageError) on failure.
 
-```julia
+```@example vimage
 using AppleAccelerate
 const V = AppleAccelerate
 
@@ -48,6 +48,7 @@ blur  = V.tentConvolve_Planar8(rand(UInt8, 640, 480), 5, 5)
 argb = rand(UInt8, 4, 640, 480)               # interleaved ARGB
 pm   = V.premultiplyData_ARGB8888(argb)       # premultiply by alpha
 bgr  = V.permuteChannels_ARGB8888(argb, UInt8[3,2,1,0])   # reverse channels
+nothing # hide
 ```
 
 ## Types and helpers

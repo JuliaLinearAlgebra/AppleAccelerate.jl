@@ -109,14 +109,18 @@ bypassing sections:
 | [`biquadm_copystate!`](@ref AppleAccelerate.biquadm_copystate!) | Copy internal state from one setup to another |
 | [`biquadm_setactivefilters!`](@ref AppleAccelerate.biquadm_setactivefilters!) | Enable/disable (bypass) individual sections |
 
-```@example filtering
-setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float64)
-# Retune channel 1 (0-based) to a gain of 5 without recreating the setup:
-AppleAccelerate.biquadm_setcoefficients!(setup, [5.0,0,0,0,0], 0, 1, 1, 1)
-y = AppleAccelerate.biquadm([ones(8), ones(8)], 8, setup)
-@assert y[2] ≈ fill(5.0, 8)
-AppleAccelerate.biquadm_resetstate!(setup)  # clear filter memory
-nothing # hide
+```jldoctest; setup = :(using AppleAccelerate)
+julia> setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float64);
+
+julia> # Retune channel 1 (0-based) to a gain of 5 without recreating the setup:
+       AppleAccelerate.biquadm_setcoefficients!(setup, [5.0,0,0,0,0], 0, 1, 1, 1);
+
+julia> y = AppleAccelerate.biquadm([ones(4), ones(4)], 4, setup);
+
+julia> show(y[1]); show(y[2])
+[1.0, 1.0, 1.0, 1.0][5.0, 5.0, 5.0, 5.0]
+
+julia> AppleAccelerate.biquadm_resetstate!(setup);  # clear filter memory
 ```
 
 ```@docs
