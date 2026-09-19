@@ -1,7 +1,12 @@
 module AppleAccelerate
 using Libdl, LinearAlgebra
+using Preferences: load_preference, set_preferences!
 
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
+
+# Automatic BLAS/LAPACK forwarding on load can be switched off; see `auto_forward_blas`.
+const _AUTO_FORWARD_PREF = "auto_forward_blas"
+const _AUTO_FORWARD_ENV = "APPLEACCELERATE_AUTO_FORWARD"
 
 # Cached macOS version, populated once in __init__()
 const _macos_version = Ref{Union{Nothing,VersionNumber}}(nothing)
@@ -160,6 +165,48 @@ function get_num_threads()::LinearAlgebra.BlasInt
     end
 end
 
+"""
+    auto_forward_blas() -> Bool
+
+Return whether AppleAccelerate forwards BLAS/LAPACK to Accelerate automatically when the
+package is loaded. The default is `true`. It can be turned off, in order of precedence, by
+
+  * the environment variable `APPLEACCELERATE_AUTO_FORWARD` (`0`/`false`/`no`/`off` to
+    disable, `1`/`true`/`yes`/`on` to enable), read when the package is loaded, or
+  * the `auto_forward_blas` preference, set with [`set_auto_forward!`](@ref).
+
+With automatic forwarding off, loading AppleAccelerate leaves the session's BLAS/LAPACK
+untouched; call [`load_accelerate`](@ref) to forward explicitly.
+"""
+function auto_forward_blas()
+    env = get(ENV, _AUTO_FORWARD_ENV, nothing)
+    if env !== nothing
+        val = lowercase(strip(env))
+        val in ("0", "false", "no", "off") && return false
+        val in ("1", "true", "yes", "on") && return true
+        @warn "AppleAccelerate.jl: ignoring unrecognized $(_AUTO_FORWARD_ENV)=$(repr(env)); expected 0/1, true/false, yes/no or on/off"
+    end
+    return load_preference(@__MODULE__, _AUTO_FORWARD_PREF, true)::Bool
+end
+
+"""
+    set_auto_forward!(flag::Bool)
+
+Persistently enable (`true`, the default) or disable (`false`) automatic BLAS/LAPACK
+forwarding on package load, by writing the `auto_forward_blas` preference to the active
+project's `LocalPreferences.toml`. Takes effect the next time AppleAccelerate is loaded,
+i.e. after restarting Julia. See [`auto_forward_blas`](@ref).
+
+Disable it to use the non-BLAS parts of the package (vDSP, vImage, libSparse, BNNS, …)
+without changing the session's BLAS; [`load_accelerate`](@ref) then forwards on demand.
+"""
+function set_auto_forward!(flag::Bool)
+    set_preferences!(@__MODULE__, _AUTO_FORWARD_PREF => flag; force = true)
+    @info "AppleAccelerate.jl: automatic BLAS/LAPACK forwarding on load is now \
+           $(flag ? "enabled" : "disabled"); restart Julia for this to take effect"
+    return flag
+end
+
 function __init__()
     @static !Sys.isapple() && return
     _macos_version[] = _read_macos_version()
@@ -170,7 +217,7 @@ function __init__()
         @info "AppleAccelerate.jl needs macOS 13.4 or later for BLAS/LAPACK forwarding"
         return
     end
-    load_accelerate(; clear = false, load_ilp64=true)
+    auto_forward_blas() && load_accelerate(; clear = false, load_ilp64=true)
     # libSparse lives at a hard-coded path (LIBSPARSE in sparse.jl). Probe it once
     # here so a future macOS layout change surfaces a clear diagnostic instead of
     # an opaque dlopen error at the first sparse ccall.

@@ -76,4 +76,5 @@ regular `[deps]`, not weak dependencies:
 
 BLAS/LAPACK forwarding is the one place AppleAccelerate does change global
 behavior — that is the documented purpose of loading it, and it goes through
-libblastrampoline, a mechanism designed for exactly this.
+libblastrampoline, a mechanism designed for exactly this. It can be
+[switched off](@ref blas-opt-out) if you only want the other subsystems.

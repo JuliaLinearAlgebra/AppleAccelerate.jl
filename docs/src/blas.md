@@ -1,6 +1,6 @@
 # Dense Linear Algebra (BLAS / LAPACK)
 
-AppleAccelerate forwards [BLAS](https://developer.apple.com/documentation/accelerate/blas) and [LAPACK](https://developer.apple.com/documentation/accelerate/solving-systems-of-linear-equations-with-lapack) calls to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate) via Julia's [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) (LBT) mechanism. This happens automatically when the package is loaded.
+AppleAccelerate forwards [BLAS](https://developer.apple.com/documentation/accelerate/blas) and [LAPACK](https://developer.apple.com/documentation/accelerate/solving-systems-of-linear-equations-with-lapack) calls to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate) via Julia's [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) (LBT) mechanism. This happens automatically when the package is loaded, unless you [turn automatic forwarding off](@ref blas-opt-out).
 
 ## How it works
 
@@ -27,6 +27,36 @@ using AppleAccelerate
 | Function | Description |
 |----------|-------------|
 | [`load_accelerate`](@ref AppleAccelerate.load_accelerate) | Load Accelerate BLAS/LAPACK via LBT |
+| [`auto_forward_blas`](@ref AppleAccelerate.auto_forward_blas) | Whether forwarding happens automatically on load |
+| [`set_auto_forward!`](@ref AppleAccelerate.set_auto_forward!) | Persistently enable/disable automatic forwarding |
+
+## [Using the package without changing BLAS](@id blas-opt-out)
+
+BLAS/LAPACK forwarding is global: it changes what every `LinearAlgebra` call in the session
+runs on. If you only want the other subsystems (vDSP, vImage, libSparse, BNNS, …), turn
+automatic forwarding off and the session's BLAS is left untouched:
+
+```julia
+using AppleAccelerate
+AppleAccelerate.set_auto_forward!(false)   # writes LocalPreferences.toml; restart Julia
+```
+
+or, for a single process, set the environment variable before the package is loaded:
+
+```sh
+APPLEACCELERATE_AUTO_FORWARD=0 julia
+```
+
+The environment variable takes precedence over the preference. With automatic forwarding
+off, forwarding becomes an explicit opt-in:
+
+```julia
+using AppleAccelerate, LinearAlgebra
+X = AppleAccelerate.fft(randn(ComplexF64, 1024))   # vDSP; BLAS is still OpenBLAS
+AppleAccelerate.load_accelerate()                  # now forward BLAS/LAPACK to Accelerate
+```
+
+`AppleAccelerate.set_auto_forward!(true)` restores the default.
 
 ## Threading
 
@@ -45,6 +75,8 @@ On macOS 26+, you can control BLAS threading:
 
 ```@docs
 AppleAccelerate.load_accelerate
+AppleAccelerate.auto_forward_blas
+AppleAccelerate.set_auto_forward!
 AppleAccelerate.set_num_threads
 AppleAccelerate.get_num_threads
 AppleAccelerate.get_macos_version
