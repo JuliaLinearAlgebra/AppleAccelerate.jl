@@ -81,10 +81,17 @@ estimate, `abserr` is the estimated absolute error, and `status` is the
 `quadrature_status` enum (`QUADRATURE_SUCCESS` on success).
 
 # Examples
-```julia
-integrate(x -> x^2, 0, 1).value          # ≈ 0.3333333
-integrate(sin, 0, π).value               # ≈ 2.0
-integrate(x -> exp(-x^2), -Inf, Inf).value  # ≈ √π
+```jldoctest
+julia> using AppleAccelerate: integrate
+
+julia> integrate(x -> x^2, 0, 1).value ≈ 1/3
+true
+
+julia> integrate(sin, 0, π).value ≈ 2
+true
+
+julia> integrate(x -> exp(-x^2), -Inf, Inf).value ≈ √π
+true
 ```
 """
 function integrate(f, a::Real, b::Real;
