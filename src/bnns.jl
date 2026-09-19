@@ -209,6 +209,11 @@ const _BNNS_REDUCE = Dict(
     :logsumexp => LA.BNNSReduceFunctionLogSumExp,
 )
 
+const _BNNS_COPY_CONVERSIONS = Set{Tuple{DataType,DataType}}([
+    (Float16, Float32), (Float32, Float16), (Float32, Int32),
+    (Int8, Float32), (Int16, Float32), (Int32, Float32), (UInt8, Float32),
+])
+
 """
     bnns_copy!(dest::Array, src::Array) -> dest
 
@@ -217,10 +222,16 @@ this is a plain element copy.
 
 `dest` and `src` may have **different element types**, in which case BNNS
 converts: `Float16 ↔ Float32` (the usual way to move data in and out of a
-half-precision graph), any integer type `→ Float32`, and `Float32 → Int32`.
-Conversions BNNS does not implement (e.g. `Float32 → Int8`) throw.
+half-precision graph), `Int8`/`Int16`/`Int32`/`UInt8` `→ Float32`, and
+`Float32 → Int32`. Any other pair throws an `ArgumentError` without calling BNNS.
 """
-function bnns_copy!(dest::Array, src::Array)
+function bnns_copy!(dest::Array{D}, src::Array{S}) where {D,S}
+    # Only conversions verified on every supported platform are let through. An
+    # unimplemented pair is not a clean error everywhere: Float32 -> Int8 returns a
+    # status on Apple silicon but aborts the process inside BNNSCopy on Intel macOS 15.
+    (D === S || (S, D) in _BNNS_COPY_CONVERSIONS) || throw(ArgumentError(
+        "bnns_copy!: BNNS cannot convert $S to $D; supported conversions are " *
+        "Float16 <-> Float32, Int8/Int16/Int32/UInt8 -> Float32 and Float32 -> Int32"))
     # BNNSCopy does NOT broadcast: given a smaller `src` it returns status 0 and
     # leaves the rest of `dest` unwritten, so equal shapes are required here.
     size(dest) == size(src) || throw(DimensionMismatch(

@@ -68,7 +68,11 @@ end
         @test AA.bnns_copy!(zeros(Float32, 2, 3), T.(G)) == G
     end
     @test AA.bnns_copy!(zeros(Int32, 2, 3), G) == Int32.(G)
-    @test_throws ErrorException AA.bnns_copy!(zeros(Int8, 2, 3), G)      # not implemented by BNNS
+    # Pairs BNNS does not implement must be rejected before the call: Float32 -> Int8
+    # aborts the process inside BNNSCopy on Intel macOS 15 instead of returning a status.
+    @test_throws ArgumentError AA.bnns_copy!(zeros(Int8, 2, 3), G)
+    @test_throws ArgumentError AA.bnns_copy!(zeros(Float64, 2, 3), G)
+    @test_throws ArgumentError AA.bnns_copy!(zeros(Float32, 2, 3), Int64.(G))
     # BNNSCopy does not broadcast; a shape mismatch must not reach it.
     @test_throws DimensionMismatch AA.bnns_copy!(zeros(Float32, 2, 3), Float32[1 2 3])
     @test_throws DimensionMismatch AA.bnns_copy!(zeros(Float32, 2, 3), zeros(Float32, 3, 2))

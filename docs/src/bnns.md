@@ -24,7 +24,7 @@ each wrapper restricts its element types by dispatch:
 | Function | Element types |
 |----------|---------------|
 | [`bnns_transpose`](@ref AppleAccelerate.bnns_transpose), same-type [`bnns_copy!`](@ref AppleAccelerate.bnns_copy!) | `Float16`, `Float32`, `Int8`–`Int64`, `UInt8`–`UInt64`, `Bool` |
-| converting [`bnns_copy!`](@ref AppleAccelerate.bnns_copy!) | `Float16 ↔ Float32`, integer `→ Float32`, `Float32 → Int32` |
+| converting [`bnns_copy!`](@ref AppleAccelerate.bnns_copy!) | `Float16 ↔ Float32`, `Int8`/`Int16`/`Int32`/`UInt8` `→ Float32`, `Float32 → Int32` (anything else throws) |
 | [`bnns_reduce`](@ref AppleAccelerate.bnns_reduce) | `Float16`, `Float32`; `Int32` for the integer-exact reductions |
 | [`bnns_topk`](@ref AppleAccelerate.bnns_topk) | `Float16`, `Float32`, `Int8`, `Int16`, `Int32`, `UInt8`, `UInt16` |
 | [`bnns_in_topk`](@ref AppleAccelerate.bnns_in_topk) | `Float16`, `Float32` |
