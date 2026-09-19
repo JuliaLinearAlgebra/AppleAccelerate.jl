@@ -911,7 +911,7 @@ function AASparseMatrix(n::Int, m::Int,
     return AASparseMatrix(m, col, row, data)
 end
 
-function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
+function AASparseMatrix(sparseM::SparseMatrixCSC{T, <:Integer},
                         attributes::att_type = ATT_ORDINARY) where T<:vTypes
     if attributes == ATT_ORDINARY
         if ishermitian(sparseM)
@@ -930,6 +930,19 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
     return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
+end
+
+# libSparse element type used for a Julia element type it has no kernels for:
+# other reals (integers, rationals, Float16, …) go to Float64, other complex to
+# ComplexF64. The four supported types are kept as they are.
+_aa_eltype(::Type{T}) where {T<:Number} =
+    T <: vTypes ? T : T <: Real ? Float64 : T <: Complex ? ComplexF64 :
+    throw(ArgumentError("no libSparse element type for $T"))
+
+# Any other numeric element type: convert the values, then wrap.
+function AASparseMatrix(sparseM::SparseMatrixCSC{Tv, Ti},
+                        attributes::att_type = ATT_ORDINARY) where {Tv<:Number, Ti<:Integer}
+    return AASparseMatrix(SparseMatrixCSC{_aa_eltype(Tv), Ti}(sparseM), attributes)
 end
 
 """
@@ -1168,8 +1181,7 @@ end
 LinearAlgebra.factorize(A::AASparseMatrix{T}) where T<:vTypes = AAFactorization(A)
 
 # julia's LinearAlgebra module doesn't provide similar constructors.
-AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
-                                        AAFactorization(AASparseMatrix(M))
+AAFactorization(M::SparseMatrixCSC) = AAFactorization(AASparseMatrix(M))
 
 # ============================================================
 # Low-level numeric refactorization kernels
@@ -1758,11 +1770,17 @@ function _check_iter_status(status::SparseIterativeStatus_t)
 end
 
 """
-    solve(A::AASparseMatrix, b; method, preconditioner = :none,
+    solve(A, b; method = :direct, kind = :auto, preconditioner = :none,
           atol = 0, rtol = 0, maxiter = 0, nvec = 0, variant = :dqgmres, lambda = 0)
 
-Solve `A x = b` with an iterative Krylov method instead of a direct
-factorization, returning `x`. `method` (required) is one of:
+Solve `A x = b`, returning `x`. `A` is an [`AASparseMatrix`](@ref) or a plain
+`SparseMatrixCSC` (any index type; element and right-hand-side types are
+promoted to the nearest of `Float32`/`Float64`/`ComplexF32`/`ComplexF64`).
+
+With the default `method = :direct`, `A` is factorized with
+[`factor`](@ref)`(A, kind)` and solved directly — to solve repeatedly against the
+same matrix, keep the factorization instead: `f = factor(A); solve(f, b)`.
+Otherwise `method` selects an iterative Krylov method:
 
   - `:cg`    — conjugate gradient; `A` must be symmetric positive-definite.
   - `:gmres` — GMRES; for square non-symmetric / indefinite systems. `variant`
@@ -1779,11 +1797,12 @@ be a vector or a matrix (multiple right-hand sides). `Float32`/`Float64`, and
 positive-definite matrix.
 """
 function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
-               method::Symbol,
+               method::Symbol = :direct, kind = :auto,
                preconditioner::Union{Symbol,AAPreconditioner} = :none,
                atol::Real = 0, rtol::Real = 0, maxiter::Integer = 0,
                nvec::Integer = 0, variant::Symbol = :dqgmres,
                lambda::Real = 0) where {T<:vTypes}
+    method === :direct && return solve(factor(A, kind), b)
     m, n = size(A)
     size(b, 1) == m || throw(DimensionMismatch(
         "right-hand side has $(size(b, 1)) rows; A has $m rows"))
@@ -1799,7 +1818,7 @@ function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
         meth = _iter_method(Val(:lsmr),
             SparseLSMROptions(; lambda, nvec, maxIterations = maxiter, atol, rtol))
     else
-        throw(ArgumentError("unknown iterative method $(repr(method)); use :cg, :gmres, or :lsmr"))
+        throw(ArgumentError("unknown method $(repr(method)); use :direct, :cg, :gmres, or :lsmr"))
     end
     nrhs = b isa AbstractVector ? 1 : size(b, 2)
     B = reshape(b, m, nrhs)
@@ -1819,8 +1838,11 @@ function solve(A::AASparseMatrix{T}, b::StridedVecOrMat{T};
     return b isa AbstractVector ? vec(X) : X
 end
 
-solve(A::SparseMatrixCSC{T,Int64}, b::StridedVecOrMat{T}; kw...) where {T<:vTypes} =
-    solve(AASparseMatrix(A), b; kw...)
+function solve(A::SparseMatrixCSC{Tv,Ti}, b::AbstractVecOrMat{<:Number}; kw...) where {Tv<:Number, Ti<:Integer}
+    T = _aa_eltype(promote_type(Tv, eltype(b)))
+    AA = AASparseMatrix(Tv === T ? A : SparseMatrixCSC{T,Ti}(A))
+    return solve(AA, b isa StridedVecOrMat{T} ? b : Array{T}(b); kw...)
+end
 
 # ============================================================
 # Preallocated / thread-safe factorization solve workspace
@@ -2196,4 +2218,146 @@ function symbolic_options(f::AAFactorization{T}) where {T<:vTypes}
         return _from_raw(LibAccelerate._SparseGetOptionsFromSymbolicFactor(
             _rawptr(LibAccelerate.SparseOpaqueSymbolicFactorization, symb)))
     end
+end
+
+# ============================================================
+# One-call factorization, for `AASparseMatrix` and `SparseMatrixCSC`
+# ============================================================
+# `AppleAccelerate.cholesky` *is* `LinearAlgebra.cholesky` (likewise lu/qr/ldlt/
+# factorize), so a `SparseMatrixCSC` method on those names would be type piracy and
+# would hijack SuiteSparse for every package in the session. `factor` is this
+# package's own function, so it can take a `SparseMatrixCSC` directly.
+
+const _FACTOR_KINDS = Dict{Symbol,SparseFactorization_t}(
+    :auto     => SparseFactorizationTBD,
+    :cholesky => SparseFactorizationCholesky,
+    :ldlt     => SparseFactorizationLDLT,
+    :lu       => SparseFactorizationLU,
+    :qr       => SparseFactorizationQR,
+)
+_factor_kind(k::SparseFactorization_t) = k
+_factor_kind(k::Symbol) = get(_FACTOR_KINDS, k) do
+    throw(ArgumentError("unknown factorization $(repr(k)); use one of " *
+        join(repr.(sort!(collect(keys(_FACTOR_KINDS)))), ", ") * ", or a SparseFactorization_t"))
+end
+
+"""
+    factor(A, kind = :auto) -> AAFactorization
+
+Factorize the sparse matrix `A` with Apple's Sparse solvers and return the
+completed [`AAFactorization`](@ref), ready for [`solve`](@ref), `\\`, `ldiv!`,
+[`subfactor`](@ref), …
+
+`A` is an [`AASparseMatrix`](@ref) or a plain `SparseMatrixCSC` — any index type,
+and any numeric element type (values other than `Float32`/`Float64`/`ComplexF32`/
+`ComplexF64` are converted to `Float64`/`ComplexF64`). Symmetric/Hermitian and
+triangular structure of a `SparseMatrixCSC` is detected automatically.
+
+`kind` is `:auto` (Cholesky if Hermitian, else LU if square on macOS 15.5+, else
+QR), `:cholesky`, `:ldlt`, `:lu` (macOS 15.5+), `:qr`, or any
+`SparseFactorization_t` constant (e.g. `SparseFactorizationLDLTSBK`).
+
+This is the `SparseMatrixCSC` entry point on purpose: `lu`/`cholesky`/`qr`/`ldlt`
+are `LinearAlgebra`'s functions, and AppleAccelerate only adds methods to them for
+its own `AASparseMatrix`, never for `SparseMatrixCSC` (that would override
+SuiteSparse session-wide).
+"""
+function factor(A::AASparseMatrix, kind::Union{Symbol,SparseFactorization_t} = :auto)
+    f = AAFactorization(A)
+    factor!(f, _factor_kind(kind))
+    return f
+end
+factor(A::SparseMatrixCSC, kind::Union{Symbol,SparseFactorization_t} = :auto) =
+    factor(AASparseMatrix(A), kind)
+
+# ============================================================
+# In-place multiply (`mul!`) on AASparseMatrix
+# ============================================================
+
+function _check_mul_dims(Y, A::AASparseMatrix, X)
+    (size(X, 1) == size(A, 2) && size(Y, 1) == size(A, 1) &&
+        size(X)[2:end] == size(Y)[2:end]) || throw(DimensionMismatch(
+        "Dimension mismatch in mul!: A is $(size(A)), X is $(size(X)), Y is $(size(Y))"))
+end
+
+"""
+    mul!(Y, A::AASparseMatrix, X) -> Y
+    mul!(Y, A::AASparseMatrix, X, α, β) -> Y
+
+In-place sparse × dense product via libSparse: `Y = A*X`, or `Y = α*A*X + β*Y`.
+`X`/`Y` are vectors or (for several right-hand sides at once) matrices. No
+allocation, so an `AASparseMatrix` can serve as the operator in iterative methods
+written against `LinearAlgebra.mul!`. See also [`muladd!`](@ref).
+"""
+function LinearAlgebra.mul!(Y::StridedVecOrMat{T}, A::AASparseMatrix{T},
+                            X::StridedVecOrMat{T}) where {T<:vTypes}
+    _check_mul_dims(Y, A, X)
+    GC.@preserve A SparseMultiply(A.matrix, X, Y)
+    return Y
+end
+
+function LinearAlgebra.mul!(Y::StridedVecOrMat{T}, A::AASparseMatrix{T},
+                            X::StridedVecOrMat{T}, α::Number, β::Number) where {T<:vTypes}
+    _check_mul_dims(Y, A, X)
+    if iszero(β)
+        GC.@preserve A SparseMultiply(T(α), A.matrix, X, Y)
+    else
+        isone(β) || rmul!(Y, T(β))
+        GC.@preserve A SparseMultiplyAdd(T(α), A.matrix, X, Y)
+    end
+    return Y
+end
+
+# ============================================================
+# Inertia of an LDLᵀ factorization
+# ============================================================
+# libSparse exposes no determinant/log-determinant query, and no way to read a
+# factor's diagonal short of applying the sub-factor to every unit vector, so
+# `det`/`logdet` are not provided. The pivot-sign counts are exposed, though.
+
+const _INERTIA_SYMS = Dict(
+    Cfloat     => :_Z16SparseGetInertia31SparseOpaqueFactorization_FloatPiS0_S0_,
+    Cdouble    => :_Z16SparseGetInertia32SparseOpaqueFactorization_DoublePiS0_S0_,
+    ComplexF32 => :_Z16SparseGetInertia39SparseOpaqueFactorization_Complex_FloatPiS0_S0_,
+    ComplexF64 => :_Z16SparseGetInertia40SparseOpaqueFactorization_Complex_DoublePiS0_S0_,
+)
+for (T, sym) in _INERTIA_SYMS
+    @eval function _inertia(f::SparseOpaqueFactorization{$T})
+        npos = Ref{Cint}(0); nzero = Ref{Cint}(0); nneg = Ref{Cint}(0)
+        rc = @ccall LIBSPARSE.$sym(f::SparseOpaqueFactorization{$T},
+            npos::Ptr{Cint}, nzero::Ptr{Cint}, nneg::Ptr{Cint})::Cint
+        return rc, (positive = Int(npos[]), zero = Int(nzero[]), negative = Int(nneg[]))
+    end
+end
+
+"""
+    inertia(f::AAFactorization) -> (positive = p, zero = z, negative = n)
+
+Number of positive, zero and negative pivots of a completed **LDLᵀ**
+factorization — by Sylvester's law of inertia, the counts of positive, zero and
+negative eigenvalues of the symmetric/Hermitian matrix. Useful for checking
+definiteness or counting eigenvalues below a shift
+(`inertia(factor(A - σ*I, :ldlt)).negative`).
+
+libSparse only reports inertia for the threshold-partial-pivoting variant,
+`SparseFactorizationLDLTTPP`. That is what the default `:ldlt` /
+`SparseFactorizationLDLT` resolves to; the `Unpivoted` and `SBK` variants throw an
+`ArgumentError`.
+
+As Apple notes, pivots that are very close to zero make the computed inertia
+sensitive to the pivoting and zero tolerances.
+"""
+function inertia(f::AAFactorization{T}) where {T<:vTypes}
+    fac = f._factorization
+    fac.status == SparseStatusOk || throw(ArgumentError(
+        "inertia requires a completed factorization; call factor! first"))
+    t = fac.symbolicFactorization.type
+    # libSparse rejects every other kind through its reportError callback; check
+    # the *resolved* type up front (default LDLT resolves to LDLTTPP).
+    t == SparseFactorizationLDLTTPP || throw(ArgumentError(
+        "inertia requires a SparseFactorizationLDLTTPP factorization (the default " *
+        "`:ldlt`); f holds $t"))
+    rc, result = GC.@preserve f _inertia(fac)
+    rc == 0 || error("SparseGetInertia failed with status $rc")
+    return result
 end

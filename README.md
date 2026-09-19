@@ -94,8 +94,8 @@ ang  = AppleAccelerate.vphase(z)                # phase angles
 ```julia
 using AppleAccelerate, LinearAlgebra, SparseArrays
 S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
-As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
-xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
+F  = AppleAccelerate.factor(S)                  # takes a SparseMatrixCSC directly; also :ldlt, :lu, :qr
+xs = AppleAccelerate.solve(F, randn(500))       # or one-shot: AppleAccelerate.solve(S, b)
 ```
 
 ### Neural-network primitives (BNNS) — reductions & top-k
