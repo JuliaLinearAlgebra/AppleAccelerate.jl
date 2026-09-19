@@ -1,0 +1,51 @@
+name: Generator drift
+# Regenerates src/lib/LibAccelerate.jl from the runner's macOS SDK into a temp tree and
+# compares its stable surface (function signatures, struct layouts, enum values) against
+# the committed file. See gen/check_drift.jl and gen/README.md ("Reproducibility").
+on:
+  schedule:
+    - cron: '17 5 * * 1'   # Mondays 05:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'gen/**'
+      - 'src/lib/LibAccelerate.jl'
+      - '.github/workflows/GenDrift.yml'
+jobs:
+  drift:
+    name: Regenerate and compare
+    runs-on: macOS-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Check drift
+        id: drift
+        run: julia gen/check_drift.jl --summary drift.md
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f drift.md ]; then cat drift.md >> "$GITHUB_STEP_SUMMARY"; fi
+      # Scheduled/manual runs track drift in a single issue: opened on the first failing
+      # run, updated with a comment on later ones. PR runs just fail the check.
+      - name: Open or update drift issue
+        if: failure() && steps.drift.outcome == 'failure' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="LibAccelerate generator drift detected"
+          # GitHub caps issue bodies at 65536 characters; the job summary has the full report.
+          head -c 60000 drift.md > body.md
+          printf '\n\nWorkflow run (full report in the job summary): %s\n' "$RUN_URL" >> body.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
+          fi

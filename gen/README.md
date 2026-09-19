@@ -43,10 +43,27 @@ machines, because:
   names renumber **wholesale** when SDK headers add or remove any anonymous type, so
   even a small SDK update can produce a large, mechanical diff in the committed output.
 
-There is currently no CI job that regenerates and diffs the output; drift against a
-new SDK is caught by re-running the generator manually. To make silent drift harder,
-`generate.jl` pins Clang.jl (via `Project.toml` `[compat]`) and every
-post-processing pass **errors** if an expected
+Because a byte-for-byte diff is meaningless across machines, drift is checked on the
+*stable surface* instead. [`check_drift.jl`](./check_drift.jl) regenerates into a throwaway
+copy of the tree (the committed file is never touched) and compares function `@ccall`
+signatures, named struct fields, enum members/values and constants by name, and the
+anonymous `##Ctag#` types as a multiset with the counter erased:
+
+```sh
+julia gen/check_drift.jl                      # regenerate + compare; exit 1 on drift
+julia gen/check_drift.jl --generated <file>   # compare against an existing output
+```
+
+A name present on only one side is reported as informational (a newer SDK adds API; a
+different macOS strips a different set of unexported symbols). A definition present on
+both sides that differs — or a committed anonymous type with no match — is drift and
+fails. The [`GenDrift`](../.github/workflows/GenDrift.yml) workflow runs this weekly on
+`macOS-latest` (and on PRs touching `gen/` or the generated file); a failing scheduled
+run opens, or comments on, a "LibAccelerate generator drift detected" issue. The check
+also fails (exit 2) when `generate.jl` itself no longer completes against the SDK.
+
+As a second line of defence, `generate.jl` pins Clang.jl (via `Project.toml` `[compat]`)
+and every post-processing pass **errors** if an expected
 transformation finds zero matches instead of silently no-opping.
 
 ## Scope
@@ -76,6 +93,7 @@ coverage by appending headers to that list.
 
 | File | Purpose |
 |------|---------|
+| `check_drift.jl` | Regenerates into a temp tree and compares the stable surface with the committed file |
 | `generate.jl` | Entry point: resolves SDK paths, runs Clang.jl, strips out-of-scope BLAS |
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
 | `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
