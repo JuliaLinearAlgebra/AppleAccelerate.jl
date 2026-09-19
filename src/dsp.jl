@@ -1099,7 +1099,8 @@ is_supported_fft_length(n::Integer) = n >= 1 && (ispow2(n) || (_odd_cofactor(n) 
         "unsupported FFT length $n: AppleAccelerate only supports 1D complex FFT ",
         "lengths that are a power of two, or of the form f*2^k with f ∈ {3, 5, 15} ",
         "and k ≥ 3 (smallest non-power-of-two lengths are 24, 40, 120). ",
-        "For arbitrary (e.g. prime) lengths, use FFTW.jl instead.")))
+        "Check a length with `AppleAccelerate.is_supported_fft_length(n)`; for other ",
+        "(e.g. prime) lengths use FFTW.jl, or pass `fallback = FFTW.fft` to opt in per call.")))
 end
 
 # --- Internal 1D FFT (direction-based) ---
@@ -1211,15 +1212,20 @@ Apple's mixed-radix DFT (see [`is_supported_fft_length`](@ref)); an unsupported 
 an `ArgumentError`. When a `setup::FFTSetup` is supplied, or for 2D inputs, all
 dimensions must be powers of 2. If `setup` is omitted, a temporary plan is created
 automatically.
+
+The 1D no-setup method takes a `fallback` keyword: `fft(x; fallback = FFTW.fft)` returns
+`fallback(x)` instead of throwing when vDSP does not support `length(x)`; it is never
+called for a supported length. `bfft`, `ifft` and `rfft` accept it likewise. For repeated
+transforms see [`fftplan`](@ref).
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
 fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
 fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
-function fft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+function fft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return fft(x, _cached_fftsetup(x))
-    is_supported_fft_length(n) || _unsupported_fft_length(n)
+    is_supported_fft_length(n) || return _fft_fallback(fallback, _unsupported_fft_length, n, x)
     return _fft1d_dft(x, DFT_FORWARD)
 end
 fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, _cached_fftsetup(x))
@@ -1241,10 +1247,10 @@ Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp
 """
 bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
 bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
-function bfft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+function bfft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return bfft(x, _cached_fftsetup(x))
-    is_supported_fft_length(n) || _unsupported_fft_length(n)
+    is_supported_fft_length(n) || return _fft_fallback(fallback, _unsupported_fft_length, n, x)
     return _fft1d_dft(x, DFT_INVERSE)
 end
 bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, _cached_fftsetup(x))
@@ -1267,7 +1273,11 @@ Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp
 ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 # No-setup 1D routes through bfft, which handles both power-of-2 and mixed-radix lengths.
-ifft(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x) ./ length(x)
+function ifft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
+    is_supported_fft_length(length(x)) ||
+        return _fft_fallback(fallback, _unsupported_fft_length, length(x), x)
+    return bfft(x) ./ length(x)
+end
 ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, _cached_fftsetup(x))
 
 # --- Internal in-place 1D complex FFT ---
@@ -1676,7 +1686,9 @@ end
     throw(ArgumentError(string(
         "unsupported real FFT length $n: AppleAccelerate supports power-of-2 real FFT ",
         "lengths, plus mixed-radix lengths of the form f*2^k with f ∈ {3, 5, 15} ",
-        "(k ≥ 4) via Apple's real-input DFT. For other lengths, use FFTW.jl instead.")))
+        "(k ≥ 4) via Apple's real-input DFT. `AppleAccelerate.is_supported_fft_length(n)` ",
+        "is a necessary condition; for other lengths use FFTW.jl, or pass ",
+        "`fallback = FFTW.rfft` to opt in per call.")))
 end
 
 # Real-input DFT setups are cached like the complex ones (see the global setup
@@ -1779,10 +1791,13 @@ Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vds
 """
 rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
 rfft(x::Matrix{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup)
-function rfft(x::Vector{T}) where {T<:Union{Float32,Float64}}
+function rfft(x::Vector{T}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return rfft(x, _cached_fftsetup(T, n))
-    (iseven(n) && is_supported_fft_length(n)) || _unsupported_rfft_length(n)
+    (iseven(n) && is_supported_fft_length(n)) ||
+        return _fft_fallback(fallback, _unsupported_rfft_length, n, x)
+    # vDSP's real-input DFT accepts fewer lengths than the complex one; probe it.
+    (fallback === nothing || _rdft_supported(T, n)) || return fallback(x)
     return _rfft1d_dft(x)
 end
 rfft(x::Matrix{T}) where {T<:Union{Float32,Float64}} = rfft(x, _cached_fftsetup(T, max(size(x)...)))

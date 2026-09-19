@@ -131,6 +131,100 @@ AppleAccelerate.irfft
 AppleAccelerate.brfft
 ```
 
+## Plans: `plan * x`, `mul!`, `inv`
+
+The setups returned by `plan_fft`/`plan_rfft`/`plan_dft`/`plan_dct` are vDSP's own objects: they hold twiddle tables but know neither the transform's direction nor its shape, so they can only be passed along to `fft(x, setup)`. An [`FFTPlan`](@ref AppleAccelerate.FFTPlan) adds that missing information, which gives every vDSP transform the plan interface Julia users know from FFTW:
+
+| Constructor | Transform | Shapes |
+|-------------|-----------|--------|
+| [`fftplan`](@ref AppleAccelerate.fftplan), [`bfftplan`](@ref AppleAccelerate.bfftplan), [`ifftplan`](@ref AppleAccelerate.ifftplan) | complex forward / unnormalized backward / normalized inverse | vector, matrix (2-D), matrix with `dims` (batched 1-D) |
+| [`rfftplan`](@ref AppleAccelerate.rfftplan), [`brfftplan`](@ref AppleAccelerate.brfftplan), [`irfftplan`](@ref AppleAccelerate.irfftplan) | real ↔ half spectrum | vector, matrix (2-D) |
+| [`dctplan`](@ref AppleAccelerate.dctplan) | DCT-II / III / IV (`Float32`) | vector |
+
+```@example fft
+using LinearAlgebra: mul!
+
+x = randn(ComplexF64, 1024)
+p = AppleAccelerate.fftplan(x)      # only the type and size of x are used
+
+X = p * x                           # allocates the result
+y = similar(x)
+mul!(y, p, x)                       # writes into y, no allocation
+@assert y == X
+
+@assert p \ X ≈ x                   # same as inv(p) * X
+ip = inv(p)                         # a normalized inverse plan; reuse it in hot loops
+@assert ip * X ≈ x
+
+z = copy(x)
+mul!(z, p, z)                       # passing the same array transforms in place
+@assert z ≈ X
+p
+```
+
+Plans can also be built from a type and a size, and carry the usual introspection:
+
+```@example fft
+pr = AppleAccelerate.rfftplan(Float32, (16, 32))      # 2-D real FFT
+size(pr), AppleAccelerate.output_size(pr), eltype(pr)
+```
+
+```@example fft
+A = randn(ComplexF32, 16, 8)
+pc = AppleAccelerate.fftplan(A, 1)                    # FFT of every column
+@assert pc * A ≈ AppleAccelerate.fft(A, 1)
+@assert pc \ (pc * A) ≈ A
+
+d = randn(Float32, 64)
+pd = AppleAccelerate.dctplan(d)                       # DCT-II
+@assert pd \ (pd * d) ≈ d                             # inv uses DCT-III, scaled by 2/n
+nothing # hide
+```
+
+**Supported sizes** are those of the one-shot functions: 1-D complex plans take any [`is_supported_fft_length`](@ref AppleAccelerate.is_supported_fft_length); 1-D real plans a power of two or a mixed-radix length accepted by Apple's real-input DFT; 2-D and batched plans powers of two; DCT plans `f·2^k` with `f ∈ {1, 3, 5, 15}`, `k ≥ 4`. Anything else throws an `ArgumentError` when the plan is *constructed*, never when it is applied.
+
+**No copies.** vDSP's FFTs want split-complex operands, which is why the one-shot `fft(x)` copies `x` into separate real/imaginary arrays and back. A plan instead hands vDSP the interleaved `Complex` buffer itself as a stride-2 split-complex operand (or uses the native interleaved DFT for lengths up to 4096), so `mul!` performs no allocation and no packing. Up to 4096 points this is also faster than the one-shot call (about 1.4× at 1024, 2× at 960 on an M-series Mac); for larger powers of two vDSP's stride-2 access is somewhat slower than its unit-stride kernels (≈105 µs vs ≈83 µs at 16384), the price of not allocating. The exceptions are the transforms vDSP only offers without a stride argument, or with a packed layout that cannot be unpacked in place — mixed-radix lengths above the interleaved DFT's limit, mixed-radix real plans, and 2-D real plans — which go through temporaries. `x` and `y` must be contiguous; column views such as `view(M, :, j)` are fine.
+
+**Thread safety.** A plan is immutable and owns no scratch memory, and vDSP setups are read-only while a transform executes, so one plan can be applied from many tasks concurrently. Plans share vDSP setups through the same locked caches as the one-shot API, which makes constructing a plan (or its `inv`) cheap.
+
+!!! note "These are AppleAccelerate's own plans"
+    `FFTPlan` does not subtype `AbstractFFTs.Plan`, and the constructors are deliberately not called `plan_fft`: AppleAccelerate defines no methods on other packages' functions for other packages' types (see [Architecture](@ref architecture)). `*`, `\`, `inv` and `mul!` are extended only for `FFTPlan`, a type this package owns, so loading AppleAccelerate still changes nothing about FFTW's plans.
+
+```@docs
+AppleAccelerate.FFTPlan
+AppleAccelerate.fftplan
+AppleAccelerate.bfftplan
+AppleAccelerate.ifftplan
+AppleAccelerate.rfftplan
+AppleAccelerate.brfftplan
+AppleAccelerate.irfftplan
+AppleAccelerate.dctplan
+AppleAccelerate.output_size
+Base.inv(::AppleAccelerate.FFTPlan)
+AppleAccelerate.LinearAlgebra.mul!(::StridedArray, ::AppleAccelerate.FFTPlan, ::StridedArray)
+```
+
+## Unsupported lengths: an explicit fallback
+
+vDSP cannot transform every length, and AppleAccelerate never silently switches backend. Check a length up front with [`is_supported_fft_length`](@ref AppleAccelerate.is_supported_fft_length), or opt in per call site with the `fallback` keyword of the one-shot 1-D `fft`, `bfft`, `ifft` and `rfft`: when (and only when) vDSP cannot handle the length, `fallback(x)` is returned instead of an `ArgumentError` being thrown.
+
+```julia
+using AppleAccelerate, FFTW
+
+x = randn(ComplexF64, 1000)                     # 1000 = 125·2^3 — not a vDSP length
+AppleAccelerate.is_supported_fft_length(1000)   # false
+AppleAccelerate.fft(x)                          # throws ArgumentError
+AppleAccelerate.fft(x; fallback = FFTW.fft)     # FFTW, because you asked for it
+AppleAccelerate.fft(randn(ComplexF64, 1024); fallback = FFTW.fft)   # still vDSP
+```
+
+For plans, make the same choice when constructing them:
+
+```julia
+p = AppleAccelerate.is_supported_fft_length(length(x)) ? AppleAccelerate.fftplan(x) : FFTW.plan_fft(x)
+y = p * x                                       # both support *, mul!, inv and \
+```
+
 ## Small-radix, fixed-size, and interleaved transforms
 
 Beyond the general FFT/DFT paths, vDSP provides specialized complex-transform kernels:
