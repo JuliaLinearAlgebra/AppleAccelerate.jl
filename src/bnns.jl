@@ -5,8 +5,14 @@
 # stateless tensor ops that remain current (`bnns_transpose`, `bnns_copy!`), the
 # DirectApply reduction / top-k kernels (`bnns_reduce`, `bnns_topk`,
 # `bnns_in_topk`), random generation, nearest neighbors, layout/size queries, and
-# the full BNNS Graph compiler pipeline. The numerically important helpers are
-# cross-validated against plain-Julia references.
+# the full BNNS Graph compiler pipeline, including an end-to-end inference path
+# (`bnns_graph_arguments`, `bnns_graph_run`, `bnns_graph_run!`). The numerically
+# important helpers are cross-validated against plain-Julia references.
+#
+# Element types: `Float32` everywhere, plus `Float16` and the integer / `Bool`
+# types wherever the kernel was verified to honour them at runtime (each
+# docstring lists its own set — BNNS returns status 0 with garbage for some
+# unsupported types, so the sets are enforced here by dispatch).
 #
 # NOTE: Every classic and DirectApply BNNS entry point that Apple DEPRECATED in
 # macOS 15.0 / iOS 18.0 is intentionally NOT wrapped here — target the BNNS Graph
@@ -20,7 +26,7 @@
 
 using .LibAccelerate:
     BNNSNDArrayDescriptor, BNNSDataType, BNNSDataLayout,
-    BNNSDataTypeFloat32, BNNSDataTypeInt32,
+    BNNSDataTypeFloat16, BNNSDataTypeFloat32, BNNSDataTypeInt32,
     BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix
 
 # Alias the raw layer so the many BNNS enum values, structs and ccall wrappers can
@@ -33,10 +39,11 @@ import .LibAccelerate as LA
 # Map a Julia element type to the corresponding BNNS data-type enum value.
 # The struct fields are typed `BNNSDataType` (a `UInt32` alias), so the enum
 # value is converted to its underlying integer code.
+bnns_data_type(::Type{Float16}) = BNNSDataType(BNNSDataTypeFloat16)
 bnns_data_type(::Type{Float32}) = BNNSDataType(BNNSDataTypeFloat32)
 bnns_data_type(::Type{Int32})   = BNNSDataType(BNNSDataTypeInt32)
 bnns_data_type(::Type{T}) where {T} =
-    throw(ArgumentError("BNNS: unsupported element type $T (supported: Float32, Int32)"))
+    throw(ArgumentError("BNNS: unsupported element type $T (supported: Float16, Float32, Int32)"))
 
 const BNNSFloat = Float32  # element type supported by these wrappers
 
@@ -56,9 +63,9 @@ this constructor reports the array using a column-major-friendly BNNS layout:
   * 1D `Vector`  -> `BNNSDataLayoutVector`
   * 2D `Matrix`  -> `BNNSDataLayoutColumnMajorMatrix` (BNNS `size = (rows, cols)`).
 
-Only `Float32` (and `Int32`) dense, contiguous arrays are supported here; other
-element types or strided/transposed arrays should use the raw `LibAccelerate`
-layer directly.
+Only `Float16`, `Float32` and `Int32` dense, contiguous arrays are supported
+here; other element types or strided/transposed arrays should use the raw
+`LibAccelerate` layer directly.
 """
 struct BNNSArray{T,N}
     desc::BNNSNDArrayDescriptor
@@ -119,16 +126,29 @@ end
 # Map a Julia element type to the BNNS data-type enum. Broader than
 # `bnns_data_type` (which only accepts the Float32/Int32 core) so index and
 # boolean tensors work.
-_bnns_dt(::Type{Float32}) = BNNSDataType(LA.BNNSDataTypeFloat32)
-_bnns_dt(::Type{Int32})   = BNNSDataType(LA.BNNSDataTypeInt32)
-_bnns_dt(::Type{Int64})   = BNNSDataType(LA.BNNSDataTypeInt64)
-_bnns_dt(::Type{Int16})   = BNNSDataType(LA.BNNSDataTypeInt16)
-_bnns_dt(::Type{Int8})    = BNNSDataType(LA.BNNSDataTypeInt8)
-_bnns_dt(::Type{UInt32})  = BNNSDataType(LA.BNNSDataTypeUInt32)
-_bnns_dt(::Type{UInt8})   = BNNSDataType(LA.BNNSDataTypeUInt8)
-_bnns_dt(::Type{Bool})    = BNNSDataType(LA.BNNSDataTypeBoolean)
+const _BNNS_DTYPES = (
+    Float16 => LA.BNNSDataTypeFloat16, Float32 => LA.BNNSDataTypeFloat32,
+    Int8 => LA.BNNSDataTypeInt8, Int16 => LA.BNNSDataTypeInt16,
+    Int32 => LA.BNNSDataTypeInt32, Int64 => LA.BNNSDataTypeInt64,
+    UInt8 => LA.BNNSDataTypeUInt8, UInt16 => LA.BNNSDataTypeUInt16,
+    UInt32 => LA.BNNSDataTypeUInt32, UInt64 => LA.BNNSDataTypeUInt64,
+    Bool => LA.BNNSDataTypeBoolean,
+)
+for (T, dt) in _BNNS_DTYPES
+    @eval _bnns_dt(::Type{$T}) = BNNSDataType($dt)
+end
 _bnns_dt(::Type{T}) where {T} =
     throw(ArgumentError("BNNS: unsupported element type $T"))
+
+# Inverse of `_bnns_dt`: the Julia element type for a BNNS data-type code (as
+# reported by graph introspection). Sub-byte / indexed / bfloat16 codes have no
+# Julia `Array` element type and throw.
+function _julia_type(dt)
+    for (T, code) in _BNNS_DTYPES
+        UInt32(code) == UInt32(dt) && return T
+    end
+    throw(ArgumentError("BNNS: data type code $(repr(UInt32(dt))) has no Julia array element type"))
+end
 
 const _ND_LAST_MAJOR = (
     LA.BNNSDataLayout1DLastMajor, LA.BNNSDataLayout2DLastMajor,
@@ -164,9 +184,13 @@ _bnns_check(status, name) =
     bnns_transpose(A::Array, dim0, dim1) -> Array
 
 Swap Julia dimensions `dim0` and `dim1` of `A` (1-based) via `BNNSTranspose`,
-equivalent to a `permutedims` that exchanges those two axes.
+equivalent to a `permutedims` that exchanges those two axes. Works for every
+element type BNNS can describe: `Float16`, `Float32`, `Int8`–`Int64`,
+`UInt8`–`UInt64` and `Bool`.
 """
 function bnns_transpose(A::Array{T}, dim0::Integer, dim1::Integer) where {T}
+    (1 <= dim0 <= ndims(A) && 1 <= dim1 <= ndims(A)) ||
+        throw(ArgumentError("BNNS: dims ($dim0, $dim1) out of range for a $(ndims(A))-D array"))
     p = collect(1:ndims(A)); p[dim0], p[dim1] = p[dim1], p[dim0]
     O = Array{T}(undef, ntuple(i -> size(A, p[i]), ndims(A)))
     di = _desc(A); do_ = _desc(O)
@@ -188,10 +212,19 @@ const _BNNS_REDUCE = Dict(
 """
     bnns_copy!(dest::Array, src::Array) -> dest
 
-Copy (with BNNS's broadcasting / layout conversion rules) `src` into `dest` via
-`BNNSCopy`. For equal shapes this is a plain element copy.
+Copy `src` into the equally-sized `dest` via `BNNSCopy`. For equal element types
+this is a plain element copy.
+
+`dest` and `src` may have **different element types**, in which case BNNS
+converts: `Float16 ↔ Float32` (the usual way to move data in and out of a
+half-precision graph), any integer type `→ Float32`, and `Float32 → Int32`.
+Conversions BNNS does not implement (e.g. `Float32 → Int8`) throw.
 """
-function bnns_copy!(dest::Array{T}, src::Array{T}) where {T}
+function bnns_copy!(dest::Array, src::Array)
+    # BNNSCopy does NOT broadcast: given a smaller `src` it returns status 0 and
+    # leaves the rest of `dest` unwritten, so equal shapes are required here.
+    size(dest) == size(src) || throw(DimensionMismatch(
+        "bnns_copy!: dest has size $(size(dest)), src has size $(size(src))"))
     ds = _desc(src); dd = _desc(dest)
     GC.@preserve src dest begin
         _bnns_check(LA.BNNSCopy(Ref(dd), Ref(ds), C_NULL), "BNNSCopy")
@@ -245,16 +278,27 @@ end
 # DirectApply family (stateless kernels operating on descriptors)
 # =============================================================================
 
+# Element types each kernel was verified to compute correctly (macOS 26). The
+# reduction kernel returns status 0 but wrong values for the other integer
+# widths, so the restriction is enforced by dispatch rather than by status.
+const _BNNSTopKTypes = Union{Float32,Float16,Int8,Int16,Int32,UInt8,UInt16}
+const _BNNSReduceTypes = Union{Float32,Float16,Int32}
+
 """
-    bnns_topk(input::Array{Float32}, K; dim=1) -> (values, indices)
+    bnns_topk(input::Array, K; dim=1) -> (values, indices)
 
 Top-`K` values and their 0-based indices along Julia dimension `dim` via
-`BNNSDirectApplyTopK`. `values` is `Float32`, `indices` is `Int32`. Comparable to
-`sort`-based `partialsortperm` per slice.
+`BNNSDirectApplyTopK`. `values` has the element type of `input`, `indices` is
+`Int32`. Comparable to `sort`-based `partialsortperm` per slice.
+
+Supported element types: `Float32`, `Float16`, `Int8`, `Int16`, `Int32`,
+`UInt8`, `UInt16` (BNNS rejects the wider integer types).
 """
-function bnns_topk(input::Array{Float32}, K::Integer; dim::Integer = 1)
+function bnns_topk(input::Array{T}, K::Integer; dim::Integer = 1) where {T<:_BNNSTopKTypes}
+    1 <= dim <= ndims(input) || throw(ArgumentError("BNNS: dim $dim out of range for a $(ndims(input))-D array"))
+    1 <= K <= size(input, dim) || throw(ArgumentError("BNNS: K = $K out of range 1:$(size(input, dim))"))
     osz = collect(size(input)); osz[dim] = K
-    vals = Array{Float32}(undef, osz...)
+    vals = Array{T}(undef, osz...)
     inds = Array{Int32}(undef, osz...)
     di = _desc(input); dv = _desc(vals); dind = _desc(inds)
     GC.@preserve input vals inds begin
@@ -266,17 +310,25 @@ function bnns_topk(input::Array{Float32}, K::Integer; dim::Integer = 1)
 end
 
 """
-    bnns_reduce(func::Symbol, input::Array{Float32}; dim=1) -> Array{Float32}
+    bnns_reduce(func::Symbol, input::Array; dim=1) -> Array
 
 Reduce `input` along Julia dimension `dim` with `func`
 (`:sum`, `:mean`, `:max`, `:min`, `:sumsquare`, `:l1`, `:l2`, `:product`,
 `:logsumexp`) via `BNNSDirectApplyReduction`. The reduced axis collapses to
-length 1.
+length 1 and the result has the element type of `input`.
+
+Supported element types: `Float32`, `Float16` (computed *in* half precision, so
+sums saturate at `floatmax(Float16)` = 65504) and `Int32`. For `Int32` only the
+reductions that are exact in integers are offered (`:sum`, `:max`, `:min`,
+`:sumsquare`, `:l1`, `:product`); `:mean`, `:l2` and `:logsumexp` throw.
 """
-function bnns_reduce(func::Symbol, input::Array{Float32}; dim::Integer = 1)
+function bnns_reduce(func::Symbol, input::Array{T}; dim::Integer = 1) where {T<:_BNNSReduceTypes}
     haskey(_BNNS_REDUCE, func) || throw(ArgumentError("BNNS: unsupported reduce $(repr(func))"))
+    (T === Int32 && func in (:mean, :l2, :logsumexp)) && throw(ArgumentError(
+        "BNNS: reduce $(repr(func)) is not exact for Int32 input; convert to Float32 first"))
+    1 <= dim <= ndims(input) || throw(ArgumentError("BNNS: dim $dim out of range for a $(ndims(input))-D array"))
     osz = collect(size(input)); osz[dim] = 1
-    O = zeros(Float32, osz...)
+    O = zeros(T, osz...)
     di = _desc(input); do_ = _desc(O)
     lp = Ref(LA.BNNSLayerParametersReduction(di, do_, _empty_desc(),
             LA.BNNSReduceFunction(_BNNS_REDUCE[func]), 0.0f0))
@@ -296,6 +348,8 @@ _empty_desc() = BNNSNDArrayDescriptor(LA.BNNSNDArrayFlags(0), _bnns_layout(1),
 # =============================================================================
 # Random number generation (opaque-handle resource)
 # =============================================================================
+
+const _BNNSIntTypes = Union{Int8,Int16,Int32,Int64,UInt8,UInt16,UInt32,UInt64}
 
 """
     BNNSRandomGenerator([seed]) -> BNNSRandomGenerator
@@ -327,11 +381,13 @@ mutable struct BNNSRandomGenerator
 end
 
 """
-    bnns_random_fill_uniform!(g::BNNSRandomGenerator, A::Array{Float32}, lo=0f0, hi=1f0) -> A
+    bnns_random_fill_uniform!(g::BNNSRandomGenerator, A::Array, lo=0f0, hi=1f0) -> A
 
-Fill `A` with i.i.d. uniform samples on `[lo, hi)` (`BNNSRandomFillUniformFloat`).
+Fill `A` (`Float32` or `Float16`) with i.i.d. uniform samples on `[lo, hi)`
+(`BNNSRandomFillUniformFloat`). For `Float16` the samples are rounded to half
+precision, so a value can round up to exactly `hi`.
 """
-function bnns_random_fill_uniform!(g::BNNSRandomGenerator, A::Array{Float32},
+function bnns_random_fill_uniform!(g::BNNSRandomGenerator, A::Array{<:Union{Float32,Float16}},
                                    lo::Real = 0.0f0, hi::Real = 1.0f0)
     d = _desc(A)
     GC.@preserve A begin
@@ -342,13 +398,18 @@ function bnns_random_fill_uniform!(g::BNNSRandomGenerator, A::Array{Float32},
 end
 
 """
-    bnns_random_fill_uniform_int!(g::BNNSRandomGenerator, A::Array{Int32}, lo, hi) -> A
+    bnns_random_fill_uniform_int!(g::BNNSRandomGenerator, A::Array{<:Integer}, lo, hi) -> A
 
 Fill integer array `A` with i.i.d. uniform samples on the half-open range
-`[lo, hi)` (`BNNSRandomFillUniformInt`).
+`[lo, hi)` (`BNNSRandomFillUniformInt`). `A` may be `Int8`, `Int16`, `Int32`,
+`Int64`, `UInt8`, `UInt16`, `UInt32` or `UInt64`; the range must fit the
+element type.
 """
-function bnns_random_fill_uniform_int!(g::BNNSRandomGenerator, A::Array{Int32},
-                                       lo::Integer, hi::Integer)
+function bnns_random_fill_uniform_int!(g::BNNSRandomGenerator, A::Array{T},
+                                       lo::Integer, hi::Integer) where {T<:_BNNSIntTypes}
+    lo < hi || throw(ArgumentError("BNNS: need lo < hi, got [$lo, $hi)"))
+    (typemin(T) <= lo && hi - 1 <= typemax(T)) ||
+        throw(ArgumentError("BNNS: range [$lo, $hi) does not fit element type $T"))
     d = _desc(A)
     GC.@preserve A begin
         _bnns_check(LA.BNNSRandomFillUniformInt(g.handle, Ref(d), Int64(lo), Int64(hi)),
@@ -358,11 +419,12 @@ function bnns_random_fill_uniform_int!(g::BNNSRandomGenerator, A::Array{Int32},
 end
 
 """
-    bnns_random_fill_normal!(g::BNNSRandomGenerator, A::Array{Float32}, mean=0f0, stddev=1f0) -> A
+    bnns_random_fill_normal!(g::BNNSRandomGenerator, A::Array, mean=0f0, stddev=1f0) -> A
 
-Fill `A` with i.i.d. Gaussian samples (`BNNSRandomFillNormalFloat`).
+Fill `A` (`Float32` or `Float16`) with i.i.d. Gaussian samples
+(`BNNSRandomFillNormalFloat`).
 """
-function bnns_random_fill_normal!(g::BNNSRandomGenerator, A::Array{Float32},
+function bnns_random_fill_normal!(g::BNNSRandomGenerator, A::Array{<:Union{Float32,Float16}},
                                   mean::Real = 0.0f0, stddev::Real = 1.0f0)
     d = _desc(A)
     GC.@preserve A begin
@@ -373,14 +435,16 @@ function bnns_random_fill_normal!(g::BNNSRandomGenerator, A::Array{Float32},
 end
 
 """
-    bnns_random_fill_categorical!(g::BNNSRandomGenerator, out::Array{Float32}, probs::Vector{Float32}; log_probs=false) -> out
+    bnns_random_fill_categorical!(g::BNNSRandomGenerator, out::Array{T}, probs::Array{T}; log_probs=false) -> out
 
-Draw categorical samples (0-based category indices, stored as `Float32`) into
-`out` using per-category weights `probs` (`BNNSRandomFillCategoricalFloat`). Pass
-`log_probs=true` if `probs` holds log probabilities.
+Draw categorical samples (0-based category indices, stored as floating point)
+into `out` using per-category weights `probs` (`BNNSRandomFillCategoricalFloat`).
+Pass `log_probs=true` if `probs` holds log probabilities. `T` is `Float32` or
+`Float16`; `out` and `probs` must share it (BNNS silently mis-samples mixed
+precisions).
 """
-function bnns_random_fill_categorical!(g::BNNSRandomGenerator, out::Array{Float32},
-                                       probs::Array{Float32}; log_probs::Bool = false)
+function bnns_random_fill_categorical!(g::BNNSRandomGenerator, out::Array{T},
+                                       probs::Array{T}; log_probs::Bool = false) where {T<:Union{Float32,Float16}}
     dout = _desc(out); dp = _desc(probs)
     GC.@preserve out probs begin
         _bnns_check(LA.BNNSRandomFillCategoricalFloat(g.handle, Ref(dout), Ref(dp), log_probs),
@@ -487,12 +551,50 @@ end
 # =============================================================================
 # BNNS Graph API (the modern, non-deprecated compiler pipeline).
 #
-# Lifecycle: build compile options -> `BNNSGraphCompileFromFile` a serialized
-# `.bnns`/MIL package into a `BNNSGraph` -> `BNNSGraphContextMake` an executable
-# context -> introspect / `execute`. Compiling requires an on-disk graph package
-# (there is no in-memory graph builder in this API), so the wrappers here cover
-# the full surface but the graph/context calls need a real package to exercise.
+# Lifecycle: build compile options -> `BNNSGraphCompileFromFile` a compiled Core
+# ML model (`.mlmodelc`, i.e. a directory holding a MIL program `model.mil` plus
+# its weights) into a `BNNSGraph` -> `BNNSGraphContextMake` an executable context
+# -> introspect (`bnns_graph_arguments`) -> run (`bnns_graph_run`/`run!`).
+# Compiling requires an on-disk model (there is no in-memory graph builder in this
+# API); the tests exercise the whole pipeline with small hand-written MIL programs.
 # =============================================================================
+
+# --- `_v2` entry points --------------------------------------------------------
+# bnns_graph.h redirects several functions to versioned symbols with
+# `__asm__("_<name>_v2")`. The un-suffixed symbols still exported by libBNNS are
+# the pre-release ABI (different argument lists): calling them with the header's
+# signature segfaults. Clang.jl does not see asm labels, so the generated raw
+# layer binds the un-suffixed names; the correct `_v2` symbols are bound here with
+# the header's exact signatures. `bnns_graph_shape_t` is likewise re-declared: the
+# header's field order is `{ size_t rank; uint64_t *shape; }`.
+struct _BNNSGraphShape
+    rank::Csize_t
+    shape::Ptr{UInt64}
+end
+
+_graph_compile_v2(filename, func, opts) =
+    @ccall LA.libacc.BNNSGraphCompileFromFile_v2(filename::Ptr{Cchar}, func::Ptr{Cchar},
+        opts::LA.bnns_graph_compile_options_t)::LA.bnns_graph_t
+_graph_input_names_v2(g, func, n, names) =
+    @ccall LA.libacc.BNNSGraphGetInputNames_v2(g::LA.bnns_graph_t, func::Ptr{Cchar},
+        n::Csize_t, names::Ptr{Ptr{Cchar}})::Cint
+_graph_output_names_v2(g, func, n, names) =
+    @ccall LA.libacc.BNNSGraphGetOutputNames_v2(g::LA.bnns_graph_t, func::Ptr{Cchar},
+        n::Csize_t, names::Ptr{Ptr{Cchar}})::Cint
+_graph_context_destroy_v2(c) =
+    @ccall LA.libacc.BNNSGraphContextDestroy_v2(c::LA.bnns_graph_context_t)::Cvoid
+_graph_context_workspace_size_v2(c, func) =
+    @ccall LA.libacc.BNNSGraphContextGetWorkspaceSize_v2(c::LA.bnns_graph_context_t,
+        func::Ptr{Cchar})::Csize_t
+_graph_context_set_batch_size_v2(c, func, n) =
+    @ccall LA.libacc.BNNSGraphContextSetBatchSize_v2(c::LA.bnns_graph_context_t,
+        func::Ptr{Cchar}, n::UInt64)::Cint
+_graph_context_set_dynamic_shapes_v2(c, func, n, shapes) =
+    @ccall LA.libacc.BNNSGraphContextSetDynamicShapes_v2(c::LA.bnns_graph_context_t,
+        func::Ptr{Cchar}, n::Csize_t, shapes::Ptr{_BNNSGraphShape})::Cint
+_graph_context_execute_v2(c, func, n, args, wsize, w) =
+    @ccall LA.libacc.BNNSGraphContextExecute_v2(c::LA.bnns_graph_context_t, func::Ptr{Cchar},
+        n::Csize_t, args::Ptr{LA.bnns_graph_argument_t}, wsize::Csize_t, w::Ptr{Cchar})::Cint
 
 # The raw BNNSGraph symbols take `Ptr{Cchar}` (not `Cstring`); build a
 # null-terminated byte buffer and pass `pointer` under `GC.@preserve`.
@@ -588,22 +690,53 @@ bnns_compile_options_get_output_fd(o::BNNSGraphCompileOptions) =
 """
     BNNSGraph(filename; func=nothing, options=BNNSGraphCompileOptions()) -> BNNSGraph
 
-Compile a serialized BNNS graph package at `filename` (optionally selecting a
-named `func` inside it) into an executable graph via `BNNSGraphCompileFromFile`.
-The returned handle feeds [`BNNSGraphContext`](@ref) and the graph-introspection
-helpers.
+Compile the compiled Core ML model (`.mlmodelc` directory, or the `model.mil`
+inside it) at `filename` — optionally only the named `func` inside it — into an
+executable graph via `BNNSGraphCompileFromFile`. Throws if BNNS cannot compile the
+model (unsupported op, malformed program, missing file). The returned handle feeds
+[`BNNSGraphContext`](@ref) and the graph-introspection helpers, and the compiled
+graph's memory is released by a finalizer once the graph and every context made
+from it are unreachable.
+
+`.mlmodelc` is what Xcode / `xcrun coremlcompiler compile` produce from an
+`.mlpackage`; only *ML Program* models (MIL), not the older NeuralNetwork format,
+are accepted by BNNS.
 """
 mutable struct BNNSGraph
     graph::LA.bnns_graph_t
+    mapped::Bool                    # compiled into an mmap'd output file -> munmap, not free
+    refs::Threads.Atomic{Int}       # 1 for the graph + 1 per live context
     function BNNSGraph(filename::AbstractString; func = nothing,
                        options::BNNSGraphCompileOptions = BNNSGraphCompileOptions())
+        ispath(filename) || throw(ArgumentError("BNNSGraph: no such model: $filename"))
         fn = _cstr(filename)
         fckeep, fcptr = _fnarg(func)
         g = GC.@preserve fn fckeep options begin
-            LA.BNNSGraphCompileFromFile(_cptr(fn), fcptr, options.opts)
+            _graph_compile_v2(_cptr(fn), fcptr, options.opts)
         end
-        return new(g)
+        g.data == C_NULL && error("BNNSGraphCompileFromFile failed to compile $(repr(filename))" *
+                                  (func === nothing ? "" : " (function $(repr(func)))"))
+        mapped = !isempty(bnns_compile_options_get_output_path(options)) ||
+                 bnns_compile_options_get_output_fd(options) != -1
+        obj = new(g, mapped, Threads.Atomic{Int}(1))
+        finalizer(_graph_release, obj)
+        return obj
     end
+end
+
+# Drop one reference; the compiled graph is released when the graph object and
+# every context made from it are gone (finalizer order is unspecified, and a
+# context reads the graph's memory until it is destroyed).
+function _graph_release(g::BNNSGraph)
+    if Threads.atomic_sub!(g.refs, 1) == 0 && g.graph.data != C_NULL
+        if g.mapped
+            @ccall munmap(g.graph.data::Ptr{Cvoid}, g.graph.size::Csize_t)::Cint
+        else
+            Libc.free(g.graph.data)
+        end
+        g.graph = LA.bnns_graph_t(C_NULL, 0)
+    end
+    return nothing
 end
 
 # Return `(keep, ptr)` where `keep` roots the buffer that `ptr` points into. For
@@ -646,14 +779,14 @@ end
 function bnns_graph_input_names(g::BNNSGraph, func = nothing)
     keep, fptr = _fnarg(func); n = bnns_graph_input_count(g, func)
     buf = fill(Ptr{Cchar}(C_NULL), n)
-    GC.@preserve keep buf _bnns_check(LA.BNNSGraphGetInputNames(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetInputNames")
+    GC.@preserve keep buf _bnns_check(_graph_input_names_v2(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetInputNames")
     return _names_from(buf)
 end
 "Output names of `func` (`BNNSGraphGetOutputNames`)."
 function bnns_graph_output_names(g::BNNSGraph, func = nothing)
     keep, fptr = _fnarg(func); n = bnns_graph_output_count(g, func)
     buf = fill(Ptr{Cchar}(C_NULL), n)
-    GC.@preserve keep buf _bnns_check(LA.BNNSGraphGetOutputNames(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetOutputNames")
+    GC.@preserve keep buf _bnns_check(_graph_output_names_v2(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetOutputNames")
     return _names_from(buf)
 end
 "Argument names of `func` (`BNNSGraphGetArgumentNames`)."
@@ -715,19 +848,28 @@ end
     BNNSGraphContext(g::BNNSGraph) -> BNNSGraphContext
 
 An executable context for a compiled [`BNNSGraph`](@ref) (`BNNSGraphContextMake`),
-destroyed by a finalizer (`BNNSGraphContextDestroy`). Feed it to
-[`bnns_graph_execute!`](@ref).
+destroyed by a finalizer (`BNNSGraphContextDestroy`). It holds the mutable
+execution state (dynamic shapes, streaming state), keeps its graph alive, and
+must be used by **one thread at a time**; make one context per task for
+concurrent inference. Feed it to [`bnns_graph_run`](@ref) /
+[`bnns_graph_run!`](@ref), or to the low-level [`bnns_graph_execute!`](@ref).
 """
 mutable struct BNNSGraphContext
     ctx::LA.bnns_graph_context_t
-    function BNNSGraphContext(c::LA.bnns_graph_context_t)
-        ctx = new(c)
-        finalizer(x -> LA.BNNSGraphContextDestroy(x.ctx), ctx)
+    graph::BNNSGraph
+    function BNNSGraphContext(c::LA.bnns_graph_context_t, g::BNNSGraph)
+        c.data == C_NULL && error("BNNSGraphContextMake returned NULL")
+        Threads.atomic_add!(g.refs, 1)
+        ctx = new(c, g)
+        finalizer(ctx) do x
+            _graph_context_destroy_v2(x.ctx)
+            _graph_release(x.graph)
+        end
         return ctx
     end
 end
 
-BNNSGraphContext(g::BNNSGraph) = BNNSGraphContext(LA.BNNSGraphContextMake(g.graph))
+BNNSGraphContext(g::BNNSGraph) = BNNSGraphContext(LA.BNNSGraphContextMake(g.graph), g)
 
 """
     BNNSGraphContext(g, func, initial_states::Vector{BNNSTensor}) -> BNNSGraphContext
@@ -739,7 +881,7 @@ function BNNSGraphContext(g::BNNSGraph, func, initial_states::Vector{LA.BNNSTens
     keep, fptr = _fnarg(func)
     c = GC.@preserve keep initial_states LA.BNNSGraphContextMakeStreaming(
         g.graph, fptr, Csize_t(length(initial_states)), pointer(initial_states))
-    return BNNSGraphContext(c)
+    return BNNSGraphContext(c, g)
 end
 
 const _ARGTYPE = Dict(:pointer => LA.BNNSGraphArgumentTypePointer, :tensor => LA.BNNSGraphArgumentTypeTensor)
@@ -767,26 +909,106 @@ bnns_graph_context_set_log_mask!(c::BNNSGraphContext, mask::Integer) =
 bnns_graph_context_set_log_callback!(c::BNNSGraphContext, cb::Ptr{Cvoid}, data::Ptr = C_NULL) =
     (_bnns_check(LA.BNNSGraphContextSetMessageLogCallback(c.ctx, cb, Ptr{LA.bnns_user_message_data_t}(data)), "BNNSGraphContextSetMessageLogCallback"); c)
 
-"Workspace size (bytes) required to execute `func` (`BNNSGraphContextGetWorkspaceSize`)."
+"""
+    bnns_graph_context_workspace_size(c, func=nothing) -> Int
+
+Workspace size (bytes) required to execute `func`
+(`BNNSGraphContextGetWorkspaceSize`). Query it again after changing the batch size
+or dynamic shapes. Allocate a suitable buffer with [`bnns_graph_workspace`](@ref).
+"""
 function bnns_graph_context_workspace_size(c::BNNSGraphContext, func = nothing)
     keep, fptr = _fnarg(func)
-    GC.@preserve keep Int(LA.BNNSGraphContextGetWorkspaceSize(c.ctx, fptr))
+    sz = GC.@preserve keep _graph_context_workspace_size_v2(c.ctx, fptr)
+    sz == typemax(Csize_t) && error("BNNSGraphContextGetWorkspaceSize failed")
+    return Int(sz)
+end
+
+const _BNNS_PAGE = 16384   # ≥ the VM page size on both Apple Silicon (16K) and Intel (4K)
+
+"""
+    bnns_graph_workspace(c; func=nothing) -> Vector{UInt8}
+
+A **page-aligned** scratch buffer of the size `func` currently needs
+([`bnns_graph_context_workspace_size`](@ref)), for the `workspace` keyword of
+[`bnns_graph_run!`](@ref) / [`bnns_graph_execute!`](@ref). `BNNSGraphContextExecute`
+requires page alignment, which an ordinary `Vector{UInt8}` does not guarantee.
+Reusing one buffer across calls makes execution allocation-free on the BNNS side;
+without one BNNS allocates its own scratch on every call. The memory is released
+when the vector is garbage collected.
+"""
+function bnns_graph_workspace(c::BNNSGraphContext; func = nothing)
+    n = max(bnns_graph_context_workspace_size(c, func), 1)
+    n = cld(n, _BNNS_PAGE) * _BNNS_PAGE
+    p = Ref{Ptr{Cvoid}}(C_NULL)
+    rc = @ccall posix_memalign(p::Ptr{Ptr{Cvoid}}, _BNNS_PAGE::Csize_t, n::Csize_t)::Cint
+    rc == 0 || throw(OutOfMemoryError())
+    return unsafe_wrap(Vector{UInt8}, Ptr{UInt8}(p[]), n; own = true)
 end
 
 """
-    bnns_graph_context_set_dynamic_shapes!(c, shapes::Vector{bnns_graph_shape_t}; func=nothing) -> c
+    bnns_graph_context_set_batch_size!(c, n; func=nothing) -> c
 
-Bind concrete shapes to a graph compiled with dynamic dimensions
-(`BNNSGraphContextSetDynamicShapes`).
+Set the batch size of a graph whose only dynamic dimension is a shared leading
+(MIL-order) batch dimension (`BNNSGraphContextSetBatchSize`). For anything more
+general use [`bnns_graph_context_set_dynamic_shapes!`](@ref).
 """
-function bnns_graph_context_set_dynamic_shapes!(c::BNNSGraphContext,
-                                                shapes::Vector{LA.bnns_graph_shape_t}; func = nothing)
+function bnns_graph_context_set_batch_size!(c::BNNSGraphContext, n::Integer; func = nothing)
+    n >= 1 || throw(ArgumentError("BNNS: batch size must be ≥ 1"))
     keep, fptr = _fnarg(func)
-    GC.@preserve keep shapes _bnns_check(
-        LA.BNNSGraphContextSetDynamicShapes(c.ctx, fptr, Csize_t(length(shapes)), pointer(shapes)),
-        "BNNSGraphContextSetDynamicShapes")
+    GC.@preserve keep _bnns_check(_graph_context_set_batch_size_v2(c.ctx, fptr, UInt64(n)),
+                                  "BNNSGraphContextSetBatchSize")
     return c
 end
+
+"""
+    bnns_graph_context_set_dynamic_shapes!(c, shapes; func=nothing) -> Vector{Pair{String,Dims}}
+
+Bind concrete input shapes to a graph compiled with dynamic dimensions
+(`BNNSGraphContextSetDynamicShapes`). `shapes` is a collection of
+`name => dims` pairs for (some of) the graph's **inputs**; `dims` is given the
+way Julia sees the array, i.e. `size(A)` of the array you will pass to
+[`bnns_graph_run`](@ref) (the reverse of the MIL shape — see
+[`bnns_graph_arguments`](@ref)). Inputs that are not mentioned keep the model's
+default shape.
+
+Returns the resulting shape of every argument, in execute order, again in Julia
+order. A `0` in an *output* shape means BNNS cannot bound that dimension from the
+input shapes alone (it depends on input values).
+"""
+function bnns_graph_context_set_dynamic_shapes!(c::BNNSGraphContext, shapes; func = nothing)
+    names = bnns_graph_argument_names(c.graph, func)
+    intents = bnns_graph_argument_intents(c.graph, func)
+    bufs = Vector{UInt64}[UInt64[] for _ in names]
+    for (k, dims) in _name_pairs(shapes)
+        i = findfirst(==(k), names)
+        i === nothing && throw(ArgumentError("BNNS: graph has no argument named $(repr(k)); arguments are $(names)"))
+        intents[i] === :out && throw(ArgumentError("BNNS: $(repr(k)) is an output; only input shapes can be set"))
+        bufs[i] = UInt64[reverse(collect(dims))...]
+    end
+    # Outputs get a rank-sized buffer so BNNS can report their deduced shape back.
+    for i in eachindex(names)
+        intents[i] === :out && (bufs[i] = zeros(UInt64, _graph_rank(c, names[i], func)))
+    end
+    keep, fptr = _fnarg(func)
+    GC.@preserve keep bufs begin
+        cs = [_BNNSGraphShape(Csize_t(length(b)), isempty(b) ? Ptr{UInt64}(C_NULL) : pointer(b)) for b in bufs]
+        st = _graph_context_set_dynamic_shapes_v2(c.ctx, fptr, Csize_t(length(cs)), cs)
+        st < 0 && error("BNNSGraphContextSetDynamicShapes failed with status $st")
+    end
+    info = bnns_graph_arguments(c; func)
+    return [names[i] => (intents[i] === :out ? Tuple(Int.(reverse(bufs[i]))) : info[i].size)
+            for i in eachindex(names)]
+end
+
+_graph_rank(c, name, func) = Int(bnns_graph_context_get_tensor(c, name; func, fill_shapes = false).rank)
+
+# Normalise `name => value` collections (a pair, a tuple/vector of pairs, a Dict,
+# a NamedTuple) to `String`-keyed pairs.
+_name_pairs(x::Pair) = (String(first(x)) => last(x),)
+_name_pairs(x::Union{AbstractDict,NamedTuple}) = [String(k) => v for (k, v) in pairs(x)]
+_name_pairs(x::Union{Tuple,AbstractVector}) =
+    all(p -> p isa Pair, x) ? [String(first(p)) => last(p) for p in x] :
+        throw(ArgumentError("BNNS: expected `name => value` pairs"))
 
 """
     bnns_graph_context_get_tensor(c, argument; func=nothing, fill_shapes=true) -> BNNSTensor
@@ -807,31 +1029,207 @@ end
 """
     bnns_graph_execute!(c, arguments::Vector{bnns_graph_argument_t}; func=nothing, workspace=UInt8[]) -> c
 
-Execute `func` with the supplied argument buffers (`BNNSGraphContextExecute`).
-Size `workspace` from [`bnns_graph_context_workspace_size`](@ref).
+Low-level execute (`BNNSGraphContextExecute`): run `func` with raw argument
+buffers, ordered as [`bnns_graph_argument_names`](@ref) reports them (outputs
+first). The caller must keep the memory behind every argument alive for the call.
+Prefer [`bnns_graph_run`](@ref) / [`bnns_graph_run!`](@ref), which build and
+validate the arguments from Julia arrays.
+
+`workspace` must be page-aligned — get one from [`bnns_graph_workspace`](@ref);
+leave it empty to let BNNS allocate its own scratch.
 """
 function bnns_graph_execute!(c::BNNSGraphContext, arguments::Vector{LA.bnns_graph_argument_t};
                              func = nothing, workspace::Vector{UInt8} = UInt8[])
     keep, fptr = _fnarg(func)
+    n = bnns_graph_argument_count(c.graph, func)
+    length(arguments) == n || throw(DimensionMismatch(
+        "BNNS: graph function takes $n arguments, got $(length(arguments))"))
+    if !isempty(workspace)
+        UInt(pointer(workspace)) % _BNNS_PAGE == 0 || throw(ArgumentError(
+            "BNNS: workspace must be page-aligned; allocate it with bnns_graph_workspace"))
+        need = bnns_graph_context_workspace_size(c, func)
+        length(workspace) >= need || throw(DimensionMismatch(
+            "BNNS: workspace has $(length(workspace)) bytes, $need required"))
+    end
     GC.@preserve keep arguments workspace begin
         wptr = isempty(workspace) ? Ptr{Cchar}(C_NULL) : Ptr{Cchar}(pointer(workspace))
-        _bnns_check(LA.BNNSGraphContextExecute(c.ctx, fptr, Csize_t(length(arguments)),
+        _bnns_check(_graph_context_execute_v2(c.ctx, fptr, Csize_t(length(arguments)),
             pointer(arguments), Csize_t(length(workspace)), wptr), "BNNSGraphContextExecute")
     end
     return c
 end
+
+# --- End-to-end inference with Julia arrays -------------------------------------
+
+"""
+    BNNSGraphArgument
+
+Description of one argument of a graph function, as returned by
+[`bnns_graph_arguments`](@ref):
+
+  * `name::String`
+  * `intent::Symbol` — `:in`, `:out` or `:inout`
+  * `eltype::DataType` — Julia element type (`Float16`, `Float32`, `Int32`, `Bool`, …)
+  * `shape::Dims` — the shape as written in the model (MIL / row-major order)
+  * `size::Dims` — `size` of the Julia `Array` to pass for it: `reverse(shape)`
+
+A dimension of `0` (in either tuple) is dynamic and not bound yet.
+"""
+struct BNNSGraphArgument
+    name::String
+    intent::Symbol
+    eltype::DataType
+    shape::Dims
+    size::Dims
+end
+
+function Base.show(io::IO, a::BNNSGraphArgument)
+    print(io, "BNNSGraphArgument(", repr(a.name), ", :", a.intent, ", ", a.eltype,
+          ", shape=", a.shape, ", size=", a.size, ")")
+end
+
+"""
+    bnns_graph_arguments(c::BNNSGraphContext; func=nothing) -> Vector{BNNSGraphArgument}
+    bnns_graph_arguments(g::BNNSGraph; func=nothing)
+
+Names, intents, element types and shapes of every argument of `func`, in execute
+order (outputs first). Given a context, shapes reflect any batch size / dynamic
+shapes already set on it.
+
+## Memory layout: reverse the dimensions
+
+Core ML / MIL tensors are **row-major**; Julia arrays are **column-major**. A MIL
+tensor of shape `[N, C, H, W]` therefore has exactly the memory layout of a Julia
+`Array` of size `(W, H, C, N)`. The graph functions here use that correspondence
+— they pass Julia's memory to BNNS as is, with no copy — so every argument is a
+Julia array whose `size` is the **reverse** of the model's shape
+(`BNNSGraphArgument.size`). In particular a MIL matrix `[rows, cols]` is a Julia
+`(cols, rows)` matrix, i.e. the transpose; use `permutedims` (or pass
+`mil_order=true` to [`bnns_graph_run`](@ref)) when you want model index order.
+BNNS graphs assume contiguous storage and ignore custom strides, so this is the
+only zero-copy mapping.
+"""
+function bnns_graph_arguments(c::BNNSGraphContext; func = nothing)
+    g = c.graph
+    names = bnns_graph_argument_names(g, func)
+    intents = bnns_graph_argument_intents(g, func)
+    return map(names, intents) do name, intent
+        t = bnns_graph_context_get_tensor(c, name; func, fill_shapes = true)
+        shape = ntuple(i -> max(Int(t.shape[i]), 0), Int(t.rank))
+        BNNSGraphArgument(name, intent, _julia_type(t.data_type), shape, reverse(shape))
+    end
+end
+
+bnns_graph_arguments(g::BNNSGraph; func = nothing) =
+    bnns_graph_arguments(BNNSGraphContext(g); func)
+
+"""
+    bnns_graph_run!(c, outputs, inputs; func=nothing, workspace=UInt8[]) -> outputs
+
+Run `func` of the graph behind context `c`, reading `inputs` and writing into the
+preallocated `outputs`. Both are collections of `name => Array` (a pair, a vector
+or tuple of pairs, a `Dict`, or a `NamedTuple`); together they must supply every
+argument of the function exactly once. Each array must be a dense `Array` whose
+element type and `size` match [`bnns_graph_arguments`](@ref) — note the
+**reversed-dimension layout** described there. Nothing is copied: BNNS reads and
+writes the arrays' memory directly.
+
+Pass a reusable page-aligned `workspace` from [`bnns_graph_workspace`](@ref) to
+keep repeated calls allocation-free. A context must not be run from two threads at
+once.
+"""
+function bnns_graph_run!(c::BNNSGraphContext, outputs, inputs; func = nothing,
+                         workspace::Vector{UInt8} = UInt8[])
+    info = bnns_graph_arguments(c; func)
+    given = Dict{String,Array}()
+    for (src, isout) in ((outputs, true), (inputs, false)), (k, A) in _name_pairs(src)
+        i = findfirst(a -> a.name == k, info)
+        i === nothing && throw(ArgumentError(
+            "BNNS: graph has no argument named $(repr(k)); arguments are $([a.name for a in info])"))
+        a = info[i]
+        (isout ? a.intent !== :in : a.intent !== :out) || throw(ArgumentError(
+            "BNNS: $(repr(k)) is an $(a.intent === :in ? "input" : "output"), passed as an $(isout ? "output" : "input")"))
+        haskey(given, k) && throw(ArgumentError("BNNS: argument $(repr(k)) supplied more than once"))
+        A isa Array || throw(ArgumentError(
+            "BNNS: argument $(repr(k)) must be a dense Array, got $(typeof(A)); collect it first"))
+        eltype(A) === a.eltype || throw(ArgumentError(
+            "BNNS: argument $(repr(k)) must have element type $(a.eltype), got $(eltype(A))"))
+        (ndims(A) == length(a.size) && all(d -> a.size[d] == 0 || a.size[d] == size(A, d), 1:ndims(A))) ||
+            throw(DimensionMismatch("BNNS: argument $(repr(k)) must have size $(a.size) " *
+                "(model shape $(a.shape), reversed for column-major storage), got $(size(A))"))
+        given[k] = A
+    end
+    missing_args = [a.name for a in info if !haskey(given, a.name)]
+    isempty(missing_args) || throw(ArgumentError("BNNS: missing graph arguments $(missing_args)"))
+    arrays = Array[given[a.name] for a in info]
+    GC.@preserve arrays begin
+        args = [LA.bnns_graph_argument_t(Ptr{Cvoid}(pointer(A)), Csize_t(sizeof(A))) for A in arrays]
+        _bnns_check(LA.BNNSGraphContextSetArgumentType(c.ctx,
+            LA.BNNSGraphArgumentType(LA.BNNSGraphArgumentTypePointer)), "BNNSGraphContextSetArgumentType")
+        bnns_graph_execute!(c, args; func, workspace)
+    end
+    return outputs
+end
+
+"""
+    bnns_graph_run(c, inputs...; func=nothing, mil_order=false, workspace=UInt8[]) -> Dict{String,Array}
+
+Run `func` on `inputs` (`name => Array` pairs, or a single `Dict`/`NamedTuple`),
+allocating the outputs, and return them keyed by output name.
+
+```julia
+g = AppleAccelerate.BNNSGraph("classifier.mlmodelc")
+c = AppleAccelerate.BNNSGraphContext(g)
+AppleAccelerate.bnns_graph_arguments(c)          # names, eltypes, sizes
+out = AppleAccelerate.bnns_graph_run(c, "image" => img)
+probs = out["probabilities"]
+```
+
+By default arrays use the zero-copy **reversed-dimension** layout
+([`bnns_graph_arguments`](@ref)): pass `size == BNNSGraphArgument.size`. With
+`mil_order=true` inputs and outputs instead have the model's own shape
+(`BNNSGraphArgument.shape`) and index order — `out[n, c, h, w]` means what it
+means in the model — at the cost of one `permutedims` copy per array.
+
+If the graph has dynamic dimensions, bind them first with
+[`bnns_graph_context_set_batch_size!`](@ref) or
+[`bnns_graph_context_set_dynamic_shapes!`](@ref); an output whose shape is still
+unknown throws.
+"""
+function bnns_graph_run(c::BNNSGraphContext, inputs...; func = nothing, mil_order::Bool = false,
+                        workspace::Vector{UInt8} = UInt8[])
+    ins = Pair{String,Any}[]
+    for x in inputs
+        append!(ins, _name_pairs(x))
+    end
+    if mil_order
+        ins = Pair{String,Any}[k => (A isa Array ? _reverse_dims(A) : A) for (k, A) in ins]
+    end
+    outs = Pair{String,Array}[]
+    for a in bnns_graph_arguments(c; func)
+        a.intent === :out || continue
+        all(>(0), a.size) || error("BNNS: output $(repr(a.name)) has unresolved dynamic shape " *
+            "$(a.shape); set the batch size / dynamic shapes on the context first")
+        push!(outs, a.name => Array{a.eltype}(undef, a.size))
+    end
+    bnns_graph_run!(c, outs, ins; func, workspace)
+    return Dict{String,Array}(k => (mil_order ? _reverse_dims(A) : A) for (k, A) in outs)
+end
+
+_reverse_dims(A::Array) = ndims(A) <= 1 ? A : permutedims(A, ndims(A):-1:1)
 
 # =============================================================================
 # Remaining DirectApply kernels
 # =============================================================================
 
 """
-    bnns_in_topk(input::Array{Float32}, targets::Array{Int32}, K; dim=1) -> Array{Bool}
+    bnns_in_topk(input::Array, targets::Array{Int32}, K; dim=1) -> Array{Bool}
 
 For each batch column, test whether the `targets` class index is among the top-`K`
-scores of `input` along Julia dimension `dim` (`BNNSDirectApplyInTopK`).
+scores of `input` along Julia dimension `dim` (`BNNSDirectApplyInTopK`). `input`
+may be `Float32` or `Float16`.
 """
-function bnns_in_topk(input::Array{Float32}, targets::Array{Int32}, K::Integer; dim::Integer = 1)
+function bnns_in_topk(input::Array{<:Union{Float32,Float16}}, targets::Array{Int32}, K::Integer; dim::Integer = 1)
     batch = length(targets)
     out = Array{Bool}(undef, size(targets))
     di = _desc(input); dt = _desc(targets); do_ = _desc(out)

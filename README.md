@@ -18,7 +18,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Sparse linear algebra** via `libSparse` — direct (Cholesky / LDLᵀ / LU / QR) and iterative (CG / GMRES / LSMR) solvers, real and complex
 - **Signal processing** — 1D/2D real & complex FFT (batched, mixed-radix), DCT, convolution, biquad filtering, window functions; cached setups make no-plan `fft(x)` competitive with FFTW and drop the FFTW dependency
 - **SIMD math inside `@simd` loops** via `AppleAccelerate.SIMDMath` — scalar math functions that LLVM turns into SIMD calls, for loops the array API can't express (strided access, values computed on the fly) — **2–4× faster** than a scalar Base loop
-- **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations
+- **Neural-network primitives** via BNNS — Core ML model inference through the BNNS Graph API (`Float16`/`Float32`), plus reductions, top-k, and random generation
 - **Image processing** via vImage — geometry (scale, rotate, affine warp), convolution, morphology, histogram, alpha compositing, and format/colorspace conversion (incl. Y′CbCr)
 
 See the [benchmarks](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/benchmarks/) for full performance comparisons and methodology.
