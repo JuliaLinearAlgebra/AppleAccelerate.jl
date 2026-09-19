@@ -3,6 +3,8 @@ module LibAccelerate
 # Accelerate ships as a macOS *system framework*. Unlike the usual Clang.jl + JLL
 # flow, there is no artifact to load — every Mac already has it. We ccall it by
 # absolute path, mirroring the `libacc` const in the top-level AppleAccelerate module.
+# NOTE: must stay in sync with `ACCELERATE_FRAMEWORK` in gen/generate.jl, which dlopens
+# the same binary for its dead-symbol strip pass and verifies this line at generation time.
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 
 # BNNSGraph opaque handles. In bnns_graph.h these are anonymous structs that all share the
@@ -44,6 +46,40 @@ struct bnns_graph_argument_t
     data_ptr_size::Csize_t
 end
 
+
+@enum CBLAS_ORDER::UInt32 begin
+    CblasRowMajor = 101
+    CblasColMajor = 102
+end
+
+@enum CBLAS_TRANSPOSE::UInt32 begin
+    CblasNoTrans = 111
+    CblasTrans = 112
+    CblasConjTrans = 113
+    AtlasConj = 114
+end
+
+@enum CBLAS_UPLO::UInt32 begin
+    CblasUpper = 121
+    CblasLower = 122
+end
+
+@enum CBLAS_DIAG::UInt32 begin
+    CblasNonUnit = 131
+    CblasUnit = 132
+end
+
+@enum CBLAS_SIDE::UInt32 begin
+    CblasLeft = 141
+    CblasRight = 142
+end
+
+# typedef void ( * BLASParamErrorProc ) ( const char * funcName , const char * paramName , const int * paramPos , const int * paramValue )
+const BLASParamErrorProc = Ptr{Cvoid}
+
+function SetBLASParamErrorProc(__ErrorProc)
+    @ccall libacc.SetBLASParamErrorProc(__ErrorProc::BLASParamErrorProc)::Cvoid
+end
 
 const vDSP_Length = Culong
 
@@ -1838,6 +1874,13 @@ mutable struct vDSP_DFT_SetupStructD end
 
 const vDSP_DFT_SetupD = Ptr{vDSP_DFT_SetupStructD}
 
+const vDSP_DFT_Direction = Cint
+
+@enum var"##Ctag#280"::Int32 begin
+    vDSP_DFT_FORWARD = 1
+    vDSP_DFT_INVERSE = -1
+end
+
 mutable struct vDSP_DFT_Interleaved_SetupStruct end
 
 const vDSP_DFT_Interleaved_Setup = Ptr{vDSP_DFT_Interleaved_SetupStruct}
@@ -1846,24 +1889,31 @@ mutable struct vDSP_DFT_Interleaved_SetupStructD end
 
 const vDSP_DFT_Interleaved_SetupD = Ptr{vDSP_DFT_Interleaved_SetupStructD}
 
+const vDSP_DFT_RealtoComplex = Bool
+
+@enum var"##Ctag#281"::UInt32 begin
+    vDSP_DFT_Interleaved_ComplextoComplex = 0
+    vDSP_DFT_Interleaved_RealtoComplex = 1
+end
+
 function vDSP_DFT_CreateSetup(__Previous, __Length)
     @ccall libacc.vDSP_DFT_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length)::vDSP_DFT_Setup
 end
 
 function vDSP_DFT_zop_CreateSetup(__Previous, __Length, __Direction)
-    @ccall libacc.vDSP_DFT_zop_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Direction::Cint)::vDSP_DFT_Setup
+    @ccall libacc.vDSP_DFT_zop_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Direction::vDSP_DFT_Direction)::vDSP_DFT_Setup
 end
 
 function vDSP_DFT_zop_CreateSetupD(__Previous, __Length, __Direction)
-    @ccall libacc.vDSP_DFT_zop_CreateSetupD(__Previous::vDSP_DFT_SetupD, __Length::vDSP_Length, __Direction::Cint)::vDSP_DFT_SetupD
+    @ccall libacc.vDSP_DFT_zop_CreateSetupD(__Previous::vDSP_DFT_SetupD, __Length::vDSP_Length, __Direction::vDSP_DFT_Direction)::vDSP_DFT_SetupD
 end
 
 function vDSP_DFT_zrop_CreateSetup(__Previous, __Length, __Direction)
-    @ccall libacc.vDSP_DFT_zrop_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Direction::Cint)::vDSP_DFT_Setup
+    @ccall libacc.vDSP_DFT_zrop_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Direction::vDSP_DFT_Direction)::vDSP_DFT_Setup
 end
 
 function vDSP_DFT_zrop_CreateSetupD(__Previous, __Length, __Direction)
-    @ccall libacc.vDSP_DFT_zrop_CreateSetupD(__Previous::vDSP_DFT_SetupD, __Length::vDSP_Length, __Direction::Cint)::vDSP_DFT_SetupD
+    @ccall libacc.vDSP_DFT_zrop_CreateSetupD(__Previous::vDSP_DFT_SetupD, __Length::vDSP_Length, __Direction::vDSP_DFT_Direction)::vDSP_DFT_SetupD
 end
 
 function vDSP_DFT_DestroySetup(__Setup)
@@ -1875,7 +1925,7 @@ function vDSP_DFT_DestroySetupD(__Setup)
 end
 
 function vDSP_DFT_zop(__Setup, __Ir, __Ii, __Is, __Or, __Oi, __Os, __Direction)
-    @ccall libacc.vDSP_DFT_zop(__Setup::Ptr{vDSP_DFT_SetupStruct}, __Ir::Ptr{Cfloat}, __Ii::Ptr{Cfloat}, __Is::vDSP_Stride, __Or::Ptr{Cfloat}, __Oi::Ptr{Cfloat}, __Os::vDSP_Stride, __Direction::Cint)::Cvoid
+    @ccall libacc.vDSP_DFT_zop(__Setup::Ptr{vDSP_DFT_SetupStruct}, __Ir::Ptr{Cfloat}, __Ii::Ptr{Cfloat}, __Is::vDSP_Stride, __Or::Ptr{Cfloat}, __Oi::Ptr{Cfloat}, __Os::vDSP_Stride, __Direction::vDSP_DFT_Direction)::Cvoid
 end
 
 function vDSP_DFT_Execute(__Setup, __Ir, __Ii, __Or, __Oi)
@@ -1886,8 +1936,16 @@ function vDSP_DFT_ExecuteD(__Setup, __Ir, __Ii, __Or, __Oi)
     @ccall libacc.vDSP_DFT_ExecuteD(__Setup::Ptr{vDSP_DFT_SetupStructD}, __Ir::Ptr{Cdouble}, __Ii::Ptr{Cdouble}, __Or::Ptr{Cdouble}, __Oi::Ptr{Cdouble})::Cvoid
 end
 
+const vDSP_DCT_Type = Cint
+
+@enum var"##Ctag#282"::UInt32 begin
+    vDSP_DCT_II = 2
+    vDSP_DCT_III = 3
+    vDSP_DCT_IV = 4
+end
+
 function vDSP_DCT_CreateSetup(__Previous, __Length, __Type)
-    @ccall libacc.vDSP_DCT_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Type::Cint)::vDSP_DFT_Setup
+    @ccall libacc.vDSP_DCT_CreateSetup(__Previous::vDSP_DFT_Setup, __Length::vDSP_Length, __Type::vDSP_DCT_Type)::vDSP_DFT_Setup
 end
 
 function vDSP_DCT_Execute(__Setup, __Input, __Output)
@@ -1895,11 +1953,11 @@ function vDSP_DCT_Execute(__Setup, __Input, __Output)
 end
 
 function vDSP_DFT_Interleaved_CreateSetup(Previous, Length, Direction, RealtoComplex)
-    @ccall libacc.vDSP_DFT_Interleaved_CreateSetup(Previous::vDSP_DFT_Interleaved_Setup, Length::vDSP_Length, Direction::Cint, RealtoComplex::Cint)::vDSP_DFT_Interleaved_Setup
+    @ccall libacc.vDSP_DFT_Interleaved_CreateSetup(Previous::vDSP_DFT_Interleaved_Setup, Length::vDSP_Length, Direction::vDSP_DFT_Direction, RealtoComplex::vDSP_DFT_RealtoComplex)::vDSP_DFT_Interleaved_Setup
 end
 
 function vDSP_DFT_Interleaved_CreateSetupD(Previous, Length, Direction, RealtoComplex)
-    @ccall libacc.vDSP_DFT_Interleaved_CreateSetupD(Previous::vDSP_DFT_Interleaved_SetupD, Length::vDSP_Length, Direction::Cint, RealtoComplex::Cint)::vDSP_DFT_Interleaved_SetupD
+    @ccall libacc.vDSP_DFT_Interleaved_CreateSetupD(Previous::vDSP_DFT_Interleaved_SetupD, Length::vDSP_Length, Direction::vDSP_DFT_Direction, RealtoComplex::vDSP_DFT_RealtoComplex)::vDSP_DFT_Interleaved_SetupD
 end
 
 function vDSP_DFT_Interleaved_Execute(Setup, Iri, Ori)
@@ -2014,12 +2072,12 @@ function vDSP_vrampmuladd2_s8_24(__I0, __I1, __IS, __Start, __Step, __O0, __O1, 
     @ccall libacc.vDSP_vrampmuladd2_s8_24(__I0::Ptr{Cint}, __I1::Ptr{Cint}, __IS::vDSP_Stride, __Start::Ptr{Cint}, __Step::Ptr{Cint}, __O0::Ptr{Cint}, __O1::Ptr{Cint}, __OS::vDSP_Stride, __N::vDSP_Length)::Cvoid
 end
 
-@enum var"##Ctag#280"::Int32 begin
+@enum var"##Ctag#283"::Int32 begin
     FFT_FORWARD = 1
     FFT_INVERSE = -1
 end
 
-@enum var"##Ctag#281"::UInt32 begin
+@enum var"##Ctag#284"::UInt32 begin
     FFT_RADIX2 = 0
     FFT_RADIX3 = 1
     FFT_RADIX5 = 2
@@ -2380,7 +2438,7 @@ end
 function Base.getproperty(x::Ptr{vU128}, f::Symbol)
     f === :v && return Ptr{vUInt32}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#351"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#361"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2410,7 +2468,7 @@ end
 function Base.getproperty(x::Ptr{vS128}, f::Symbol)
     f === :v && return Ptr{vUInt32}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#344"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#354"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2440,7 +2498,7 @@ end
 function Base.getproperty(x::Ptr{vU256}, f::Symbol)
     f === :v && return Ptr{NTuple{2, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#353"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#363"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2470,7 +2528,7 @@ end
 function Base.getproperty(x::Ptr{vS256}, f::Symbol)
     f === :v && return Ptr{NTuple{2, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#357"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#367"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2500,7 +2558,7 @@ end
 function Base.getproperty(x::Ptr{vU512}, f::Symbol)
     f === :v && return Ptr{NTuple{4, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#359"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#369"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2530,7 +2588,7 @@ end
 function Base.getproperty(x::Ptr{vS512}, f::Symbol)
     f === :v && return Ptr{NTuple{4, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#348"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#358"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2560,7 +2618,7 @@ end
 function Base.getproperty(x::Ptr{vU1024}, f::Symbol)
     f === :v && return Ptr{NTuple{8, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#355"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#365"}(x + 0)
     return getfield(x, f)
 end
 
@@ -2590,7 +2648,7 @@ end
 function Base.getproperty(x::Ptr{vS1024}, f::Symbol)
     f === :v && return Ptr{NTuple{8, vUInt32}}(x + 0)
     f === :vs && return Ptr{Cvoid}(x + 0)
-    f === :s && return Ptr{var"##Ctag#346"}(x + 0)
+    f === :s && return Ptr{var"##Ctag#356"}(x + 0)
     return getfield(x, f)
 end
 
@@ -3030,41 +3088,7 @@ end
 
 const __SPARSE_float_complex = ComplexF32
 
-@enum CBLAS_ORDER::UInt32 begin
-    CblasRowMajor = 101
-    CblasColMajor = 102
-end
-
-@enum CBLAS_TRANSPOSE::UInt32 begin
-    CblasNoTrans = 111
-    CblasTrans = 112
-    CblasConjTrans = 113
-    AtlasConj = 114
-end
-
-@enum CBLAS_UPLO::UInt32 begin
-    CblasUpper = 121
-    CblasLower = 122
-end
-
-@enum CBLAS_DIAG::UInt32 begin
-    CblasNonUnit = 131
-    CblasUnit = 132
-end
-
-@enum CBLAS_SIDE::UInt32 begin
-    CblasLeft = 141
-    CblasRight = 142
-end
-
-# typedef void ( * BLASParamErrorProc ) ( const char * funcName , const char * paramName , const int * paramPos , const int * paramValue )
-const BLASParamErrorProc = Ptr{Cvoid}
-
-function SetBLASParamErrorProc(__ErrorProc)
-    @ccall libacc.SetBLASParamErrorProc(__ErrorProc::BLASParamErrorProc)::Cvoid
-end
-
-@enum var"##Ctag#282"::UInt32 begin
+@enum var"##Ctag#285"::UInt32 begin
     SparseOrdinary = 0
     SparseTriangular = 1
     SparseUnitTriangular = 2
@@ -3409,7 +3433,7 @@ end
 
 const SparseStatus_t = Cint
 
-@enum var"##Ctag#283"::Int32 begin
+@enum var"##Ctag#286"::Int32 begin
     SparseStatusOK = 0
     SparseFactorizationFailed = -1
     SparseMatrixIsSingular = -2
@@ -3420,7 +3444,7 @@ end
 
 const SparseFactorization_t = UInt8
 
-@enum var"##Ctag#284"::UInt32 begin
+@enum var"##Ctag#287"::UInt32 begin
     SparseFactorizationCholesky = 0
     SparseFactorizationLDLT = 1
     SparseFactorizationLDLTUnpivoted = 2
@@ -3436,13 +3460,13 @@ end
 
 const SparseControl_t = UInt32
 
-@enum var"##Ctag#285"::UInt32 begin
+@enum var"##Ctag#288"::UInt32 begin
     SparseDefaultControl = 0
 end
 
 const SparseOrder_t = UInt8
 
-@enum var"##Ctag#286"::UInt32 begin
+@enum var"##Ctag#289"::UInt32 begin
     SparseOrderDefault = 0
     SparseOrderUser = 1
     SparseOrderAMD = 2
@@ -3453,7 +3477,7 @@ end
 
 const SparseScaling_t = UInt8
 
-@enum var"##Ctag#287"::UInt32 begin
+@enum var"##Ctag#290"::UInt32 begin
     SparseScalingDefault = 0
     SparseScalingUser = 1
     SparseScalingEquilibriationInf = 2
@@ -3655,7 +3679,7 @@ end
 
 const SparseSubfactor_t = UInt8
 
-@enum var"##Ctag#288"::UInt32 begin
+@enum var"##Ctag#291"::UInt32 begin
     SparseSubfactorInvalid = 0
     SparseSubfactorP = 1
     SparseSubfactorS = 2
@@ -3799,13 +3823,13 @@ end
 
 const SparseUpdate_t = UInt8
 
-@enum var"##Ctag#289"::UInt32 begin
+@enum var"##Ctag#292"::UInt32 begin
     SparseUpdatePartialRefactor = 0
 end
 
 const SparsePreconditioner_t = Cint
 
-@enum var"##Ctag#290"::UInt32 begin
+@enum var"##Ctag#293"::UInt32 begin
     SparsePreconditionerNone = 0
     SparsePreconditionerUser = 1
     SparsePreconditionerDiagonal = 2
@@ -3838,7 +3862,7 @@ end
 
 const SparseIterativeStatus_t = Cint
 
-@enum var"##Ctag#291"::Int32 begin
+@enum var"##Ctag#294"::Int32 begin
     SparseIterativeConverged = 0
     SparseIterativeMaxIterations = 1
     SparseIterativeParameterError = -1
@@ -3860,7 +3884,7 @@ end
 
 const SparseGMRESVariant_t = UInt8
 
-@enum var"##Ctag#292"::UInt32 begin
+@enum var"##Ctag#295"::UInt32 begin
     SparseVariantDQGMRES = 0
     SparseVariantGMRES = 1
     SparseVariantFGMRES = 2
@@ -3878,7 +3902,7 @@ end
 
 const SparseLSMRConvergenceTest_t = Cint
 
-@enum var"##Ctag#293"::UInt32 begin
+@enum var"##Ctag#296"::UInt32 begin
     SparseLSMRCTDefault = 0
     SparseLSMRCTFongSaunders = 1
 end
@@ -3896,11 +3920,11 @@ struct SparseLSMROptions
     reportStatus::Ptr{Cvoid}
 end
 
-struct var"##Ctag#349"
+struct var"##Ctag#359"
     data::NTuple{256, UInt8}
 end
 
-function Base.getproperty(x::Ptr{var"##Ctag#349"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#359"}, f::Symbol)
     f === :base && return Ptr{_SparseIterativeMethodBaseOptions}(x + 0)
     f === :cg && return Ptr{SparseCGOptions}(x + 0)
     f === :gmres && return Ptr{SparseGMRESOptions}(x + 0)
@@ -3909,18 +3933,18 @@ function Base.getproperty(x::Ptr{var"##Ctag#349"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#349", f::Symbol)
-    r = Ref{var"##Ctag#349"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#349"}, r)
+function Base.getproperty(x::var"##Ctag#359", f::Symbol)
+    r = Ref{var"##Ctag#359"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#359"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#349"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#359"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
-function Base.propertynames(x::var"##Ctag#349", private::Bool = false)
+function Base.propertynames(x::var"##Ctag#359", private::Bool = false)
     (:base, :cg, :gmres, :lsmr, :padding, if private
             fieldnames(typeof(x))
         else
@@ -3934,7 +3958,7 @@ end
 
 function Base.getproperty(x::Ptr{SparseIterativeMethod}, f::Symbol)
     f === :method && return Ptr{Cint}(x + 0)
-    f === :options && return Ptr{var"##Ctag#349"}(x + 8)
+    f === :options && return Ptr{var"##Ctag#359"}(x + 8)
     return getfield(x, f)
 end
 
@@ -3959,7 +3983,7 @@ end
 
 const _SparseIterativeMethod_t = Cint
 
-@enum var"##Ctag#298"::UInt32 begin
+@enum var"##Ctag#301"::UInt32 begin
     _SparseMethodCG = 0
     _SparseMethodGMRES = 1
     _SparseMethodLSMR = 2
@@ -4389,7 +4413,7 @@ function _SparseSpMV_Complex_Float(alpha, A, x, accumulate, y)
     @ccall libacc._SparseSpMV_Complex_Float(alpha::__SPARSE_float_complex, A::SparseMatrix_Complex_Float, x::DenseMatrix_Complex_Float, accumulate::Bool, y::DenseMatrix_Complex_Float)::Cvoid
 end
 
-@enum var"##Ctag#299"::UInt32 begin
+@enum var"##Ctag#302"::UInt32 begin
     BNNSDataTypeFloatBit = 65536
     BNNSDataTypeFloat16 = 65552
     BNNSDataTypeFloat32 = 65568
@@ -4423,7 +4447,7 @@ end
 
 const BNNSDataType = UInt32
 
-@enum var"##Ctag#300"::UInt32 begin
+@enum var"##Ctag#303"::UInt32 begin
     BNNSPoolingFunctionMax = 0
     BNNSPoolingFunctionAverageCountIncludePadding = 1
     BNNSPoolingFunctionAverageCountExcludePadding = 2
@@ -4434,7 +4458,7 @@ end
 
 const BNNSPoolingFunction = UInt32
 
-@enum var"##Ctag#301"::UInt32 begin
+@enum var"##Ctag#304"::UInt32 begin
     BNNSActivationFunctionIdentity = 0
     BNNSActivationFunctionRectifiedLinear = 1
     BNNSActivationFunctionLeakyRectifiedLinear = 2
@@ -4476,13 +4500,13 @@ end
 
 const BNNSActivationFunction = UInt32
 
-@enum var"##Ctag#302"::UInt32 begin
+@enum var"##Ctag#305"::UInt32 begin
     BNNSFlagsUseClientPtr = 1
 end
 
 const BNNSFlags = UInt32
 
-@enum var"##Ctag#303"::UInt32 begin
+@enum var"##Ctag#306"::UInt32 begin
     BNNSLossFunctionSoftmaxCrossEntropy = 1
     BNNSLossFunctionSigmoidCrossEntropy = 2
     BNNSLossFunctionMeanSquareError = 3
@@ -4497,7 +4521,7 @@ end
 
 const BNNSLossFunction = UInt32
 
-@enum var"##Ctag#304"::UInt32 begin
+@enum var"##Ctag#307"::UInt32 begin
     BNNSLossReductionNone = 0
     BNNSLossReductionSum = 1
     BNNSLossReductionWeightedMean = 2
@@ -4507,7 +4531,7 @@ end
 
 const BNNSLossReductionFunction = UInt32
 
-@enum var"##Ctag#305"::UInt32 begin
+@enum var"##Ctag#308"::UInt32 begin
     BNNSArithmeticAdd = 0
     BNNSArithmeticSubtract = 1
     BNNSArithmeticMultiply = 2
@@ -4553,7 +4577,7 @@ end
 
 const BNNSArithmeticFunction = UInt32
 
-@enum var"##Ctag#306"::UInt32 begin
+@enum var"##Ctag#309"::UInt32 begin
     BNNSConstant = 0
     BNNSSample = 1
     BNNSParameter = 2
@@ -4561,7 +4585,7 @@ end
 
 const BNNSDescriptorType = UInt32
 
-@enum var"##Ctag#307"::UInt32 begin
+@enum var"##Ctag#310"::UInt32 begin
     BNNSOptimizerFunctionSGDMomentum = 1
     BNNSOptimizerFunctionAdam = 2
     BNNSOptimizerFunctionRMSProp = 3
@@ -4578,7 +4602,7 @@ end
 
 const BNNSOptimizerFunction = UInt32
 
-@enum var"##Ctag#308"::UInt32 begin
+@enum var"##Ctag#311"::UInt32 begin
     BNNSOptimizerRegularizationNone = 0
     BNNSOptimizerRegularizationL1 = 1
     BNNSOptimizerRegularizationL2 = 2
@@ -4586,7 +4610,7 @@ end
 
 const BNNSOptimizerRegularizationFunction = UInt32
 
-@enum var"##Ctag#309"::UInt32 begin
+@enum var"##Ctag#312"::UInt32 begin
     BNNSSGDMomentumVariant0 = 0
     BNNSSGDMomentumVariant1 = 1
     BNNSSGDMomentumVariant2 = 2
@@ -4594,7 +4618,7 @@ end
 
 const BNNSOptimizerSGDMomentumVariant = UInt32
 
-@enum var"##Ctag#310"::UInt32 begin
+@enum var"##Ctag#313"::UInt32 begin
     BNNSOptimizerClippingNone = 0
     BNNSOptimizerClippingByValue = 1
     BNNSOptimizerClippingByNorm = 2
@@ -4603,13 +4627,13 @@ end
 
 const BNNSOptimizerClippingFunction = UInt32
 
-@enum var"##Ctag#311"::UInt32 begin
+@enum var"##Ctag#314"::UInt32 begin
     BNNSL2Norm = 1
 end
 
 const BNNSNormType = UInt32
 
-@enum var"##Ctag#312"::UInt32 begin
+@enum var"##Ctag#315"::UInt32 begin
     BNNSConvolution = 0
     BNNSFullyConnected = 1
     BNNSBatchNorm = 2
@@ -4623,7 +4647,7 @@ end
 
 const BNNSFilterType = UInt32
 
-@enum var"##Ctag#313"::UInt32 begin
+@enum var"##Ctag#316"::UInt32 begin
     BNNSReduceFunctionMax = 0
     BNNSReduceFunctionMin = 1
     BNNSReduceFunctionArgMax = 2
@@ -4647,14 +4671,14 @@ end
 
 const BNNSReduceFunction = UInt32
 
-@enum var"##Ctag#314"::UInt32 begin
+@enum var"##Ctag#317"::UInt32 begin
     BNNSLayerFlagsLSTMBidirectional = 1
     BNNSLayerFlagsLSTMDefaultActivations = 2
 end
 
 const BNNSLayerFlags = UInt32
 
-@enum var"##Ctag#315"::UInt32 begin
+@enum var"##Ctag#318"::UInt32 begin
     BNNSDataLayoutVector = 65536
     BNNSDataLayout1DLastMajor = 98304
     BNNSDataLayout1DFirstMajor = 98305
@@ -4687,14 +4711,14 @@ end
 
 const BNNSDataLayout = UInt32
 
-@enum var"##Ctag#316"::UInt32 begin
+@enum var"##Ctag#319"::UInt32 begin
     BNNSInterpolationMethodNearest = 0
     BNNSInterpolationMethodLinear = 1
 end
 
 const BNNSInterpolationMethod = UInt32
 
-@enum var"##Ctag#317"::UInt32 begin
+@enum var"##Ctag#320"::UInt32 begin
     BNNSLinearSamplingDefault = 0
     BNNSLinearSamplingAlignCorners = 1
     BNNSLinearSamplingUnalignCorners = 2
@@ -4704,7 +4728,7 @@ end
 
 const BNNSLinearSamplingMode = UInt32
 
-@enum var"##Ctag#318"::UInt32 begin
+@enum var"##Ctag#321"::UInt32 begin
     BNNSCornersHeightFirst = 0
     BNNSCornersWidthFirst = 1
     BNNSCenterSizeHeightFirst = 2
@@ -4713,7 +4737,7 @@ end
 
 const BNNSBoxCoordinateMode = UInt32
 
-@enum var"##Ctag#319"::UInt32 begin
+@enum var"##Ctag#322"::UInt32 begin
     BNNSPaddingModeConstant = 0
     BNNSPaddingModeReflect = 1
     BNNSPaddingModeSymmetric = 2
@@ -4721,7 +4745,7 @@ end
 
 const BNNSPaddingMode = UInt32
 
-@enum var"##Ctag#320"::UInt32 begin
+@enum var"##Ctag#323"::UInt32 begin
     BNNSRelationalOperatorEqual = 0
     BNNSRelationalOperatorLess = 1
     BNNSRelationalOperatorLessEqual = 2
@@ -4738,52 +4762,52 @@ end
 
 const BNNSRelationalOperator = UInt32
 
-@enum var"##Ctag#321"::UInt32 begin
+@enum var"##Ctag#324"::UInt32 begin
     BNNSPointerSpecifierAlpha = 0
     BNNSPointerSpecifierBeta = 1
 end
 
 const BNNSPointerSpecifier = UInt32
 
-@enum var"##Ctag#322"::UInt32 begin
+@enum var"##Ctag#325"::UInt32 begin
     BNNSNDArrayFlagBackpropSet = 0
     BNNSNDArrayFlagBackpropAccumulate = 1
 end
 
 const BNNSNDArrayFlags = UInt32
 
-@enum var"##Ctag#323"::UInt32 begin
+@enum var"##Ctag#326"::UInt32 begin
     BNNSEmbeddingFlagScaleGradientByFrequency = 1
 end
 
 const BNNSEmbeddingFlags = UInt32
 
-@enum var"##Ctag#324"::UInt32 begin
+@enum var"##Ctag#327"::UInt32 begin
     BNNSQuantizerFunctionQuantize = 0
     BNNSQuantizerFunctionDequantize = 1
 end
 
 const BNNSQuantizerFunction = UInt32
 
-@enum var"##Ctag#325"::UInt32 begin
+@enum var"##Ctag#328"::UInt32 begin
     BNNSRandomGeneratorMethodAES_CTR = 0
 end
 
 const BNNSRandomGeneratorMethod = UInt32
 
-@enum var"##Ctag#326"::UInt32 begin
+@enum var"##Ctag#329"::UInt32 begin
     BNNSSparsityTypeUnstructured = 0
 end
 
 const BNNSSparsityType = UInt32
 
-@enum var"##Ctag#327"::UInt32 begin
+@enum var"##Ctag#330"::UInt32 begin
     BNNSTargetSystemGeneric = 0
 end
 
 const BNNSTargetSystem = UInt32
 
-@enum var"##Ctag#328"::UInt32 begin
+@enum var"##Ctag#331"::UInt32 begin
     BNNSShuffleTypePixelShuffleNCHW = 0
     BNNSShuffleTypePixelUnshuffleNCHW = 1
     BNNSShuffleTypeDepthToSpaceNCHW = 2
@@ -5389,7 +5413,7 @@ const bnns_graph_realloc_fn_t = Ptr{Cvoid}
 # typedef void ( * bnns_graph_free_all_fn_t ) ( void * _Nullable user_memory_context , size_t user_memory_context_size )
 const bnns_graph_free_all_fn_t = Ptr{Cvoid}
 
-@enum var"##Ctag#329"::UInt32 begin
+@enum var"##Ctag#332"::UInt32 begin
     BNNSGraphMessageLevelInfo = 1
     BNNSGraphMessageLevelUnsupported = 2
     BNNSGraphMessageLevelWarning = 4
@@ -5428,7 +5452,7 @@ function BNNSGraphCompileOptionsGetGenerateDebugInfo(options)
     @ccall libacc.BNNSGraphCompileOptionsGetGenerateDebugInfo(options::bnns_graph_compile_options_t)::Bool
 end
 
-@enum var"##Ctag#330"::UInt32 begin
+@enum var"##Ctag#333"::UInt32 begin
     BNNSGraphOptimizationPreferencePerformance = 0
     BNNSGraphOptimizationPreferenceIRSize = 1
 end
@@ -5503,7 +5527,7 @@ function BNNSGraphGetFunctionNames(graph, function_name_count, function_names)
     @ccall libacc.BNNSGraphGetFunctionNames(graph::bnns_graph_t, function_name_count::Csize_t, function_names::Ptr{Ptr{Cchar}})::Cint
 end
 
-@enum var"##Ctag#331"::UInt32 begin
+@enum var"##Ctag#334"::UInt32 begin
     BNNSGraphArgumentIntentIn = 1
     BNNSGraphArgumentIntentOut = 2
     BNNSGraphArgumentIntentInOut = 3
@@ -5523,7 +5547,7 @@ function BNNSGraphGetArgumentInterleaveFactors(graph, _function, argument_count,
     @ccall libacc.BNNSGraphGetArgumentInterleaveFactors(graph::bnns_graph_t, _function::Ptr{Cchar}, argument_count::Csize_t, argument_interleave::Ptr{Ptr{UInt16}}, argument_interleave_counts::Ptr{Csize_t})::Cint
 end
 
-@enum var"##Ctag#332"::UInt32 begin
+@enum var"##Ctag#335"::UInt32 begin
     BNNSGraphArgumentTypePointer = 0
     BNNSGraphArgumentTypeTensor = 2
 end
@@ -5976,79 +6000,13 @@ function BNNSFilterCreateVectorActivationLayer(in_desc, out_desc, activation, fi
     @ccall libacc.BNNSFilterCreateVectorActivationLayer(in_desc::Ptr{BNNSVectorDescriptor}, out_desc::Ptr{BNNSVectorDescriptor}, activation::Ptr{BNNSActivation}, filter_params::Ptr{BNNSFilterParameters})::Ptr{Cvoid}
 end
 
-struct var"##Ctag#333"
-    data::Ptr{Cvoid}
-    size::Cint
-end
-function Base.getproperty(x::Ptr{var"##Ctag#333"}, f::Symbol)
-    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
-    f === :size && return Ptr{Cint}(x + 0)
-    return getfield(x, f)
-end
-
-function Base.getproperty(x::var"##Ctag#333", f::Symbol)
-    r = Ref{var"##Ctag#333"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#333"}, r)
-    fptr = getproperty(ptr, f)
-    GC.@preserve r unsafe_load(fptr)
-end
-
-function Base.setproperty!(x::Ptr{var"##Ctag#333"}, f::Symbol, v)
-    unsafe_store!(getproperty(x, f), v)
-end
-
-
-struct var"##Ctag#334"
-    data::Ptr{Cvoid}
-    size::Cint
-end
-function Base.getproperty(x::Ptr{var"##Ctag#334"}, f::Symbol)
-    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
-    f === :size && return Ptr{Cint}(x + 0)
-    return getfield(x, f)
-end
-
-function Base.getproperty(x::var"##Ctag#334", f::Symbol)
-    r = Ref{var"##Ctag#334"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#334"}, r)
-    fptr = getproperty(ptr, f)
-    GC.@preserve r unsafe_load(fptr)
-end
-
-function Base.setproperty!(x::Ptr{var"##Ctag#334"}, f::Symbol, v)
-    unsafe_store!(getproperty(x, f), v)
-end
-
-
-struct var"##Ctag#335"
-    data::Ptr{Cvoid}
-    size::Cint
-end
-function Base.getproperty(x::Ptr{var"##Ctag#335"}, f::Symbol)
-    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
-    f === :size && return Ptr{Cint}(x + 0)
-    return getfield(x, f)
-end
-
-function Base.getproperty(x::var"##Ctag#335", f::Symbol)
-    r = Ref{var"##Ctag#335"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#335"}, r)
-    fptr = getproperty(ptr, f)
-    GC.@preserve r unsafe_load(fptr)
-end
-
-function Base.setproperty!(x::Ptr{var"##Ctag#335"}, f::Symbol, v)
-    unsafe_store!(getproperty(x, f), v)
-end
-
-
 struct var"##Ctag#336"
-    rank::Cint
-    shape::Ptr{Cint}
+    data::Ptr{Cvoid}
+    size::Cint
 end
 function Base.getproperty(x::Ptr{var"##Ctag#336"}, f::Symbol)
-    f === :rank && return Ptr{Cint}(x + 0)
-    f === :shape && return Ptr{Ptr{Cint}}(x + 0)
+    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
+    f === :size && return Ptr{Cint}(x + 0)
     return getfield(x, f)
 end
 
@@ -6064,13 +6022,35 @@ function Base.setproperty!(x::Ptr{var"##Ctag#336"}, f::Symbol, v)
 end
 
 
-struct var"##Ctag#338"
-    size::Cint
+struct var"##Ctag#337"
     data::Ptr{Cvoid}
+    size::Cint
+end
+function Base.getproperty(x::Ptr{var"##Ctag#337"}, f::Symbol)
+    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
+    f === :size && return Ptr{Cint}(x + 0)
+    return getfield(x, f)
+end
+
+function Base.getproperty(x::var"##Ctag#337", f::Symbol)
+    r = Ref{var"##Ctag#337"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#337"}, r)
+    fptr = getproperty(ptr, f)
+    GC.@preserve r unsafe_load(fptr)
+end
+
+function Base.setproperty!(x::Ptr{var"##Ctag#337"}, f::Symbol, v)
+    unsafe_store!(getproperty(x, f), v)
+end
+
+
+struct var"##Ctag#338"
+    data::Ptr{Cvoid}
+    size::Cint
 end
 function Base.getproperty(x::Ptr{var"##Ctag#338"}, f::Symbol)
-    f === :size && return Ptr{Cint}(x + 0)
     f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
+    f === :size && return Ptr{Cint}(x + 0)
     return getfield(x, f)
 end
 
@@ -6086,10 +6066,54 @@ function Base.setproperty!(x::Ptr{var"##Ctag#338"}, f::Symbol, v)
 end
 
 
-struct var"##Ctag#342"
+struct var"##Ctag#339"
+    rank::Cint
+    shape::Ptr{UInt64}
+end
+function Base.getproperty(x::Ptr{var"##Ctag#339"}, f::Symbol)
+    f === :rank && return Ptr{Cint}(x + 0)
+    f === :shape && return Ptr{Ptr{UInt64}}(x + 0)
+    return getfield(x, f)
+end
+
+function Base.getproperty(x::var"##Ctag#339", f::Symbol)
+    r = Ref{var"##Ctag#339"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#339"}, r)
+    fptr = getproperty(ptr, f)
+    GC.@preserve r unsafe_load(fptr)
+end
+
+function Base.setproperty!(x::Ptr{var"##Ctag#339"}, f::Symbol, v)
+    unsafe_store!(getproperty(x, f), v)
+end
+
+
+struct var"##Ctag#341"
+    size::Cint
+    data::Ptr{Cvoid}
+end
+function Base.getproperty(x::Ptr{var"##Ctag#341"}, f::Symbol)
+    f === :size && return Ptr{Cint}(x + 0)
+    f === :data && return Ptr{Ptr{Cvoid}}(x + 0)
+    return getfield(x, f)
+end
+
+function Base.getproperty(x::var"##Ctag#341", f::Symbol)
+    r = Ref{var"##Ctag#341"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#341"}, r)
+    fptr = getproperty(ptr, f)
+    GC.@preserve r unsafe_load(fptr)
+end
+
+function Base.setproperty!(x::Ptr{var"##Ctag#341"}, f::Symbol, v)
+    unsafe_store!(getproperty(x, f), v)
+end
+
+
+struct var"##Ctag#345"
     data_ptr_size::Cint
 end
-function Base.getproperty(x::Ptr{var"##Ctag#342"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#345"}, f::Symbol)
     f === :tensor && return Ptr{Ptr{Cint}}(x + 0)
     f === :descriptor && return Ptr{Ptr{Cint}}(x + 0)
     f === :data_ptr && return Ptr{Ptr{Cvoid}}(x + 0)
@@ -6097,14 +6121,14 @@ function Base.getproperty(x::Ptr{var"##Ctag#342"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#342", f::Symbol)
-    r = Ref{var"##Ctag#342"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#342"}, r)
+function Base.getproperty(x::var"##Ctag#345", f::Symbol)
+    r = Ref{var"##Ctag#345"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#345"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#342"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#345"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
@@ -6145,13 +6169,2484 @@ function quadrature_integrate(__f, __a, __b, options, status, abs_error, workspa
     @ccall libacc.quadrature_integrate(__f::Ptr{quadrature_integrate_function}, __a::Cdouble, __b::Cdouble, options::Ptr{quadrature_integrate_options}, status::Ptr{quadrature_status}, abs_error::Ptr{Cdouble}, workspace_size::Csize_t, workspace::Ptr{Cvoid})::Cdouble
 end
 
-struct var"##Ctag#344"
+const vImagePixelCount = Culong
+
+struct vImage_Buffer
+    data::Ptr{Cvoid}
+    height::vImagePixelCount
+    width::vImagePixelCount
+    rowBytes::Csize_t
+end
+
+struct vImage_AffineTransform
+    a::Cfloat
+    b::Cfloat
+    c::Cfloat
+    d::Cfloat
+    tx::Cfloat
+    ty::Cfloat
+end
+
+struct vImage_AffineTransform_Double
+    a::Cdouble
+    b::Cdouble
+    c::Cdouble
+    d::Cdouble
+    tx::Cdouble
+    ty::Cdouble
+end
+
+const vImage_CGAffineTransform = vImage_AffineTransform_Double
+
+struct vImage_PerpsectiveTransform
+    a::Cfloat
+    b::Cfloat
+    c::Cfloat
+    d::Cfloat
+    tx::Cfloat
+    ty::Cfloat
+    vx::Cfloat
+    vy::Cfloat
+    v::Cfloat
+end
+
+const vImage_WarpInterpolation = Int32
+
+@enum var"##Ctag#346"::UInt32 begin
+    kvImageInterpolationNearest = 0
+    kvImageInterpolationLinear = 1
+end
+
+const Pixel_8 = UInt8
+
+const Pixel_F = Cfloat
+
+const Pixel_88 = NTuple{2, UInt8}
+
+const Pixel_8888 = NTuple{4, UInt8}
+
+const Pixel_FFFF = NTuple{4, Cfloat}
+
+const Pixel_16U = UInt16
+
+const Pixel_16S = Int16
+
+const Pixel_16Q12 = Int16
+
+const Pixel_16U16U = NTuple{2, UInt16}
+
+const Pixel_16S16S = NTuple{2, Int16}
+
+const Pixel_32U = UInt32
+
+const Pixel_ARGB_16U = NTuple{4, UInt16}
+
+const Pixel_ARGB_16S = NTuple{4, Int16}
+
+const Pixel_16F = UInt16
+
+const Pixel_16F16F = NTuple{2, UInt16}
+
+const Pixel_ARGB_16F = NTuple{4, UInt16}
+
+const Pixel_FF = NTuple{2, Cfloat}
+
+const ResamplingFilter = Ptr{Cvoid}
+
+const GammaFunction = Ptr{Cvoid}
+
+const vImage_Error = Cssize_t
+
+@enum var"##Ctag#347"::Int32 begin
+    kvImageNoError = 0
+    kvImageRoiLargerThanInputBuffer = -21766
+    kvImageInvalidKernelSize = -21767
+    kvImageInvalidEdgeStyle = -21768
+    kvImageInvalidOffset_X = -21769
+    kvImageInvalidOffset_Y = -21770
+    kvImageMemoryAllocationError = -21771
+    kvImageNullPointerArgument = -21772
+    kvImageInvalidParameter = -21773
+    kvImageBufferSizeMismatch = -21774
+    kvImageUnknownFlagsBit = -21775
+    kvImageInternalError = -21776
+    kvImageInvalidRowBytes = -21777
+    kvImageInvalidImageFormat = -21778
+    kvImageColorSyncIsAbsent = -21779
+    kvImageOutOfPlaceOperationRequired = -21780
+    kvImageInvalidImageObject = -21781
+    kvImageInvalidCVImageFormat = -21782
+    kvImageUnsupportedConversion = -21783
+    kvImageCoreVideoIsAbsent = -21784
+end
+
+const vImage_Flags = UInt32
+
+@enum var"##Ctag#348"::UInt32 begin
+    kvImageNoFlags = 0
+    kvImageLeaveAlphaUnchanged = 1
+    kvImageCopyInPlace = 2
+    kvImageBackgroundColorFill = 4
+    kvImageEdgeExtend = 8
+    kvImageDoNotTile = 16
+    kvImageHighQualityResampling = 32
+    kvImageTruncateKernel = 64
+    kvImageGetTempBufferSize = 128
+    kvImagePrintDiagnosticsToConsole = 256
+    kvImageNoAllocate = 512
+    kvImageHDRContent = 1024
+    kvImageDoNotClamp = 2048
+    kvImageUseFP16Accumulator = 4096
+end
+
+mutable struct vImageConverter end
+
+const vImageConverterRef = Ptr{vImageConverter}
+
+mutable struct vImageCVImageFormat end
+
+const vImageCVImageFormatRef = Ptr{vImageCVImageFormat}
+
+const vImageConstCVImageFormatRef = Ptr{vImageCVImageFormat}
+
+@enum vImageARGBType::UInt32 begin
+    kvImageARGB8888 = 0
+    kvImageARGB16U = 1
+    kvImageARGB16Q12 = 2
+end
+
+@enum vImageYpCbCrType::UInt32 begin
+    kvImage422CbYpCrYp8 = 0
+    kvImage422YpCbYpCr8 = 1
+    kvImage422CbYpCrYp8_AA8 = 2
+    kvImage420Yp8_Cb8_Cr8 = 3
+    kvImage420Yp8_CbCr8 = 4
+    kvImage444AYpCbCr8 = 5
+    kvImage444CrYpCb8 = 6
+    kvImage444CbYpCrA8 = 7
+    kvImage444CrYpCb10 = 8
+    kvImage422CrYpCbYpCbYpCbYpCrYpCrYp10 = 9
+    kvImage422CbYpCrYp16 = 13
+    kvImage444AYpCbCr16 = 14
+end
+
+struct vImage_YpCbCrToARGBMatrix
+    Yp::Cfloat
+    Cr_R::Cfloat
+    Cr_G::Cfloat
+    Cb_G::Cfloat
+    Cb_B::Cfloat
+end
+
+struct vImage_YpCbCrToARGB
+    data::NTuple{128, UInt8}
+end
+
+function Base.getproperty(x::Ptr{vImage_YpCbCrToARGB}, f::Symbol)
+    f === :opaque && return Ptr{NTuple{128, UInt8}}(x + 0)
+    return getfield(x, f)
+end
+
+function Base.getproperty(x::vImage_YpCbCrToARGB, f::Symbol)
+    r = Ref{vImage_YpCbCrToARGB}(x)
+    ptr = Base.unsafe_convert(Ptr{vImage_YpCbCrToARGB}, r)
+    fptr = getproperty(ptr, f)
+    GC.@preserve r unsafe_load(fptr)
+end
+
+function Base.setproperty!(x::Ptr{vImage_YpCbCrToARGB}, f::Symbol, v)
+    unsafe_store!(getproperty(x, f), v)
+end
+
+function Base.propertynames(x::vImage_YpCbCrToARGB, private::Bool = false)
+    (:opaque, if private
+            fieldnames(typeof(x))
+        else
+            ()
+        end...)
+end
+
+struct vImage_ARGBToYpCbCrMatrix
+    R_Yp::Cfloat
+    G_Yp::Cfloat
+    B_Yp::Cfloat
+    R_Cb::Cfloat
+    G_Cb::Cfloat
+    B_Cb_R_Cr::Cfloat
+    G_Cr::Cfloat
+    B_Cr::Cfloat
+end
+
+struct vImage_ARGBToYpCbCr
+    data::NTuple{128, UInt8}
+end
+
+function Base.getproperty(x::Ptr{vImage_ARGBToYpCbCr}, f::Symbol)
+    f === :opaque && return Ptr{NTuple{128, UInt8}}(x + 0)
+    return getfield(x, f)
+end
+
+function Base.getproperty(x::vImage_ARGBToYpCbCr, f::Symbol)
+    r = Ref{vImage_ARGBToYpCbCr}(x)
+    ptr = Base.unsafe_convert(Ptr{vImage_ARGBToYpCbCr}, r)
+    fptr = getproperty(ptr, f)
+    GC.@preserve r unsafe_load(fptr)
+end
+
+function Base.setproperty!(x::Ptr{vImage_ARGBToYpCbCr}, f::Symbol, v)
+    unsafe_store!(getproperty(x, f), v)
+end
+
+function Base.propertynames(x::vImage_ARGBToYpCbCr, private::Bool = false)
+    (:opaque, if private
+            fieldnames(typeof(x))
+        else
+            ()
+        end...)
+end
+
+struct vImage_YpCbCrPixelRange
+    Yp_bias::Int32
+    CbCr_bias::Int32
+    YpRangeMax::Int32
+    CbCrRangeMax::Int32
+    YpMax::Int32
+    YpMin::Int32
+    CbCrMax::Int32
+    CbCrMin::Int32
+end
+
+function vImagePremultipliedAlphaBlend_BGRA8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_BGRA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlend_BGRAFFFF(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_BGRAFFFF(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_RGBA8888(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_RGBA8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_RGBAFFFF(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_RGBAFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_RGBA16F(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_RGBA16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_RGBA16U(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_RGBA16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_RGBA8888(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_RGBA8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_RGBAFFFF(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_RGBAFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_RGBA16F(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_RGBA16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_RGBA16U(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_RGBA16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_RGBA8888(src, dest, flags)
+    @ccall libacc.vImageClipToAlpha_RGBA8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_RGBAFFFF(src, dest, flags)
+    @ccall libacc.vImageClipToAlpha_RGBAFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_Planar8(srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha, dest, flags)
+    @ccall libacc.vImageAlphaBlend_Planar8(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, srcBottomAlpha::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_PlanarF(srcTop, srcTopAlpha, srcBottom, srcBottomAlpha, alpha, dest, flags)
+    @ccall libacc.vImageAlphaBlend_PlanarF(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, srcBottomAlpha::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_ARGB8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_ARGB8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_ARGBFFFF(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_ARGBFFFF(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlend_Planar8(srcTop, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_Planar8(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlend_PlanarF(srcTop, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_PlanarF(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlend_ARGB8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_ARGB8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlend_ARGBFFFF(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlend_ARGBFFFF(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendWithPermute_ARGB8888(srcTop, srcBottom, dest, permuteMap, makeDestAlphaOpaque, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendWithPermute_ARGB8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, makeDestAlphaOpaque::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendWithPermute_RGBA8888(srcTop, srcBottom, dest, permuteMap, makeDestAlphaOpaque, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendWithPermute_RGBA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, makeDestAlphaOpaque::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendMultiply_RGBA8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendMultiply_RGBA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendScreen_RGBA8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendScreen_RGBA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendDarken_RGBA8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendDarken_RGBA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedAlphaBlendLighten_RGBA8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedAlphaBlendLighten_RGBA8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_Planar8(src, alpha, dest, flags)
+    @ccall libacc.vImagePremultiplyData_Planar8(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_PlanarF(src, alpha, dest, flags)
+    @ccall libacc.vImagePremultiplyData_PlanarF(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_ARGB8888(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_ARGBFFFF(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_ARGB16U(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_ARGB16Q12(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_ARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultiplyData_RGBA16Q12(src, dest, flags)
+    @ccall libacc.vImagePremultiplyData_RGBA16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_Planar8(src, alpha, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_Planar8(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_PlanarF(src, alpha, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_PlanarF(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_ARGBFFFF(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_ARGB16U(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_ARGB16Q12(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_ARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageUnpremultiplyData_RGBA16Q12(src, dest, flags)
+    @ccall libacc.vImageUnpremultiplyData_RGBA16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedConstAlphaBlend_Planar8(srcTop, constAlpha, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedConstAlphaBlend_Planar8(srcTop::Ptr{vImage_Buffer}, constAlpha::Pixel_8, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedConstAlphaBlend_PlanarF(srcTop, constAlpha, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedConstAlphaBlend_PlanarF(srcTop::Ptr{vImage_Buffer}, constAlpha::Pixel_F, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedConstAlphaBlend_ARGB8888(srcTop, constAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedConstAlphaBlend_ARGB8888(srcTop::Ptr{vImage_Buffer}, constAlpha::Pixel_8, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePremultipliedConstAlphaBlend_ARGBFFFF(srcTop, constAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImagePremultipliedConstAlphaBlend_ARGBFFFF(srcTop::Ptr{vImage_Buffer}, constAlpha::Pixel_F, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_NonpremultipliedToPremultiplied_Planar8(srcTop, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_NonpremultipliedToPremultiplied_Planar8(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_NonpremultipliedToPremultiplied_PlanarF(srcTop, srcTopAlpha, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_NonpremultipliedToPremultiplied_PlanarF(srcTop::Ptr{vImage_Buffer}, srcTopAlpha::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_NonpremultipliedToPremultiplied_ARGB8888(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_NonpremultipliedToPremultiplied_ARGB8888(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAlphaBlend_NonpremultipliedToPremultiplied_ARGBFFFF(srcTop, srcBottom, dest, flags)
+    @ccall libacc.vImageAlphaBlend_NonpremultipliedToPremultiplied_ARGBFFFF(srcTop::Ptr{vImage_Buffer}, srcBottom::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_Planar8(src, alpha, dest, flags)
+    @ccall libacc.vImageClipToAlpha_Planar8(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_PlanarF(src, alpha, dest, flags)
+    @ccall libacc.vImageClipToAlpha_PlanarF(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageClipToAlpha_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClipToAlpha_ARGBFFFF(src, dest, flags)
+    @ccall libacc.vImageClipToAlpha_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+@enum var"##Ctag#349"::UInt32 begin
+    kvImage_PNG_FILTER_VALUE_NONE = 0
+    kvImage_PNG_FILTER_VALUE_SUB = 1
+    kvImage_PNG_FILTER_VALUE_UP = 2
+    kvImage_PNG_FILTER_VALUE_AVG = 3
+    kvImage_PNG_FILTER_VALUE_PAETH = 4
+end
+
+function vImagePNGDecompressionFilter(buffer, startScanline, scanlineCount, bitsPerPixel, filterMethodNumber, filterType, flags)
+    @ccall libacc.vImagePNGDecompressionFilter(buffer::Ptr{vImage_Buffer}, startScanline::vImagePixelCount, scanlineCount::vImagePixelCount, bitsPerPixel::UInt32, filterMethodNumber::UInt32, filterType::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFtoARGBFFFF(srcA, srcR, srcG, srcB, dest, flags)
+    @ccall libacc.vImageConvert_PlanarFtoARGBFFFF(srcA::Ptr{vImage_Buffer}, srcR::Ptr{vImage_Buffer}, srcG::Ptr{vImage_Buffer}, srcB::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toPlanar8(srcARGB, destA, destR, destG, destB, flags)
+    @ccall libacc.vImageConvert_ARGB8888toPlanar8(srcARGB::Ptr{vImage_Buffer}, destA::Ptr{vImage_Buffer}, destR::Ptr{vImage_Buffer}, destG::Ptr{vImage_Buffer}, destB::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFtoPlanarF(srcARGB, destA, destR, destG, destB, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFtoPlanarF(srcARGB::Ptr{vImage_Buffer}, destA::Ptr{vImage_Buffer}, destR::Ptr{vImage_Buffer}, destG::Ptr{vImage_Buffer}, destB::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBFFFtoRGBAFFFF(arg1, arg2, arg3, arg4, arg5, flags)
+    @ccall libacc.vImageConvert_RGBFFFtoRGBAFFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_F, arg4::Ptr{vImage_Buffer}, arg5::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBFFFtoBGRAFFFF(arg1, arg2, arg3, arg4, arg5, flags)
+    @ccall libacc.vImageConvert_RGBFFFtoBGRAFFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_F, arg4::Ptr{vImage_Buffer}, arg5::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA5551toRGBA8888(src, dest, flags)
+    @ccall libacc.vImageConvert_RGBA5551toRGBA8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA8888toRGBA5551(src, dest, flags)
+    @ccall libacc.vImageConvert_RGBA8888toRGBA5551(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA8888toRGBA5551_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_RGBA8888toRGBA5551_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toRGBA8888(arg1, arg2, arg3, arg4, arg5, arg6)
+    @ccall libacc.vImageConvert_RGB888toRGBA8888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_8, arg4::Ptr{vImage_Buffer}, arg5::Bool, arg6::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toBGRA8888(arg1, arg2, arg3, arg4, arg5, arg6)
+    @ccall libacc.vImageConvert_RGB888toBGRA8888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_8, arg4::Ptr{vImage_Buffer}, arg5::Bool, arg6::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRA8888toRGB888(arg1, arg2, arg3)
+    @ccall libacc.vImageConvert_BGRA8888toRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA8888toRGB888(arg1, arg2, arg3)
+    @ccall libacc.vImageConvert_RGBA8888toRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBA8888ToRGB888(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_RGBA8888ToRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cuchar}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_BGRA8888ToRGB888(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_BGRA8888ToRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cuchar}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBAFFFFToRGBFFF(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_RGBAFFFFToRGBFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cfloat}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_BGRAFFFFToRGBFFF(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_BGRAFFFFToRGBFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cfloat}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8ToBGRX8888(blue, green, red, alpha, dest, flags)
+    @ccall libacc.vImageConvert_Planar8ToBGRX8888(blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, alpha::Pixel_8, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFToBGRXFFFF(blue, green, red, alpha, dest, flags)
+    @ccall libacc.vImageConvert_PlanarFToBGRXFFFF(blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, alpha::Pixel_F, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRX8888ToPlanar8(src, blue, green, red, flags)
+    @ccall libacc.vImageConvert_BGRX8888ToPlanar8(src::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRXFFFFToPlanarF(src, blue, green, red, flags)
+    @ccall libacc.vImageConvert_BGRXFFFFToPlanarF(src::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8ToBGRXFFFF(blue, green, red, alpha, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_Planar8ToBGRXFFFF(blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, alpha::Pixel_F, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFToBGRX8888(blue, green, red, alpha, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_PlanarFToBGRX8888(blue::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, alpha::Pixel_8, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageClip_PlanarF(src, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageClip_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Pixel_F, minFloat::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toPlanarF(src, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_Planar8toPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Pixel_F, minFloat::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFtoPlanar8(src, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_PlanarFtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Pixel_F, minFloat::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFtoPlanar8_dithered(src, dest, maxFloat, minFloat, dither, flags)
+    @ccall libacc.vImageConvert_PlanarFtoPlanar8_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Pixel_F, minFloat::Pixel_F, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBFFFtoRGB888_dithered(src, dest, maxFloat, minFloat, dither, flags)
+    @ccall libacc.vImageConvert_RGBFFFtoRGB888_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Pixel_F}, minFloat::Ptr{Pixel_F}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFtoARGB8888_dithered(src, dest, maxFloat, minFloat, dither, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFtoARGB8888_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, dither::Cint, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toARGB8888(srcA, srcR, srcG, srcB, dest, flags)
+    @ccall libacc.vImageConvert_Planar8toARGB8888(srcA::Ptr{vImage_Buffer}, srcR::Ptr{vImage_Buffer}, srcG::Ptr{vImage_Buffer}, srcB::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ChunkyToPlanar8(srcChannels, destPlanarBuffers, channelCount, srcStrideBytes, srcWidth, srcHeight, srcRowBytes, flags)
+    @ccall libacc.vImageConvert_ChunkyToPlanar8(srcChannels::Ptr{Ptr{Cvoid}}, destPlanarBuffers::Ptr{Ptr{vImage_Buffer}}, channelCount::Cuint, srcStrideBytes::Csize_t, srcWidth::vImagePixelCount, srcHeight::vImagePixelCount, srcRowBytes::Csize_t, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarToChunky8(srcPlanarBuffers, destChannels, channelCount, destStrideBytes, destWidth, destHeight, destRowBytes, flags)
+    @ccall libacc.vImageConvert_PlanarToChunky8(srcPlanarBuffers::Ptr{Ptr{vImage_Buffer}}, destChannels::Ptr{Ptr{Cvoid}}, channelCount::Cuint, destStrideBytes::Csize_t, destWidth::vImagePixelCount, destHeight::vImagePixelCount, destRowBytes::Csize_t, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ChunkyToPlanarF(srcChannels, destPlanarBuffers, channelCount, srcStrideBytes, srcWidth, srcHeight, srcRowBytes, flags)
+    @ccall libacc.vImageConvert_ChunkyToPlanarF(srcChannels::Ptr{Ptr{Cvoid}}, destPlanarBuffers::Ptr{Ptr{vImage_Buffer}}, channelCount::Cuint, srcStrideBytes::Csize_t, srcWidth::vImagePixelCount, srcHeight::vImagePixelCount, srcRowBytes::Csize_t, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarToChunkyF(srcPlanarBuffers, destChannels, channelCount, destStrideBytes, destWidth, destHeight, destRowBytes, flags)
+    @ccall libacc.vImageConvert_PlanarToChunkyF(srcPlanarBuffers::Ptr{Ptr{vImage_Buffer}}, destChannels::Ptr{Ptr{Cvoid}}, channelCount::Cuint, destStrideBytes::Csize_t, destWidth::vImagePixelCount, destHeight::vImagePixelCount, destRowBytes::Csize_t, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16SToF(src, dest, offset, scale, flags)
+    @ccall libacc.vImageConvert_16SToF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, offset::Cfloat, scale::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16UToF(src, dest, offset, scale, flags)
+    @ccall libacc.vImageConvert_16UToF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, offset::Cfloat, scale::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_FTo16S(src, dest, offset, scale, flags)
+    @ccall libacc.vImageConvert_FTo16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, offset::Cfloat, scale::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_FTo16U(src, dest, offset, scale, flags)
+    @ccall libacc.vImageConvert_FTo16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, offset::Cfloat, scale::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Uto16F(src, dest, flags)
+    @ccall libacc.vImageConvert_16Uto16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Fto16U(src, dest, flags)
+    @ccall libacc.vImageConvert_16Fto16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_12UTo16U(src, dest, flags)
+    @ccall libacc.vImageConvert_12UTo16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16UTo12U(src, dest, flags)
+    @ccall libacc.vImageConvert_16UTo12U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageTableLookUp_ARGB8888(src, dest, alphaTable, redTable, greenTable, blueTable, flags)
+    @ccall libacc.vImageTableLookUp_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, alphaTable::Ptr{Pixel_8}, redTable::Ptr{Pixel_8}, greenTable::Ptr{Pixel_8}, blueTable::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageTableLookUp_Planar8(src, dest, table, flags)
+    @ccall libacc.vImageTableLookUp_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannels_ARGB8888(newSrc, origSrc, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannels_ARGB8888(newSrc::Ptr{vImage_Buffer}, origSrc::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannels_ARGBFFFF(newSrc, origSrc, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannels_ARGBFFFF(newSrc::Ptr{vImage_Buffer}, origSrc::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_Planar8(scalar, dest, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_Planar8(scalar::Pixel_8, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_PlanarF(scalar, dest, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_PlanarF(scalar::Pixel_F, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_Planar16S(scalar, dest, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_Planar16S(scalar::Pixel_16S, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_Planar16U(scalar, dest, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_Planar16U(scalar::Pixel_16U, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_Planar16F(scalar, dest, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_Planar16F(scalar::Pixel_16F, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageExtractChannel_ARGB8888(src, dest, channelIndex, flags)
+    @ccall libacc.vImageExtractChannel_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, channelIndex::Clong, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageExtractChannel_ARGB16U(src, dest, channelIndex, flags)
+    @ccall libacc.vImageExtractChannel_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, channelIndex::Clong, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageExtractChannel_ARGBFFFF(src, dest, channelIndex, flags)
+    @ccall libacc.vImageExtractChannel_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, channelIndex::Clong, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_ARGB8888(dest, color, flags)
+    @ccall libacc.vImageBufferFill_ARGB8888(dest::Ptr{vImage_Buffer}, color::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_ARGB16U(dest, color, flags)
+    @ccall libacc.vImageBufferFill_ARGB16U(dest::Ptr{vImage_Buffer}, color::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_ARGB16S(dest, color, flags)
+    @ccall libacc.vImageBufferFill_ARGB16S(dest::Ptr{vImage_Buffer}, color::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_ARGBFFFF(dest, color, flags)
+    @ccall libacc.vImageBufferFill_ARGBFFFF(dest::Ptr{vImage_Buffer}, color::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_ARGB16F(dest, color, flags)
+    @ccall libacc.vImageBufferFill_ARGB16F(dest::Ptr{vImage_Buffer}, color::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_CbCr8(dest, color, flags)
+    @ccall libacc.vImageBufferFill_CbCr8(dest::Ptr{vImage_Buffer}, color::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_CbCr16U(dest, color, flags)
+    @ccall libacc.vImageBufferFill_CbCr16U(dest::Ptr{vImage_Buffer}, color::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBufferFill_CbCr16S(dest, color, flags)
+    @ccall libacc.vImageBufferFill_CbCr16S(dest::Ptr{vImage_Buffer}, color::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_ARGB8888(scalar, src, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_ARGB8888(scalar::Pixel_8, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithScalar_ARGBFFFF(scalar, src, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannelsWithScalar_ARGBFFFF(scalar::Pixel_F, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannels_ARGB8888(src, dest, permuteMap, flags)
+    @ccall libacc.vImagePermuteChannels_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannels_ARGB16U(src, dest, permuteMap, flags)
+    @ccall libacc.vImagePermuteChannels_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannels_ARGBFFFF(src, dest, permuteMap, flags)
+    @ccall libacc.vImagePermuteChannels_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannels_ARGB16F(src, dest, permuteMap, flags)
+    @ccall libacc.vImagePermuteChannels_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannelsWithMaskedInsert_ARGB8888(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImagePermuteChannelsWithMaskedInsert_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannelsWithMaskedInsert_ARGB16U(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImagePermuteChannelsWithMaskedInsert_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannelsWithMaskedInsert_ARGBFFFF(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImagePermuteChannelsWithMaskedInsert_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toPlanarF(src, alpha, red, green, blue, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_ARGB8888toPlanarF(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFtoPlanar8(src, alpha, red, green, blue, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFtoPlanar8(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFtoRGBFFF(src, dest, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFtoRGBFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBAFFFFtoRGBFFF(src, dest, flags)
+    @ccall libacc.vImageConvert_RGBAFFFFtoRGBFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRAFFFFtoRGBFFF(src, dest, flags)
+    @ccall libacc.vImageConvert_BGRAFFFFtoRGBFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBFFFtoARGBFFFF(arg1, arg2, arg3, arg4, arg5, flags)
+    @ccall libacc.vImageConvert_RGBFFFtoARGBFFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_F, arg4::Ptr{vImage_Buffer}, arg5::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB1555toPlanar8(src, destA, destR, destG, destB, flags)
+    @ccall libacc.vImageConvert_ARGB1555toPlanar8(src::Ptr{vImage_Buffer}, destA::Ptr{vImage_Buffer}, destR::Ptr{vImage_Buffer}, destG::Ptr{vImage_Buffer}, destB::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB1555toARGB8888(src, dest, flags)
+    @ccall libacc.vImageConvert_ARGB1555toARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toARGB1555(srcA, srcR, srcG, srcB, dest, flags)
+    @ccall libacc.vImageConvert_Planar8toARGB1555(srcA::Ptr{vImage_Buffer}, srcR::Ptr{vImage_Buffer}, srcG::Ptr{vImage_Buffer}, srcB::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toARGB1555(src, dest, flags)
+    @ccall libacc.vImageConvert_ARGB8888toARGB1555(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toARGB1555_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_ARGB8888toARGB1555_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toARGB8888(alpha, src, dest, flags)
+    @ccall libacc.vImageConvert_RGB565toARGB8888(alpha::Pixel_8, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toRGBA8888(alpha, src, dest, flags)
+    @ccall libacc.vImageConvert_RGB565toRGBA8888(alpha::Pixel_8, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toBGRA8888(alpha, src, dest, flags)
+    @ccall libacc.vImageConvert_RGB565toBGRA8888(alpha::Pixel_8, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toRGB888(src, dest, flags)
+    @ccall libacc.vImageConvert_RGB565toRGB888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toRGB565(src, dest, flags)
+    @ccall libacc.vImageConvert_ARGB8888toRGB565(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA8888toRGB565(src, dest, flags)
+    @ccall libacc.vImageConvert_RGBA8888toRGB565(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRA8888toRGB565(src, dest, flags)
+    @ccall libacc.vImageConvert_BGRA8888toRGB565(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toRGB565_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_RGB888toRGB565_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toRGB565_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_ARGB8888toRGB565_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA8888toRGB565_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_RGBA8888toRGB565_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRA8888toRGB565_dithered(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_BGRA8888toRGB565_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toPlanar8(src, destR, destG, destB, flags)
+    @ccall libacc.vImageConvert_RGB565toPlanar8(src::Ptr{vImage_Buffer}, destR::Ptr{vImage_Buffer}, destG::Ptr{vImage_Buffer}, destB::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toRGB565(srcR, srcG, srcB, dest, flags)
+    @ccall libacc.vImageConvert_Planar8toRGB565(srcR::Ptr{vImage_Buffer}, srcG::Ptr{vImage_Buffer}, srcB::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA5551toRGB565(src, dest, flags)
+    @ccall libacc.vImageConvert_RGBA5551toRGB565(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB1555toRGB565(src, dest, flags)
+    @ccall libacc.vImageConvert_ARGB1555toRGB565(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toRGBA5551(src, dest, dither, flags)
+    @ccall libacc.vImageConvert_RGB565toRGBA5551(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB565toARGB1555(src, dest, dither, flags)
+    @ccall libacc.vImageConvert_RGB565toARGB1555(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16FtoPlanarF(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar16FtoPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFtoPlanar16F(src, dest, flags)
+    @ccall libacc.vImageConvert_PlanarFtoPlanar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toPlanar16F(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar8toPlanar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16FtoPlanar8(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar16FtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16UToPlanar8(src, dest, flags)
+    @ccall libacc.vImageConvert_16UToPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8To16U(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar8To16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toARGB8888(arg1, arg2, arg3, arg4, arg5, arg6)
+    @ccall libacc.vImageConvert_RGB888toARGB8888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Pixel_8, arg4::Ptr{vImage_Buffer}, arg5::Bool, arg6::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toRGB888(arg1, arg2, arg3)
+    @ccall libacc.vImageConvert_ARGB8888toRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGB8888ToRGB888(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_ARGB8888ToRGB888(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cuchar}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGBFFFFToRGBFFF(arg1, arg2, arg3, arg4, arg5)
+    @ccall libacc.vImageFlatten_ARGBFFFFToRGBFFF(arg1::Ptr{vImage_Buffer}, arg2::Ptr{vImage_Buffer}, arg3::Ptr{Cfloat}, arg4::Bool, arg5::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toRGB888(planarRed, planarGreen, planarBlue, rgbDest, flags)
+    @ccall libacc.vImageConvert_Planar8toRGB888(planarRed::Ptr{vImage_Buffer}, planarGreen::Ptr{vImage_Buffer}, planarBlue::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFtoRGBFFF(planarRed, planarGreen, planarBlue, rgbDest, flags)
+    @ccall libacc.vImageConvert_PlanarFtoRGBFFF(planarRed::Ptr{vImage_Buffer}, planarGreen::Ptr{vImage_Buffer}, planarBlue::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toPlanar8(rgbSrc, redDest, greenDest, blueDest, flags)
+    @ccall libacc.vImageConvert_RGB888toPlanar8(rgbSrc::Ptr{vImage_Buffer}, redDest::Ptr{vImage_Buffer}, greenDest::Ptr{vImage_Buffer}, blueDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBFFFtoPlanarF(rgbSrc, redDest, greenDest, blueDest, flags)
+    @ccall libacc.vImageConvert_RGBFFFtoPlanarF(rgbSrc::Ptr{vImage_Buffer}, redDest::Ptr{vImage_Buffer}, greenDest::Ptr{vImage_Buffer}, blueDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSelectChannels_ARGB8888(newSrc, origSrc, dest, copyMask, flags)
+    @ccall libacc.vImageSelectChannels_ARGB8888(newSrc::Ptr{vImage_Buffer}, origSrc::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSelectChannels_ARGBFFFF(newSrc, origSrc, dest, copyMask, flags)
+    @ccall libacc.vImageSelectChannels_ARGBFFFF(newSrc::Ptr{vImage_Buffer}, origSrc::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithPixel_ARGB8888(the_pixel, src, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannelsWithPixel_ARGB8888(the_pixel::Ptr{Cuchar}, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithPixel_ARGB16U(the_pixel, src, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannelsWithPixel_ARGB16U(the_pixel::Ptr{Cushort}, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageOverwriteChannelsWithPixel_ARGBFFFF(the_pixel, src, dest, copyMask, flags)
+    @ccall libacc.vImageOverwriteChannelsWithPixel_ARGBFFFF(the_pixel::Ptr{Cfloat}, src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, copyMask::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8ToXRGB8888(alpha, red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_Planar8ToXRGB8888(alpha::Pixel_8, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFToXRGBFFFF(alpha, red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_PlanarFToXRGBFFFF(alpha::Pixel_F, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB8888ToPlanar8(src, red, green, blue, flags)
+    @ccall libacc.vImageConvert_XRGB8888ToPlanar8(src::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGBFFFFToPlanarF(src, red, green, blue, flags)
+    @ccall libacc.vImageConvert_XRGBFFFFToPlanarF(src::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8ToARGBFFFF(alpha, red, green, blue, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_Planar8ToARGBFFFF(alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8ToXRGBFFFF(alpha, red, green, blue, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_Planar8ToXRGBFFFF(alpha::Pixel_F, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFToARGB8888(alpha, red, green, blue, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_PlanarFToARGB8888(alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_PlanarFToXRGB8888(alpha, red, green, blue, dest, maxFloat, minFloat, flags)
+    @ccall libacc.vImageConvert_PlanarFToXRGB8888(alpha::Pixel_8, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, maxFloat::Ptr{Cfloat}, minFloat::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UtoARGB16U(rgbSrc, aSrc, alpha, argbDest, premultiply, flags)
+    @ccall libacc.vImageConvert_RGB16UtoARGB16U(rgbSrc::Ptr{vImage_Buffer}, aSrc::Ptr{vImage_Buffer}, alpha::Pixel_16U, argbDest::Ptr{vImage_Buffer}, premultiply::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UtoRGBA16U(rgbSrc, aSrc, alpha, rgbaDest, premultiply, flags)
+    @ccall libacc.vImageConvert_RGB16UtoRGBA16U(rgbSrc::Ptr{vImage_Buffer}, aSrc::Ptr{vImage_Buffer}, alpha::Pixel_16U, rgbaDest::Ptr{vImage_Buffer}, premultiply::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UtoBGRA16U(rgbSrc, aSrc, alpha, bgraDest, premultiply, flags)
+    @ccall libacc.vImageConvert_RGB16UtoBGRA16U(rgbSrc::Ptr{vImage_Buffer}, aSrc::Ptr{vImage_Buffer}, alpha::Pixel_16U, bgraDest::Ptr{vImage_Buffer}, premultiply::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UtoRGB16U(argbSrc, rgbDest, flags)
+    @ccall libacc.vImageConvert_ARGB16UtoRGB16U(argbSrc::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA16UtoRGB16U(rgbaSrc, rgbDest, flags)
+    @ccall libacc.vImageConvert_RGBA16UtoRGB16U(rgbaSrc::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_BGRA16UtoRGB16U(bgraSrc, rgbDest, flags)
+    @ccall libacc.vImageConvert_BGRA16UtoRGB16U(bgraSrc::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16UtoARGB16U(aSrc, rSrc, gSrc, bSrc, argbDest, flags)
+    @ccall libacc.vImageConvert_Planar16UtoARGB16U(aSrc::Ptr{vImage_Buffer}, rSrc::Ptr{vImage_Buffer}, gSrc::Ptr{vImage_Buffer}, bSrc::Ptr{vImage_Buffer}, argbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UtoPlanar16U(argbSrc, aDest, rDest, gDest, bDest, flags)
+    @ccall libacc.vImageConvert_ARGB16UtoPlanar16U(argbSrc::Ptr{vImage_Buffer}, aDest::Ptr{vImage_Buffer}, rDest::Ptr{vImage_Buffer}, gDest::Ptr{vImage_Buffer}, bDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16UtoRGB16U(rSrc, gSrc, bSrc, rgbDest, flags)
+    @ccall libacc.vImageConvert_Planar16UtoRGB16U(rSrc::Ptr{vImage_Buffer}, gSrc::Ptr{vImage_Buffer}, bSrc::Ptr{vImage_Buffer}, rgbDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UtoPlanar16U(rgbSrc, rDest, gDest, bDest, flags)
+    @ccall libacc.vImageConvert_RGB16UtoPlanar16U(rgbSrc::Ptr{vImage_Buffer}, rDest::Ptr{vImage_Buffer}, gDest::Ptr{vImage_Buffer}, bDest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16UtoPlanar8_dithered(src, dest, dither, flags)
+    @ccall libacc.vImageConvert_Planar16UtoPlanar8_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UtoRGB888_dithered(src, dest, dither, flags)
+    @ccall libacc.vImageConvert_RGB16UtoRGB888_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UtoARGB8888_dithered(src, dest, dither, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UtoARGB8888_dithered(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, dither::Cint, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UToARGB8888(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImageConvert_ARGB16UToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888ToARGB16U(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImageConvert_ARGB8888ToARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB16UToARGB8888(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImageConvert_RGB16UToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888ToRGB16U(src, dest, permuteMap, copyMask, backgroundColor, flags)
+    @ccall libacc.vImageConvert_ARGB8888ToRGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, copyMask::UInt8, backgroundColor::Ptr{Pixel_16U}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageByteSwap_Planar16U(src, dest, flags)
+    @ccall libacc.vImageByteSwap_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGB8888(argbSrc, argbDst, argbBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_ARGB8888(argbSrc::Ptr{vImage_Buffer}, argbDst::Ptr{vImage_Buffer}, argbBackgroundColorPtr::Ptr{Cuchar}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBA8888(rgbaSrc, rgbaDst, rgbaBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_RGBA8888(rgbaSrc::Ptr{vImage_Buffer}, rgbaDst::Ptr{vImage_Buffer}, rgbaBackgroundColorPtr::Ptr{Cuchar}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGB16U(argbSrc, argbDst, argbBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_ARGB16U(argbSrc::Ptr{vImage_Buffer}, argbDst::Ptr{vImage_Buffer}, argbBackgroundColorPtr::Ptr{Cushort}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBA16U(rgbaSrc, rgbaDst, rgbaBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_RGBA16U(rgbaSrc::Ptr{vImage_Buffer}, rgbaDst::Ptr{vImage_Buffer}, rgbaBackgroundColorPtr::Ptr{Cushort}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGB16Q12(argbSrc, argbDst, argbBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_ARGB16Q12(argbSrc::Ptr{vImage_Buffer}, argbDst::Ptr{vImage_Buffer}, argbBackgroundColorPtr::Ptr{Cshort}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBA16Q12(argbSrc, argbDst, argbBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_RGBA16Q12(argbSrc::Ptr{vImage_Buffer}, argbDst::Ptr{vImage_Buffer}, argbBackgroundColorPtr::Ptr{Cshort}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_ARGBFFFF(argbSrc, argbDst, argbBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_ARGBFFFF(argbSrc::Ptr{vImage_Buffer}, argbDst::Ptr{vImage_Buffer}, argbBackgroundColorPtr::Ptr{Cfloat}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFlatten_RGBAFFFF(rgbaSrc, rgbaDst, rgbaBackgroundColorPtr, isImagePremultiplied, flags)
+    @ccall libacc.vImageFlatten_RGBAFFFF(rgbaSrc::Ptr{vImage_Buffer}, rgbaDst::Ptr{vImage_Buffer}, rgbaBackgroundColorPtr::Ptr{Cfloat}, isImagePremultiplied::Bool, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar1toPlanar8(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar1toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar2toPlanar8(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar2toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar4toPlanar8(src, dest, flags)
+    @ccall libacc.vImageConvert_Planar4toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Indexed1toPlanar8(src, dest, colors, flags)
+    @ccall libacc.vImageConvert_Indexed1toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, colors::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Indexed2toPlanar8(src, dest, colors, flags)
+    @ccall libacc.vImageConvert_Indexed2toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, colors::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Indexed4toPlanar8(src, dest, colors, flags)
+    @ccall libacc.vImageConvert_Indexed4toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, colors::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+@enum var"##Ctag#350"::UInt32 begin
+    kvImageConvert_DitherNone = 0
+    kvImageConvert_DitherOrdered = 1
+    kvImageConvert_DitherOrderedReproducible = 2
+    kvImageConvert_DitherFloydSteinberg = 3
+    kvImageConvert_DitherAtkinson = 4
+    # kvImageConvert_OrderedGaussianBlue = 0
+    kvImageConvert_OrderedUniformBlue = 268435456
+    kvImageConvert_OrderedNoiseShapeMask = 0x00000000f0000000
+end
+
+function vImageConvert_Planar8toPlanar1(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toPlanar1(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toPlanar2(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toPlanar2(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toPlanar4(src, dest, tempBuffer, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toPlanar4(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toIndexed1(src, dest, tempBuffer, colors, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toIndexed1(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, colors::Ptr{Pixel_8}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toIndexed2(src, dest, tempBuffer, colors, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toIndexed2(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, colors::Ptr{Pixel_8}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar8toIndexed4(src, dest, tempBuffer, colors, dither, flags)
+    @ccall libacc.vImageConvert_Planar8toIndexed4(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, colors::Ptr{Pixel_8}, dither::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_8to16Q12(src, dest, flags)
+    @ccall libacc.vImageConvert_8to16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGB888toPlanar16Q12(src, red, green, blue, flags)
+    @ccall libacc.vImageConvert_RGB888toPlanar16Q12(src::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888toPlanar16Q12(src, alpha, red, green, blue, flags)
+    @ccall libacc.vImageConvert_ARGB8888toPlanar16Q12(src::Ptr{vImage_Buffer}, alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Q12to8(src, dest, flags)
+    @ccall libacc.vImageConvert_16Q12to8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16Q12toRGB888(red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_Planar16Q12toRGB888(red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16Q12toARGB8888(alpha, red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_Planar16Q12toARGB8888(alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Q12to16F(src, dest, flags)
+    @ccall libacc.vImageConvert_16Q12to16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16Q12toRGB16F(red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_Planar16Q12toRGB16F(red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Planar16Q12toARGB16F(alpha, red, green, blue, dest, flags)
+    @ccall libacc.vImageConvert_Planar16Q12toARGB16F(alpha::Ptr{vImage_Buffer}, red::Ptr{vImage_Buffer}, green::Ptr{vImage_Buffer}, blue::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Fto16Q12(src, dest, flags)
+    @ccall libacc.vImageConvert_16Fto16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Q12toF(src, dest, flags)
+    @ccall libacc.vImageConvert_16Q12toF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_Fto16Q12(src, dest, flags)
+    @ccall libacc.vImageConvert_Fto16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Q12to16U(src, dest, flags)
+    @ccall libacc.vImageConvert_16Q12to16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_16Uto16Q12(src, dest, flags)
+    @ccall libacc.vImageConvert_16Uto16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_YpCbCrToARGB_GenerateConversion(matrix, pixelRange, outInfo, inYpCbCrType, outARGBType, flags)
+    @ccall libacc.vImageConvert_YpCbCrToARGB_GenerateConversion(matrix::Ptr{vImage_YpCbCrToARGBMatrix}, pixelRange::Ptr{vImage_YpCbCrPixelRange}, outInfo::Ptr{vImage_YpCbCrToARGB}, inYpCbCrType::vImageYpCbCrType, outARGBType::vImageARGBType, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBToYpCbCr_GenerateConversion(matrix, pixelRange, outInfo, inARGBType, outYpCbCrType, flags)
+    @ccall libacc.vImageConvert_ARGBToYpCbCr_GenerateConversion(matrix::Ptr{vImage_ARGBToYpCbCrMatrix}, pixelRange::Ptr{vImage_YpCbCrPixelRange}, outInfo::Ptr{vImage_ARGBToYpCbCr}, inARGBType::vImageARGBType, outYpCbCrType::vImageYpCbCrType, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422YpCbYpCr8ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422YpCbYpCr8ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To422YpCbYpCr8(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To422YpCbYpCr8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CbYpCrYp8ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422CbYpCrYp8ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To422CbYpCrYp8(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To422CbYpCrYp8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CbYpCrYp8_AA8ToARGB8888(src, srcA, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_422CbYpCrYp8_AA8ToARGB8888(src::Ptr{vImage_Buffer}, srcA::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To422CbYpCrYp8_AA8(src, dest, destA, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To422CbYpCrYp8_AA8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, destA::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444AYpCbCr8ToARGB8888(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_444AYpCbCr8ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To444AYpCbCr8(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To444AYpCbCr8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444CbYpCrA8ToARGB8888(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_444CbYpCrA8ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To444CbYpCrA8(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To444CbYpCrA8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444CrYpCb8ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_444CrYpCb8ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To444CrYpCb8(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To444CrYpCb8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_420Yp8_Cb8_Cr8ToARGB8888(srcYp, srcCb, srcCr, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_420Yp8_Cb8_Cr8ToARGB8888(srcYp::Ptr{vImage_Buffer}, srcCb::Ptr{vImage_Buffer}, srcCr::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To420Yp8_Cb8_Cr8(src, destYp, destCb, destCr, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To420Yp8_Cb8_Cr8(src::Ptr{vImage_Buffer}, destYp::Ptr{vImage_Buffer}, destCb::Ptr{vImage_Buffer}, destCr::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_420Yp8_CbCr8ToARGB8888(srcYp, srcCbCr, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_420Yp8_CbCr8ToARGB8888(srcYp::Ptr{vImage_Buffer}, srcCbCr::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To420Yp8_CbCr8(src, destYp, destCbCr, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To420Yp8_CbCr8(src::Ptr{vImage_Buffer}, destYp::Ptr{vImage_Buffer}, destCbCr::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444AYpCbCr16ToARGB8888(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_444AYpCbCr16ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To444AYpCbCr16(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To444AYpCbCr16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444AYpCbCr16ToARGB16U(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_444AYpCbCr16ToARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UTo444AYpCbCr16(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UTo444AYpCbCr16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444CrYpCb10ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_444CrYpCb10ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To444CrYpCb10(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To444CrYpCb10(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_444CrYpCb10ToARGB16Q12(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_444CrYpCb10ToARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::Pixel_16Q12, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16Q12To444CrYpCb10(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16Q12To444CrYpCb10(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CrYpCbYpCbYpCbYpCrYpCrYp10ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422CrYpCbYpCbYpCbYpCrYpCrYp10ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To422CrYpCbYpCbYpCbYpCrYpCrYp10(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To422CrYpCbYpCbYpCbYpCrYpCrYp10(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CrYpCbYpCbYpCbYpCrYpCrYp10ToARGB16Q12(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422CrYpCbYpCbYpCbYpCrYpCrYp10ToARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::Pixel_16Q12, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16Q12To422CrYpCbYpCbYpCbYpCrYpCrYp10(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16Q12To422CrYpCbYpCbYpCbYpCrYpCrYp10(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CbYpCrYp16ToARGB8888(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422CbYpCrYp16ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888To422CbYpCrYp16(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888To422CbYpCrYp16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_422CbYpCrYp16ToARGB16U(src, dest, info, permuteMap, alpha, flags)
+    @ccall libacc.vImageConvert_422CbYpCrYp16ToARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_YpCbCrToARGB}, permuteMap::Ptr{UInt8}, alpha::UInt16, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UTo422CbYpCrYp16(src, dest, info, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UTo422CbYpCrYp16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, info::Ptr{vImage_ARGBToYpCbCr}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA1010102ToARGB8888(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_RGBA1010102ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888ToRGBA1010102(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888ToRGBA1010102(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA1010102ToARGB16Q12(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_RGBA1010102ToARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16Q12ToRGBA1010102(src, dest, RGB101010RangeMin, RGB101010RangeMax, RGB101010Min, RGB101010Max, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16Q12ToRGBA1010102(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, RGB101010Min::Int32, RGB101010Max::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_RGBA1010102ToARGB16U(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_RGBA1010102ToARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UToRGBA1010102(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UToRGBA1010102(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePermuteChannels_RGB888(src, dest, permuteMap, flags)
+    @ccall libacc.vImagePermuteChannels_RGB888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageCopyBuffer(src, dest, pixelSize, flags)
+    @ccall libacc.vImageCopyBuffer(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, pixelSize::Csize_t, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB2101010ToARGB8888(src, alpha, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_XRGB2101010ToARGB8888(src::Ptr{vImage_Buffer}, alpha::Pixel_8, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB2101010ToARGB8888(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB2101010ToARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888ToXRGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888ToXRGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB8888ToARGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB8888ToARGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB2101010ToARGB16Q12(src, alpha, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_XRGB2101010ToARGB16Q12(src::Ptr{vImage_Buffer}, alpha::Pixel_16Q12, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB2101010ToARGB16Q12(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB2101010ToARGB16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16Q12ToXRGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, RGB101010Min, RGB101010Max, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16Q12ToXRGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, RGB101010Min::Int32, RGB101010Max::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16Q12ToARGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, RGB101010Min, RGB101010Max, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16Q12ToARGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, RGB101010Min::Int32, RGB101010Max::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB2101010ToARGB16U(src, alpha, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_XRGB2101010ToARGB16U(src::Ptr{vImage_Buffer}, alpha::UInt16, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB2101010ToARGB16U(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB2101010ToARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UToXRGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UToXRGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB16UToARGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB16UToARGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB2101010ToARGBFFFF(src, alpha, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_XRGB2101010ToARGBFFFF(src::Ptr{vImage_Buffer}, alpha::Pixel_F, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB2101010ToARGBFFFF(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB2101010ToARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFToXRGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFToXRGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGBFFFFToARGB2101010(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGBFFFFToARGB2101010(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_XRGB2101010ToARGB16F(src, alpha, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_XRGB2101010ToARGB16F(src::Ptr{vImage_Buffer}, alpha::Pixel_F, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvert_ARGB2101010ToARGB16F(src, dest, RGB101010RangeMin, RGB101010RangeMax, permuteMap, flags)
+    @ccall libacc.vImageConvert_ARGB2101010ToARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, RGB101010RangeMin::Int32, RGB101010RangeMax::Int32, permuteMap::Ptr{UInt8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, divisor, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, divisor::Int32, backgroundColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_Planar16F(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, divisor, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, divisor::Int32, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolve_ARGB16F(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageConvolve_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, divisor, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, divisor::Int32, bias::Int32, backgroundColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, bias::Cfloat, backgroundColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_Planar16F(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, bias::Cfloat, backgroundColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, divisor, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, divisor::Int32, bias::Int32, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveFloatKernel_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernelHeight, kernelWidth, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveFloatKernel_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernelHeight::UInt32, kernelWidth::UInt32, bias::Cfloat, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, bias::Cfloat, backgroundColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveWithBias_ARGB16F(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageConvolveWithBias_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, bias::Cfloat, backgroundColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveMultiKernel_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernels, kernel_height, kernel_width, divisors, biases, backgroundColor, flags)
+    @ccall libacc.vImageConvolveMultiKernel_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernels::Ptr{Ptr{Int16}}, kernel_height::UInt32, kernel_width::UInt32, divisors::Ptr{Int32}, biases::Ptr{Int32}, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageConvolveMultiKernel_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernels, kernel_height, kernel_width, biases, backgroundColor, flags)
+    @ccall libacc.vImageConvolveMultiKernel_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernels::Ptr{Ptr{Cfloat}}, kernel_height::UInt32, kernel_width::UInt32, biases::Ptr{Cfloat}, backgroundColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRichardsonLucyDeConvolve_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel2, kernel_height, kernel_width, kernel_height2, kernel_width2, divisor, divisor2, backgroundColor, iterationCount, flags)
+    @ccall libacc.vImageRichardsonLucyDeConvolve_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel2::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, kernel_height2::UInt32, kernel_width2::UInt32, divisor::Int32, divisor2::Int32, backgroundColor::Pixel_8, iterationCount::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRichardsonLucyDeConvolve_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel2, kernel_height, kernel_width, kernel_height2, kernel_width2, backgroundColor, iterationCount, flags)
+    @ccall libacc.vImageRichardsonLucyDeConvolve_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel2::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, kernel_height2::UInt32, kernel_width2::UInt32, backgroundColor::Pixel_F, iterationCount::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRichardsonLucyDeConvolve_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel2, kernel_height, kernel_width, kernel_height2, kernel_width2, divisor, divisor2, backgroundColor, iterationCount, flags)
+    @ccall libacc.vImageRichardsonLucyDeConvolve_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Int16}, kernel2::Ptr{Int16}, kernel_height::UInt32, kernel_width::UInt32, kernel_height2::UInt32, kernel_width2::UInt32, divisor::Int32, divisor2::Int32, backgroundColor::Ptr{Cuchar}, iterationCount::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRichardsonLucyDeConvolve_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel2, kernel_height, kernel_width, kernel_height2, kernel_width2, backgroundColor, iterationCount, flags)
+    @ccall libacc.vImageRichardsonLucyDeConvolve_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel2::Ptr{Cfloat}, kernel_height::UInt32, kernel_width::UInt32, kernel_height2::UInt32, kernel_width2::UInt32, backgroundColor::Ptr{Cfloat}, iterationCount::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBoxConvolve_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageBoxConvolve_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageBoxConvolve_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageBoxConvolve_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageTentConvolve_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageTentConvolve_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageTentConvolve_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, backgroundColor, flags)
+    @ccall libacc.vImageTentConvolve_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::UInt32, kernel_width::UInt32, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, bias::Cfloat, backgroundColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, bias::Cfloat, backgroundColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_Planar16F(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, bias::Cfloat, backgroundColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_Planar16U(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, bias::Cfloat, backgroundColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_Planar8to16U(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, scale, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_Planar8to16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, scale::Cfloat, bias::Cfloat, backgroundColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSepConvolve_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernelX, kernelX_width, kernelY, kernelY_width, bias, backgroundColor, flags)
+    @ccall libacc.vImageSepConvolve_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernelX::Ptr{Cfloat}, kernelX_width::UInt32, kernelY::Ptr{Cfloat}, kernelY_width::UInt32, bias::Cfloat, backgroundColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+@enum var"##Ctag#351"::UInt32 begin
+    kRotate0DegreesClockwise = 0
+    kRotate90DegreesClockwise = 3
+    kRotate180DegreesClockwise = 2
+    kRotate270DegreesClockwise = 1
+    # kRotate0DegreesCounterClockwise = 0
+    # kRotate90DegreesCounterClockwise = 1
+    # kRotate180DegreesCounterClockwise = 2
+    # kRotate270DegreesCounterClockwise = 3
+end
+
+function vImageRotate_Planar8(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_PlanarF(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_ARGB8888(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_ARGB16U(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_ARGB16S(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_ARGBFFFF(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_Planar16F(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_CbCr16F(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate_ARGB16F(src, dest, tempBuffer, angleInRadians, backColor, flags)
+    @ccall libacc.vImageRotate_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, angleInRadians::Cfloat, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_Planar8(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_Planar16S(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_Planar16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_Planar16U(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_PlanarF(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_ARGB8888(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_ARGB16U(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_ARGB16S(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_ARGBFFFF(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_Planar16F(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_CbCr16F(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_ARGB16F(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_CbCr8(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_CbCr8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_CbCr16U(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_CbCr16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageScale_XRGB2101010W(src, dest, tempBuffer, flags)
+    @ccall libacc.vImageScale_XRGB2101010W(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_Planar8(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_PlanarF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_ARGB8888(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_ARGB16U(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_ARGB16S(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_ARGBFFFF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_Planar16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_CbCr16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarp_ARGB16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarp_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_Planar8(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_PlanarF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_ARGB8888(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_ARGB16U(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_ARGB16S(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_ARGBFFFF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_Planar16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_CbCr16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpD_ARGB16F(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpD_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_AffineTransform_Double}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_Planar8(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_PlanarF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_ARGB8888(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_ARGB16U(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_ARGB16S(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageAffineWarpCG_ARGBFFFF(src, dest, tempBuffer, transform, backColor, flags)
+    @ccall libacc.vImageAffineWarpCG_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_CGAffineTransform}, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageGetPerspectiveWarp(srcPoints, destPoints, transform, flags)
+    @ccall libacc.vImageGetPerspectiveWarp(srcPoints::Ptr{NTuple{2, Cfloat}}, destPoints::Ptr{NTuple{2, Cfloat}}, transform::Ptr{vImage_PerpsectiveTransform}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_Planar8(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_ARGB8888(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_Planar16U(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_ARGB16U(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_Planar16F(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePerspectiveWarp_ARGB16F(src, dest, tempBuffer, transform, interpolation, backColor, flags)
+    @ccall libacc.vImagePerspectiveWarp_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, transform::Ptr{vImage_PerpsectiveTransform}, interpolation::vImage_WarpInterpolation, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_Planar8(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_Planar16U(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_PlanarF(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_ARGB16U(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_ARGB16S(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_ARGBFFFF(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_Planar16F(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_CbCr16F(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalReflect_ARGB16F(src, dest, flags)
+    @ccall libacc.vImageHorizontalReflect_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_Planar8(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_Planar16U(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_PlanarF(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_ARGB16U(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_ARGB16S(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_ARGBFFFF(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_Planar16F(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_CbCr16F(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalReflect_ARGB16F(src, dest, flags)
+    @ccall libacc.vImageVerticalReflect_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_Planar8(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_Planar16U(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_PlanarF(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_ARGB8888(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_ARGB16U(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_ARGB16S(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_ARGBFFFF(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_Planar16F(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_CbCr16F(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageRotate90_ARGB16F(src, dest, rotationConstant, backColor, flags)
+    @ccall libacc.vImageRotate90_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, rotationConstant::UInt8, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_Planar16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_Planar16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16S, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_Planar16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_ARGB16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_ARGB16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_Planar16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_CbCr16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_ARGB16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_Planar16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_Planar16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16S, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_Planar16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_Planar16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_ARGB16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_ARGB16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_Planar16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_CbCr16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_ARGB16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_ARGB16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_ARGB16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_Planar16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_CbCr16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_ARGB16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_ARGB16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_ARGB16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_ARGB16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_ARGB16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_Planar16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_Planar16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Pixel_16F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_CbCr16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_CbCr16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_ARGB16F(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_ARGB16F(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_CbCr8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_CbCr8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_CbCr16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_CbCr16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_CbCr16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_CbCr16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_CbCr16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_CbCr16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShearD_CbCr16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShearD_CbCr16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_CbCr8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_CbCr8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cuchar}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_CbCr16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_CbCr16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_CbCr16U(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_CbCr16U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cushort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_CbCr16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_CbCr16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShearD_CbCr16S(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShearD_CbCr16S(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cdouble, shearSlope::Cdouble, filter::ResamplingFilter, backColor::Ptr{Cshort}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHorizontalShear_XRGB2101010W(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, xTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageHorizontalShear_XRGB2101010W(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, xTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_32U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageVerticalShear_XRGB2101010W(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, yTranslate, shearSlope, filter, backColor, flags)
+    @ccall libacc.vImageVerticalShear_XRGB2101010W(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, yTranslate::Cfloat, shearSlope::Cfloat, filter::ResamplingFilter, backColor::Pixel_32U, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageNewResamplingFilter(scale, flags)
+    @ccall libacc.vImageNewResamplingFilter(scale::Cfloat, flags::vImage_Flags)::ResamplingFilter
+end
+
+function vImageDestroyResamplingFilter(filter)
+    @ccall libacc.vImageDestroyResamplingFilter(filter::ResamplingFilter)::Cvoid
+end
+
+function vImageNewResamplingFilterForFunctionUsingBuffer(filter, scale, kernelFunc, kernelWidth, userData, flags)
+    @ccall libacc.vImageNewResamplingFilterForFunctionUsingBuffer(filter::ResamplingFilter, scale::Cfloat, kernelFunc::Ptr{Cvoid}, kernelWidth::Cfloat, userData::Ptr{Cvoid}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageGetResamplingFilterSize(scale, kernelFunc, kernelWidth, flags)
+    @ccall libacc.vImageGetResamplingFilterSize(scale::Cfloat, kernelFunc::Ptr{Cvoid}, kernelWidth::Cfloat, flags::vImage_Flags)::Csize_t
+end
+
+function vImageGetResamplingFilterExtent(filter, flags)
+    @ccall libacc.vImageGetResamplingFilterExtent(filter::ResamplingFilter, flags::vImage_Flags)::vImagePixelCount
+end
+
+function vImageHistogramCalculation_Planar8(src, histogram, flags)
+    @ccall libacc.vImageHistogramCalculation_Planar8(src::Ptr{vImage_Buffer}, histogram::Ptr{vImagePixelCount}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramCalculation_PlanarF(src, histogram, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageHistogramCalculation_PlanarF(src::Ptr{vImage_Buffer}, histogram::Ptr{vImagePixelCount}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramCalculation_ARGB8888(src, histogram, flags)
+    @ccall libacc.vImageHistogramCalculation_ARGB8888(src::Ptr{vImage_Buffer}, histogram::Ptr{Ptr{vImagePixelCount}}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramCalculation_ARGBFFFF(src, histogram, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageHistogramCalculation_ARGBFFFF(src::Ptr{vImage_Buffer}, histogram::Ptr{Ptr{vImagePixelCount}}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEqualization_Planar8(src, dest, flags)
+    @ccall libacc.vImageEqualization_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEqualization_PlanarF(src, dest, tempBuffer, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageEqualization_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEqualization_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageEqualization_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEqualization_ARGBFFFF(src, dest, tempBuffer, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageEqualization_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramSpecification_Planar8(src, dest, desired_histogram, flags)
+    @ccall libacc.vImageHistogramSpecification_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, desired_histogram::Ptr{vImagePixelCount}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramSpecification_PlanarF(src, dest, tempBuffer, desired_histogram, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageHistogramSpecification_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, desired_histogram::Ptr{vImagePixelCount}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramSpecification_ARGB8888(src, dest, desired_histogram, flags)
+    @ccall libacc.vImageHistogramSpecification_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, desired_histogram::Ptr{Ptr{vImagePixelCount}}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageHistogramSpecification_ARGBFFFF(src, dest, tempBuffer, desired_histogram, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageHistogramSpecification_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, desired_histogram::Ptr{Ptr{vImagePixelCount}}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageContrastStretch_Planar8(src, dest, flags)
+    @ccall libacc.vImageContrastStretch_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageContrastStretch_PlanarF(src, dest, tempBuffer, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageContrastStretch_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageContrastStretch_ARGB8888(src, dest, flags)
+    @ccall libacc.vImageContrastStretch_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageContrastStretch_ARGBFFFF(src, dest, tempBuffer, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageContrastStretch_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEndsInContrastStretch_Planar8(src, dest, percent_low, percent_high, flags)
+    @ccall libacc.vImageEndsInContrastStretch_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, percent_low::Cuint, percent_high::Cuint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEndsInContrastStretch_PlanarF(src, dest, tempBuffer, percent_low, percent_high, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageEndsInContrastStretch_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, percent_low::Cuint, percent_high::Cuint, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEndsInContrastStretch_ARGB8888(src, dest, percent_low, percent_high, flags)
+    @ccall libacc.vImageEndsInContrastStretch_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, percent_low::Ptr{Cuint}, percent_high::Ptr{Cuint}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageEndsInContrastStretch_ARGBFFFF(src, dest, tempBuffer, percent_low, percent_high, histogram_entries, minVal, maxVal, flags)
+    @ccall libacc.vImageEndsInContrastStretch_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, percent_low::Ptr{Cuint}, percent_high::Ptr{Cuint}, histogram_entries::Cuint, minVal::Pixel_F, maxVal::Pixel_F, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageDilate_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageDilate_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cuchar}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageDilate_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageDilate_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageDilate_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageDilate_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cuchar}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageDilate_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageDilate_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageErode_Planar8(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageErode_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cuchar}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageErode_PlanarF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageErode_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageErode_ARGB8888(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageErode_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cuchar}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageErode_ARGBFFFF(src, dest, srcOffsetToROI_X, srcOffsetToROI_Y, kernel, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageErode_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel::Ptr{Cfloat}, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMax_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMax_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMax_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMax_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMax_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMax_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMax_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMax_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMin_Planar8(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMin_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMin_PlanarF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMin_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMin_ARGB8888(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMin_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMin_ARGBFFFF(src, dest, tempBuffer, srcOffsetToROI_X, srcOffsetToROI_Y, kernel_height, kernel_width, flags)
+    @ccall libacc.vImageMin_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, srcOffsetToROI_X::vImagePixelCount, srcOffsetToROI_Y::vImagePixelCount, kernel_height::vImagePixelCount, kernel_width::vImagePixelCount, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_Planar16S(srcs, dests, src_planes, dest_planes, matrix, divisor, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_Planar16S(srcs::Ptr{Ptr{vImage_Buffer}}, dests::Ptr{Ptr{vImage_Buffer}}, src_planes::UInt32, dest_planes::UInt32, matrix::Ptr{Int16}, divisor::Int32, pre_bias::Ptr{Int16}, post_bias::Ptr{Int32}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_Planar8(srcs, dests, src_planes, dest_planes, matrix, divisor, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_Planar8(srcs::Ptr{Ptr{vImage_Buffer}}, dests::Ptr{Ptr{vImage_Buffer}}, src_planes::UInt32, dest_planes::UInt32, matrix::Ptr{Int16}, divisor::Int32, pre_bias::Ptr{Int16}, post_bias::Ptr{Int32}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_PlanarF(srcs, dests, src_planes, dest_planes, matrix, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_PlanarF(srcs::Ptr{Ptr{vImage_Buffer}}, dests::Ptr{Ptr{vImage_Buffer}}, src_planes::UInt32, dest_planes::UInt32, matrix::Ptr{Cfloat}, pre_bias::Ptr{Cfloat}, post_bias::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_ARGB8888(src, dest, matrix, divisor, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_ARGB8888(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, matrix::Ptr{Int16}, divisor::Int32, pre_bias::Ptr{Int16}, post_bias::Ptr{Int32}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_ARGBFFFF(src, dest, matrix, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_ARGBFFFF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, matrix::Ptr{Cfloat}, pre_bias::Ptr{Cfloat}, post_bias::Ptr{Cfloat}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_ARGB8888ToPlanar8(src, dest, matrix, divisor, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_ARGB8888ToPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, matrix::Ptr{Int16}, divisor::Int32, pre_bias::Ptr{Int16}, post_bias::Int32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMatrixMultiply_ARGBFFFFToPlanarF(src, dest, matrix, pre_bias, post_bias, flags)
+    @ccall libacc.vImageMatrixMultiply_ARGBFFFFToPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, matrix::Ptr{Cfloat}, pre_bias::Ptr{Cfloat}, post_bias::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+@enum var"##Ctag#352"::UInt32 begin
+    kvImageGamma_UseGammaValue = 0
+    kvImageGamma_UseGammaValue_half_precision = 1
+    kvImageGamma_5_over_9_half_precision = 2
+    kvImageGamma_9_over_5_half_precision = 3
+    kvImageGamma_5_over_11_half_precision = 4
+    kvImageGamma_11_over_5_half_precision = 5
+    kvImageGamma_sRGB_forward_half_precision = 6
+    kvImageGamma_sRGB_reverse_half_precision = 7
+    kvImageGamma_11_over_9_half_precision = 8
+    kvImageGamma_9_over_11_half_precision = 9
+    kvImageGamma_BT709_forward_half_precision = 10
+    kvImageGamma_BT709_reverse_half_precision = 11
+end
+
+function vImageCreateGammaFunction(gamma, gamma_type, flags)
+    @ccall libacc.vImageCreateGammaFunction(gamma::Cfloat, gamma_type::Cint, flags::vImage_Flags)::GammaFunction
+end
+
+function vImageDestroyGammaFunction(f)
+    @ccall libacc.vImageDestroyGammaFunction(f::GammaFunction)::Cvoid
+end
+
+function vImageGamma_Planar8toPlanarF(src, dest, gamma, flags)
+    @ccall libacc.vImageGamma_Planar8toPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, gamma::GammaFunction, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageGamma_PlanarFtoPlanar8(src, dest, gamma, flags)
+    @ccall libacc.vImageGamma_PlanarFtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, gamma::GammaFunction, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageGamma_PlanarF(src, dest, gamma, flags)
+    @ccall libacc.vImageGamma_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, gamma::GammaFunction, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_Planar8(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_Planar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_Planar8toPlanar16Q12(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_Planar8toPlanar16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_Planar16Q12(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_Planar16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_16S, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_Planar16Q12toPlanar8(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_Planar16Q12toPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_16S, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_Planar8toPlanarF(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_Planar8toPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_8, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_PlanarF(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseGamma_PlanarFtoPlanar8(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImagePiecewiseGamma_PlanarFtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSymmetricPiecewiseGamma_Planar16Q12(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImageSymmetricPiecewiseGamma_Planar16Q12(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Pixel_16S, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSymmetricPiecewiseGamma_PlanarF(src, dest, exponentialCoeffs, gamma, linearCoeffs, boundary, flags)
+    @ccall libacc.vImageSymmetricPiecewiseGamma_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, exponentialCoeffs::Ptr{Cfloat}, gamma::Cfloat, linearCoeffs::Ptr{Cfloat}, boundary::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewisePolynomial_PlanarF(src, dest, coefficients, boundaries, order, log2segments, flags)
+    @ccall libacc.vImagePiecewisePolynomial_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, coefficients::Ptr{Ptr{Cfloat}}, boundaries::Ptr{Cfloat}, order::UInt32, log2segments::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewisePolynomial_Planar8toPlanarF(src, dest, coefficients, boundaries, order, log2segments, flags)
+    @ccall libacc.vImagePiecewisePolynomial_Planar8toPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, coefficients::Ptr{Ptr{Cfloat}}, boundaries::Ptr{Cfloat}, order::UInt32, log2segments::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewisePolynomial_PlanarFtoPlanar8(src, dest, coefficients, boundaries, order, log2segments, flags)
+    @ccall libacc.vImagePiecewisePolynomial_PlanarFtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, coefficients::Ptr{Ptr{Cfloat}}, boundaries::Ptr{Cfloat}, order::UInt32, log2segments::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageSymmetricPiecewisePolynomial_PlanarF(src, dest, coefficients, boundaries, order, log2segments, flags)
+    @ccall libacc.vImageSymmetricPiecewisePolynomial_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, coefficients::Ptr{Ptr{Cfloat}}, boundaries::Ptr{Cfloat}, order::UInt32, log2segments::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImagePiecewiseRational_PlanarF(src, dest, topCoefficients, bottomCoefficients, boundaries, topOrder, bottomOrder, log2segments, flags)
+    @ccall libacc.vImagePiecewiseRational_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, topCoefficients::Ptr{Ptr{Cfloat}}, bottomCoefficients::Ptr{Ptr{Cfloat}}, boundaries::Ptr{Cfloat}, topOrder::UInt32, bottomOrder::UInt32, log2segments::UInt32, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanar16(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanar16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_16U}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanar24(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanar24(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{UInt32}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanar48(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanar48(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{UInt64}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanar96(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanar96(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_FFFF}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanar128(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanar128(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_FFFF}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar8toPlanarF(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar8toPlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_F}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_PlanarFtoPlanar8(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_PlanarFtoPlanar8(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_8}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_8to64U(src, dest, LUT, flags)
+    @ccall libacc.vImageLookupTable_8to64U(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, LUT::Ptr{UInt64}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageLookupTable_Planar16(src, dest, table, flags)
+    @ccall libacc.vImageLookupTable_Planar16(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_16U}, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageInterpolatedLookupTable_PlanarF(src, dest, table, tableEntries, maxFloat, minFloat, flags)
+    @ccall libacc.vImageInterpolatedLookupTable_PlanarF(src::Ptr{vImage_Buffer}, dest::Ptr{vImage_Buffer}, table::Ptr{Pixel_F}, tableEntries::vImagePixelCount, maxFloat::Cfloat, minFloat::Cfloat, flags::vImage_Flags)::vImage_Error
+end
+
+mutable struct vImage_MultidimensionalTableData end
+
+const vImage_MultidimensionalTable = Ptr{vImage_MultidimensionalTableData}
+
+@enum vImageMDTableUsageHint::UInt32 begin
+    kvImageMDTableHint_16Q12 = 1
+    kvImageMDTableHint_Float = 2
+end
+
+function vImageMultidimensionalTable_Create(tableData, numSrcChannels, numDestChannels, table_entries_per_dimension, hint, flags, err)
+    @ccall libacc.vImageMultidimensionalTable_Create(tableData::Ptr{UInt16}, numSrcChannels::UInt32, numDestChannels::UInt32, table_entries_per_dimension::Ptr{UInt8}, hint::vImageMDTableUsageHint, flags::vImage_Flags, err::Ptr{vImage_Error})::vImage_MultidimensionalTable
+end
+
+function vImageMultidimensionalTable_Retain(table)
+    @ccall libacc.vImageMultidimensionalTable_Retain(table::vImage_MultidimensionalTable)::vImage_Error
+end
+
+function vImageMultidimensionalTable_Release(table)
+    @ccall libacc.vImageMultidimensionalTable_Release(table::vImage_MultidimensionalTable)::vImage_Error
+end
+
+@enum vImage_InterpolationMethod::UInt32 begin
+    kvImageNoInterpolation = 0
+    kvImageFullInterpolation = 1
+    kvImageHalfInterpolation = 2
+end
+
+function vImageMultiDimensionalInterpolatedLookupTable_PlanarF(srcs, dests, tempBuffer, table, method, flags)
+    @ccall libacc.vImageMultiDimensionalInterpolatedLookupTable_PlanarF(srcs::Ptr{vImage_Buffer}, dests::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, table::vImage_MultidimensionalTable, method::vImage_InterpolationMethod, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageMultiDimensionalInterpolatedLookupTable_Planar16Q12(srcs, dests, tempBuffer, table, method, flags)
+    @ccall libacc.vImageMultiDimensionalInterpolatedLookupTable_Planar16Q12(srcs::Ptr{vImage_Buffer}, dests::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, table::vImage_MultidimensionalTable, method::vImage_InterpolationMethod, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFloodFill_Planar8(srcDest, tempBuffer, seedX, seedY, newValue, connectivity, flags)
+    @ccall libacc.vImageFloodFill_Planar8(srcDest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, seedX::vImagePixelCount, seedY::vImagePixelCount, newValue::Pixel_8, connectivity::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFloodFill_Planar16U(srcDest, tempBuffer, seedX, seedY, newValue, connectivity, flags)
+    @ccall libacc.vImageFloodFill_Planar16U(srcDest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, seedX::vImagePixelCount, seedY::vImagePixelCount, newValue::Pixel_16U, connectivity::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFloodFill_ARGB8888(srcDest, tempBuffer, seedX, seedY, newValue, connectivity, flags)
+    @ccall libacc.vImageFloodFill_ARGB8888(srcDest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, seedX::vImagePixelCount, seedY::vImagePixelCount, newValue::Ptr{Cuchar}, connectivity::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+function vImageFloodFill_ARGB16U(srcDest, tempBuffer, seedX, seedY, newValue, connectivity, flags)
+    @ccall libacc.vImageFloodFill_ARGB16U(srcDest::Ptr{vImage_Buffer}, tempBuffer::Ptr{Cvoid}, seedX::vImagePixelCount, seedY::vImagePixelCount, newValue::Ptr{Cushort}, connectivity::Cint, flags::vImage_Flags)::vImage_Error
+end
+
+struct var"##Ctag#354"
     LSW::Int32
     d3::UInt32
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#344"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#354"}, f::Symbol)
     f === :LSW && return Ptr{Int32}(x + 0)
     f === :d3 && return Ptr{UInt32}(x + 4)
     f === :d2 && return Ptr{UInt32}(x + 8)
@@ -6159,19 +8654,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#344"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#344", f::Symbol)
-    r = Ref{var"##Ctag#344"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#344"}, r)
+function Base.getproperty(x::var"##Ctag#354", f::Symbol)
+    r = Ref{var"##Ctag#354"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#354"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#344"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#354"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#346"
+struct var"##Ctag#356"
     LSW::Int32
     d31::UInt32
     d30::UInt32
@@ -6205,7 +8700,7 @@ struct var"##Ctag#346"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#346"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#356"}, f::Symbol)
     f === :LSW && return Ptr{Int32}(x + 0)
     f === :d31 && return Ptr{UInt32}(x + 4)
     f === :d30 && return Ptr{UInt32}(x + 8)
@@ -6241,19 +8736,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#346"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#346", f::Symbol)
-    r = Ref{var"##Ctag#346"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#346"}, r)
+function Base.getproperty(x::var"##Ctag#356", f::Symbol)
+    r = Ref{var"##Ctag#356"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#356"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#346"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#356"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#348"
+struct var"##Ctag#358"
     LSW::Int32
     d15::UInt32
     d14::UInt32
@@ -6271,7 +8766,7 @@ struct var"##Ctag#348"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#348"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#358"}, f::Symbol)
     f === :LSW && return Ptr{Int32}(x + 0)
     f === :d15 && return Ptr{UInt32}(x + 4)
     f === :d14 && return Ptr{UInt32}(x + 8)
@@ -6291,25 +8786,25 @@ function Base.getproperty(x::Ptr{var"##Ctag#348"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#348", f::Symbol)
-    r = Ref{var"##Ctag#348"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#348"}, r)
+function Base.getproperty(x::var"##Ctag#358", f::Symbol)
+    r = Ref{var"##Ctag#358"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#358"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#348"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#358"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#351"
+struct var"##Ctag#361"
     LSW::UInt32
     d3::UInt32
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#351"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#361"}, f::Symbol)
     f === :LSW && return Ptr{UInt32}(x + 0)
     f === :d3 && return Ptr{UInt32}(x + 4)
     f === :d2 && return Ptr{UInt32}(x + 8)
@@ -6317,19 +8812,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#351"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#351", f::Symbol)
-    r = Ref{var"##Ctag#351"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#351"}, r)
+function Base.getproperty(x::var"##Ctag#361", f::Symbol)
+    r = Ref{var"##Ctag#361"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#361"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#351"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#361"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#353"
+struct var"##Ctag#363"
     LSW::UInt32
     d7::UInt32
     d6::UInt32
@@ -6339,7 +8834,7 @@ struct var"##Ctag#353"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#353"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#363"}, f::Symbol)
     f === :LSW && return Ptr{UInt32}(x + 0)
     f === :d7 && return Ptr{UInt32}(x + 4)
     f === :d6 && return Ptr{UInt32}(x + 8)
@@ -6351,19 +8846,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#353"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#353", f::Symbol)
-    r = Ref{var"##Ctag#353"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#353"}, r)
+function Base.getproperty(x::var"##Ctag#363", f::Symbol)
+    r = Ref{var"##Ctag#363"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#363"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#353"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#363"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#355"
+struct var"##Ctag#365"
     LSW::UInt32
     d31::UInt32
     d30::UInt32
@@ -6397,7 +8892,7 @@ struct var"##Ctag#355"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#355"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#365"}, f::Symbol)
     f === :LSW && return Ptr{UInt32}(x + 0)
     f === :d31 && return Ptr{UInt32}(x + 4)
     f === :d30 && return Ptr{UInt32}(x + 8)
@@ -6433,19 +8928,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#355"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#355", f::Symbol)
-    r = Ref{var"##Ctag#355"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#355"}, r)
+function Base.getproperty(x::var"##Ctag#365", f::Symbol)
+    r = Ref{var"##Ctag#365"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#365"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#355"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#365"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#357"
+struct var"##Ctag#367"
     LSW::Int32
     d7::UInt32
     d6::UInt32
@@ -6455,7 +8950,7 @@ struct var"##Ctag#357"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#357"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#367"}, f::Symbol)
     f === :LSW && return Ptr{Int32}(x + 0)
     f === :d7 && return Ptr{UInt32}(x + 4)
     f === :d6 && return Ptr{UInt32}(x + 8)
@@ -6467,19 +8962,19 @@ function Base.getproperty(x::Ptr{var"##Ctag#357"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#357", f::Symbol)
-    r = Ref{var"##Ctag#357"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#357"}, r)
+function Base.getproperty(x::var"##Ctag#367", f::Symbol)
+    r = Ref{var"##Ctag#367"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#367"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#357"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#367"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
 
-struct var"##Ctag#359"
+struct var"##Ctag#369"
     LSW::UInt32
     d15::UInt32
     d14::UInt32
@@ -6497,7 +8992,7 @@ struct var"##Ctag#359"
     d2::UInt32
     MSW::UInt32
 end
-function Base.getproperty(x::Ptr{var"##Ctag#359"}, f::Symbol)
+function Base.getproperty(x::Ptr{var"##Ctag#369"}, f::Symbol)
     f === :LSW && return Ptr{UInt32}(x + 0)
     f === :d15 && return Ptr{UInt32}(x + 4)
     f === :d14 && return Ptr{UInt32}(x + 8)
@@ -6517,17 +9012,31 @@ function Base.getproperty(x::Ptr{var"##Ctag#359"}, f::Symbol)
     return getfield(x, f)
 end
 
-function Base.getproperty(x::var"##Ctag#359", f::Symbol)
-    r = Ref{var"##Ctag#359"}(x)
-    ptr = Base.unsafe_convert(Ptr{var"##Ctag#359"}, r)
+function Base.getproperty(x::var"##Ctag#369", f::Symbol)
+    r = Ref{var"##Ctag#369"}(x)
+    ptr = Base.unsafe_convert(Ptr{var"##Ctag#369"}, r)
     fptr = getproperty(ptr, f)
     GC.@preserve r unsafe_load(fptr)
 end
 
-function Base.setproperty!(x::Ptr{var"##Ctag#359"}, f::Symbol, v)
+function Base.setproperty!(x::Ptr{var"##Ctag#369"}, f::Symbol, v)
     unsafe_store!(getproperty(x, f), v)
 end
 
+
+const CBLAS_INDEX = Cint
+
+# Skipping MacroDefinition: __CF_ENUM_ATTRIBUTES __attribute__ ( ( enum_extensibility ( open ) ) )
+
+# Skipping MacroDefinition: __CF_CLOSED_ENUM_ATTRIBUTES __attribute__ ( ( enum_extensibility ( closed ) ) )
+
+# Skipping MacroDefinition: __CF_OPTIONS_ATTRIBUTES __attribute__ ( ( flag_enum , enum_extensibility ( open ) ) )
+
+# Skipping MacroDefinition: _CF_TYPED_ENUM __attribute__ ( ( swift_wrapper ( enum ) ) )
+
+# Skipping MacroDefinition: _CF_TYPED_EXTENSIBLE_ENUM __attribute__ ( ( swift_wrapper ( struct ) ) )
+
+# Skipping MacroDefinition: CF_SWIFT_BRIDGED_TYPEDEF __attribute__ ( ( swift_bridged_typedef ) )
 
 const vDSP_Version0 = 1126
 
@@ -6538,8 +9047,6 @@ const USE_NON_APPLE_STANDARD_DATATYPES = 1
 # Skipping MacroDefinition: __VBASICOPS_INLINE_ATTR__ __attribute__ ( ( __always_inline__ , __nodebug__ ) )
 
 # Skipping MacroDefinition: SPARSE_PUBLIC_INTERFACE __attribute__ ( ( overloadable ) )
-
-const CBLAS_INDEX = Cint
 
 # Skipping MacroDefinition: __SPARSE_ENUM_ATTR __attribute__ ( ( enum_extensibility ( open ) ) )
 
@@ -6560,5 +9067,11 @@ const BNNS_MAX_TENSOR_DIMENSION = 8
 const QUADRATURE_INTEGRATE_QAG_WORKSPACE_PER_INTERVAL = 32
 
 const QUADRATURE_INTEGRATE_QAGS_WORKSPACE_PER_INTERVAL = 152
+
+# Skipping MacroDefinition: VIMAGE_PF __attribute__ ( ( visibility ( "default" ) ) )
+
+const VIMAGE_AFFINETRANSFORM_DOUBLE_IS_AVAILABLE = 1
+
+const VIMAGE_CGAFFINETRANSFORM_IS_AVAILABLE = 1
 
 end # module
