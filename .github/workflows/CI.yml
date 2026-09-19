@@ -7,31 +7,23 @@ on:
     tags: '*'
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         version:
           - '1'
+          - 'min'
         os:
-          - ubuntu-latest
+          - macOS-latest
           - macOS-15-intel
-        arch:
-          - x64
-        include:
-          - os: macOS-latest
-            arch: aarch64
-            version: 'min'
-          - os: macOS-latest
-            arch: aarch64
-            version: '1'
+          - ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
