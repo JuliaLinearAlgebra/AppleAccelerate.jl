@@ -26,14 +26,17 @@ struct bnns_graph_compile_options_t
     size::Csize_t
 end
 
-struct bnns_graph_shape_t
+struct bnns_user_message_data_t
     data::Ptr{Cvoid}
     size::Csize_t
 end
 
-struct bnns_user_message_data_t
-    data::Ptr{Cvoid}
-    size::Csize_t
+# bnns_graph_shape_t is NOT one of the `{ data, size }` handles above: it is
+# `{ size_t rank; uint64_t *shape; }` — the count comes first. Clang.jl drops it for the same
+# trailing-availability-attribute reason, so define it here with the header's field order.
+struct bnns_graph_shape_t
+    rank::Csize_t
+    shape::Ptr{UInt64}
 end
 
 # bnns_graph_argument_t holds an anonymous union of three pointer types

@@ -58,3 +58,23 @@ end
     dead = sort!([s for s in syms if Libdl.dlsym_e(h, s) == C_NULL])
     isempty(dead) || @info "Generated wrappers with no symbol on this platform (informational)" count = length(dead)
 end
+
+# `__asm__` labels. bnns_graph.h keeps the source-level names but links them to `_v2`
+# symbols (`int BNNSGraphContextExecute(…) __asm__("_BNNSGraphContextExecute_v2")`); the
+# un-suffixed symbols are still exported with the OLD argument lists, so a binding that
+# ignores the label resolves fine and then crashes when called. The generator retargets
+# these; lock the result in, along with the one prologue struct that is not a
+# `{ data, size }` handle.
+@testset "LibAccelerate honours __asm__ labels" begin
+    libsrc = read(joinpath(dirname(pathof(AppleAccelerate)), "lib", "LibAccelerate.jl"), String)
+    for f in ("BNNSGraphCompileFromFile", "BNNSGraphContextExecute", "BNNSGraphContextDestroy",
+              "BNNSGraphContextGetWorkspaceSize", "BNNSGraphContextSetDynamicShapes",
+              "BNNSGraphContextSetBatchSize", "BNNSGraphGetInputNames", "BNNSGraphGetOutputNames")
+        @test isdefined(AppleAccelerate.LibAccelerate, Symbol(f))
+        @test occursin("@ccall libacc.$(f)_v2(", libsrc)
+        @test !occursin("@ccall libacc.$(f)(", libsrc)
+    end
+    S = AppleAccelerate.LibAccelerate.bnns_graph_shape_t
+    @test fieldnames(S) == (:rank, :shape)
+    @test fieldtypes(S) == (Csize_t, Ptr{UInt64})
+end
