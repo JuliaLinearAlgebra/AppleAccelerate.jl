@@ -8,7 +8,7 @@
   <a href="https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Docs"/></a>
   <a href="https://juliahub.com/ui/Packages/General/AppleAccelerate"><img src="https://juliahub.com/docs/General/AppleAccelerate/stable/version.svg" alt="JuliaHub"/></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
-  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.10-blue.svg" alt="Julia compat"/></a>
+  <a href="https://julialang.org/downloads/"><img src="https://img.shields.io/badge/Julia-≥1.11-blue.svg" alt="Julia compat"/></a>
 </p>
 
 A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/documentation/accelerate), providing:
@@ -17,6 +17,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Dense linear algebra** — all of `LinearAlgebra` (`lu`, `qr`, `svd`, `cholesky`, `eigen`, …) accelerated transparently via [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — **6–13× faster** single-threaded GEMM than OpenBLAS on Apple Silicon (SME/AMX co-processor), plus **2–4× faster** factorizations and solves
 - **Sparse linear algebra** via `libSparse` — direct (Cholesky / LDLᵀ / LU / QR) and iterative (CG / GMRES / LSMR) solvers, real and complex
 - **Signal processing** — 1D/2D real & complex FFT (batched, mixed-radix), DCT, convolution, biquad filtering, window functions; cached setups make no-plan `fft(x)` competitive with FFTW and drop the FFTW dependency
+- **SIMD math inside `@simd` loops** via `AppleAccelerate.SIMDMath` — scalar math functions that LLVM turns into SIMD calls, for loops the array API can't express (strided access, values computed on the fly) — **2–4× faster** than a scalar Base loop
 - **Neural-network primitives** via BNNS — `Float32` matrix multiply and pointwise activations
 - **Image processing** via vImage — geometry (scale, rotate, affine warp), convolution, morphology, histogram, alpha compositing, and format/colorspace conversion (incl. Y′CbCr)
 
@@ -24,7 +25,7 @@ See the [benchmarks](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev
 
 ## Installation
 
-Requires macOS 13.4+ and Julia 1.10+.
+Requires macOS 13.4+ and Julia 1.11+.
 
 ```julia
 using Pkg
@@ -52,6 +53,23 @@ using AppleAccelerate
 X = randn(10_000)
 Y = AppleAccelerate.exp(X)                      # also sin, cos, log, sqrt, tanh, …
 AppleAccelerate.sincos(X)                       # fused, both results in one pass
+```
+
+### SIMD math inside `@simd` loops (`AppleAccelerate.SIMDMath`)
+
+For loops the array API can't express. Prefer `AppleAccelerate.exp`/`log` on whole arrays
+when you can — they're faster.
+
+```julia
+using AppleAccelerate
+using AppleAccelerate.SIMDMath: log
+function logsum_strided(X, stride)
+    u = zero(eltype(X))
+    @simd for i in 1:stride:length(X)
+        @inbounds u += log(X[i])
+    end
+    u
+end
 ```
 
 ### Signal processing — FFT / DCT / convolution / biquad filtering

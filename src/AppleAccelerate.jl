@@ -188,6 +188,7 @@ end
 
     include("array.jl")
     include("vmath.jl")
+    include("simdmath.jl")
     include("complexarray.jl")
     include("dsp.jl")
     include("sparse.jl")

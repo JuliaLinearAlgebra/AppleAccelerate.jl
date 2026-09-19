@@ -7,6 +7,7 @@ makedocs(;
     pages = [
         "Introduction" => "index.md",
         "Array Operations (vDSP / vForce)" => "array.md",
+        "SIMD Math in `@simd` Loops" => "simdmath.md",
         "Complex Array Operations (vDSP)" => "complex.md",
         "Dense Linear Algebra (BLAS / LAPACK)" => "blas.md",
         "Sparse Linear Algebra (libSparse)" => "sparse.md",
