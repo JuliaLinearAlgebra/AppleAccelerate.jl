@@ -351,8 +351,8 @@ end
     end
 
     # Non-power-of-2 dimensions are rejected.
-    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 8, 12))
-    @test_throws AssertionError AppleAccelerate.rfft(randn(Float64, 12, 8))
+    @test_throws ArgumentError AppleAccelerate.rfft(randn(Float64, 8, 12))
+    @test_throws ArgumentError AppleAccelerate.rfft(randn(Float64, 12, 8))
 end
 
 @testset "brfft and irfft 2D roundtrip" begin
@@ -889,6 +889,45 @@ end
     @test_throws ErrorException AppleAccelerate.deq22!(zeros(5), randn(5), randn(4))   # B != 5
     @test_throws ErrorException AppleAccelerate.deq22!(zeros(5), randn(2), Float64[1,2,3,4,5])  # A too short
     @test_throws ErrorException AppleAccelerate.deq22!(zeros(6), randn(5), Float64[1,2,3,4,5])  # C != A length
+end
+
+# Input validation must throw real exceptions, not `@assert` (which can be compiled
+# out): a bad length reaching vDSP reads/writes out of bounds.
+@testset "Validation throws ArgumentError / DimensionMismatch" begin
+    @testset "$T" for T in (Float32, Float64)
+        CT = Complex{T}
+        setup = AppleAccelerate.plan_fft(16, T)
+
+        # FFTSetup construction
+        @test_throws ArgumentError AppleAccelerate.plan_fft(12, T)
+
+        # 1-D complex, explicit setup: length must be a power of 2
+        @test_throws ArgumentError AppleAccelerate.fft(randn(CT, 12), setup)
+        @test_throws ArgumentError AppleAccelerate.fft!(randn(CT, 12), setup)
+
+        # 2-D complex
+        @test_throws ArgumentError AppleAccelerate.fft(randn(CT, 8, 12))
+        @test_throws ArgumentError AppleAccelerate.fft!(randn(CT, 12, 8))
+
+        # 1-D real, explicit setup
+        @test_throws ArgumentError AppleAccelerate.rfft(randn(T, 12), setup)
+
+        # brfft: output length must be a power of 2, input must be n÷2+1 long
+        @test_throws ArgumentError AppleAccelerate.brfft(randn(CT, 7), 12, setup)
+        @test_throws DimensionMismatch AppleAccelerate.brfft(randn(CT, 5), 16, setup)
+
+        # 2-D real
+        @test_throws ArgumentError AppleAccelerate.rfft(randn(T, 8, 12))
+        @test_throws ArgumentError AppleAccelerate.brfft(randn(CT, 7, 8), 12)
+        @test_throws DimensionMismatch AppleAccelerate.brfft(randn(CT, 4, 8), 16)
+
+        # batched
+        @test_throws ArgumentError AppleAccelerate.fft(randn(CT, 12, 4), 1)
+
+        # the message names the offending value
+        err = try AppleAccelerate.fft(randn(CT, 12), setup) catch e; e end
+        @test err isa ArgumentError && occursin("12", err.msg)
+    end
 end
 
 @testset "DCT types 2/3/4 vs DSP.dct/idct" begin
