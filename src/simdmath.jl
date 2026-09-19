@@ -163,7 +163,13 @@ Two arguments: `atan(y, x)`, `hypot`, `nextafter`, `pow`, `rem`, `remainder`.
 
 All are defined for `Float32` and `Float64` only. `nextafter`, `pow` and `remainder`
 have no `Base` counterpart with matching semantics and are named after their C
-equivalents; use `pow(x, y)` rather than `x^y`.
+equivalents; use `pow(x, y)` rather than `x^y` (or let [`@simdmath`](@ref) rewrite
+`x^y` for you).
+
+These are all the one- and two-argument routines `<simd/math.h>` provides that are
+worth calling. Names such as `copysign`, `min`/`max` (`fmin`/`fmax`) and `fdim` have
+no `_simd_*` entry point at all -- the header implements them inline, and LLVM
+already vectorises the `Base` versions natively.
 
 Deliberately absent:
 
@@ -275,6 +281,123 @@ for (tbl, nargs) in ((UNARY, 1), (BINARY, 2))
             end
         end
     end
+end
+
+# ---------------------------------------------------------------------------------
+# `@simdmath`
+# ---------------------------------------------------------------------------------
+#
+# `using AppleAccelerate.SIMDMath: log` shadows `Base.log` for the *whole* enclosing
+# module, which is a lot of blast radius for one hot loop -- and because the functions
+# above only have `Float32`/`Float64` methods, every other `log(::Int)` or
+# `rem(i, n)` in that module then throws a `MethodError`. The macro scopes the
+# substitution to one expression instead, and routes through the `_simdmath_*`
+# dispatchers below so that argument types SIMDMath does not cover keep their `Base`
+# meaning.
+
+# Julia name => arities provided. `atan` appears in both tables.
+const _ARITIES = let d = Dict{Symbol,Vector{Int}}()
+    for (tbl, nargs) in ((UNARY, 1), (BINARY, 2)), t in tbl
+        push!(get!(d, first(t), Int[]), nargs)
+    end
+    d
+end
+
+_dispatcher(name::Symbol) = Symbol(:_simdmath_, name)
+
+for (jlname, arities) in _ARITIES
+    disp = _dispatcher(jlname)
+    for nargs in arities
+        args = [Symbol(:x, i) for i in 1:nargs]
+        sig = [:($(a)::T) for a in args]
+        @eval @inline $disp($(sig...)) where {T<:Union{Float32,Float64}} = $jlname($(args...))
+    end
+    # Anything else keeps its ordinary meaning. `pow` is what `x^y` rewrites to, so
+    # its fallback is `^`; `nextafter` and `remainder` have no `Base` counterpart and
+    # so get no fallback -- a `MethodError` naming them is the honest answer there.
+    base = jlname === :pow ? :(Base.:^) :
+           isdefined(Base, jlname) ? :(Base.$jlname) : nothing
+    base === nothing || @eval @inline $disp(args...) = $base(args...)
+end
+
+_rewritable(f, nargs::Int) = f isa Symbol && nargs in get(_ARITIES, f, ())
+
+# Positional, unsplatted arguments only: keywords and splats never reach a SIMDMath
+# method, so such calls are left exactly as written.
+_plain_args(args) = !any(a -> a isa Expr && a.head in (:parameters, :kw, :...), args)
+
+_rewrite(x) = x
+function _rewrite(ex::Expr)
+    # Quoted code is data, not code that runs here.
+    ex.head === :quote && return ex
+    if ex.head === :call && _plain_args(ex.args[2:end])
+        f, args = ex.args[1], ex.args[2:end]
+        if f === :^ && length(args) == 2
+            # `x^2` lowers to `Base.literal_pow`, i.e. `x*x`; a `pow` call would be
+            # both slower and less accurate, so literal integer exponents stay put.
+            args[2] isa Integer && return Expr(:call, :^, map(_rewrite, args)...)
+            return Expr(:call, GlobalRef(SIMDMath, _dispatcher(:pow)), map(_rewrite, args)...)
+        elseif _rewritable(f, length(args))
+            return Expr(:call, GlobalRef(SIMDMath, _dispatcher(f)), map(_rewrite, args)...)
+        end
+    end
+    # A method definition's signature is a name being bound, not a call being made.
+    if ex.head in (:function, :->) ||
+       (ex.head === :(=) && ex.args[1] isa Expr && ex.args[1].head in (:call, :where, :(::)))
+        return Expr(ex.head, ex.args[1], map(_rewrite, ex.args[2:end])...)
+    end
+    return Expr(ex.head, map(_rewrite, ex.args)...)
+end
+
+"""
+    SIMDMath.@simdmath expr
+
+Rewrite the math calls inside `expr` to their `SIMDMath` equivalents, without
+importing anything into the enclosing module:
+
+```julia
+using AppleAccelerate.SIMDMath: @simdmath
+
+function weighted_logsum(X, W)
+    u = zero(eltype(X))
+    @simdmath @simd for i in eachindex(X, W)
+        @inbounds u += W[i] * log(X[i])^W[i]
+    end
+    u
+end
+```
+
+This is the alternative to `using AppleAccelerate.SIMDMath: log`, which replaces
+`log` everywhere in the module rather than in one loop. `@simdmath` goes outside or
+inside `@simd`; it does not add `@simd` or `@inbounds` for you, and the loop still
+has to vectorise for any of this to matter (see [`SIMDMath`](@ref)).
+
+What is rewritten:
+
+  * unqualified calls to a name in the "Available functions" list of
+    [`SIMDMath`](@ref), with a matching number of positional arguments;
+  * `x^y`, which becomes `pow(x, y)` -- except when `y` is a literal integer
+    (`x^2`), which Julia already lowers to multiplications.
+
+What is left alone: qualified calls (`Base.log(x)`), broadcasts (`log.(x)`, `x .^ y`),
+calls with keyword or splatted arguments, the signature of a method defined inside
+`expr`, anything inside a quoted expression, and every function SIMDMath does not
+provide.
+
+A rewritten call only uses the SIMD routine when all its arguments are `Float32` or
+all are `Float64`. For any other argument types it falls back to the `Base`
+function, so index arithmetic such as `rem(i, 4)` and integer powers `x^n` keep
+working unchanged. (`nextafter` and `remainder` have no `Base` counterpart to fall
+back to.)
+
+The rewrite is purely syntactic: a local variable or argument that happens to be
+called `log` and is then *called* will be rewritten too.
+
+The accuracy caveats of [`SIMDMath`](@ref) apply unchanged -- these routines are less
+accurate than `Base`.
+"""
+macro simdmath(ex)
+    esc(_rewrite(ex))
 end
 
 end # module SIMDMath
