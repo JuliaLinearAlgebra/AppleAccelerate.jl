@@ -646,3 +646,43 @@ AppleAccelerate.imgfir
 ## Broadcasting
 
 AppleAccelerate overrides `Base.copy` and `Base.copyto!` for `Broadcasted` objects, so that broadcasting syntax like `f.(X)` automatically uses the accelerated implementation.
+
+## Type-Dispatched int ↔ float Conversion
+
+[`float_to_int`](@ref AppleAccelerate.float_to_int) and
+[`int_to_float`](@ref AppleAccelerate.int_to_float) are a front end over the C-named
+`vfix*` / `vflt*` families described under *Type Conversion (int ↔ float)*: the integer
+type and the rounding mode are chosen from Julia types and a keyword rather than being
+spelled into the function name. They call the same vDSP kernels.
+
+| Function | Description |
+|----------|-------------|
+| [`float_to_int`](@ref AppleAccelerate.float_to_int) / [`float_to_int!`](@ref AppleAccelerate.float_to_int!) | `Float32`/`Float64` → `Int8`/`Int16`/`Int32`/`UInt8`/`UInt16`/`UInt32`, `rounding = :trunc` (default) or `:nearest` |
+| [`int_to_float`](@ref AppleAccelerate.int_to_float) / [`int_to_float!`](@ref AppleAccelerate.int_to_float!) | the same integer types → `Float32`/`Float64` |
+
+```@example array
+X = Float64[-1.7, 0.5, 1.5, 2.5, 2.9]
+
+AppleAccelerate.float_to_int(Int16, X)                       # Int16[-1, 0, 1, 2, 2]
+AppleAccelerate.float_to_int(Int16, X; rounding = :nearest)  # Int16[-2, 0, 2, 2, 3] (ties → even)
+AppleAccelerate.int_to_float(Float32, UInt8[0, 128, 255])    # Float32[0, 128, 255]
+
+# Strided views work copy-free, e.g. one channel of interleaved 16-bit audio:
+pcm  = Int16[100, -100, 200, -200, 300, -300]                # L R L R L R
+left = AppleAccelerate.int_to_float(Float32, view(pcm, 1:2:6))
+nothing # hide
+```
+
+!!! warning "Out-of-range input is unspecified"
+    The vDSP float → int kernels neither saturate nor throw. An element whose rounded
+    value does not fit the integer type (including `NaN`, `±Inf`, and negative values
+    for unsigned targets) produces an unspecified result that varies with the width and
+    the float type. Clip first with [`vclip`](@ref AppleAccelerate.vclip) when the range
+    is not already guaranteed.
+
+```@docs
+AppleAccelerate.float_to_int!
+AppleAccelerate.float_to_int
+AppleAccelerate.int_to_float!
+AppleAccelerate.int_to_float
+```

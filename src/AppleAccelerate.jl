@@ -192,6 +192,7 @@ end
     include("complexarray.jl")
     include("dsp.jl")
     include("fftplan.jl")
+    include("vdsp_extras.jl")
     include("sparse.jl")
     include("quadrature.jl")
     include("bnns.jl")

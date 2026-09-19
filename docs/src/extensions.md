@@ -77,3 +77,13 @@ regular `[deps]`, not weak dependencies:
 BLAS/LAPACK forwarding is the one place AppleAccelerate does change global
 behavior — that is the documented purpose of loading it, and it goes through
 libblastrampoline, a mechanism designed for exactly this.
+
+## Coverage of the raw layer
+
+How much of the generated layer has an idiomatic wrapper is audited exactly by
+`gen/coverage_audit.jl` (it inspects lowered IR rather than grepping for C names). The
+vDSP result, including the handful of functions deliberately left to the raw layer:
+
+```@docs
+AppleAccelerate.VDSP_COVERAGE
+```

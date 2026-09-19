@@ -57,7 +57,11 @@ bring a new capability area in scope**, add its headers to the `headers` list in
 `gen/generate.jl` and regenerate (Phase 2). List headers individually if the umbrella
 drags in CoreGraphics/CoreFoundation — Clang.jl cannot resolve libdispatch's typedefs.
 
-**Coverage-gap scan.** Don't use a literal `comm -23` of raw-vs-referenced symbols —
+**Coverage-gap scan.** Prefer the exact audit — `julia --project=. gen/coverage_audit.jl
+[prefix]` walks the lowered IR of every method and lists the raw functions nothing calls
+(it found 10 genuine vDSP gaps where the text heuristic below reported ~50, because the
+heuristic cannot see names built as `string("vDSP_vfix", intname, suff)`). The text scan
+remains useful when the package doesn't load. Don't use a literal `comm -23` of raw-vs-referenced symbols —
 it over-reports catastrophically (wrappers build names dynamically, e.g.
 `Symbol(string("vDSP_", op, suff))` and from symbol lists like `(:vadd,:vsub,:vmul)`,
 so most *wrapped* functions look "missing"). Reconcile at the **base-operation** level:

@@ -250,3 +250,25 @@ AppleAccelerate.blackman
 AppleAccelerate.hamming
 AppleAccelerate.hanning
 ```
+
+## Cross-Precision Multi-Channel Biquad Updates
+
+[`biquadm_setcoefficients!`](@ref AppleAccelerate.biquadm_setcoefficients!) and
+[`biquadm_settargets!`](@ref AppleAccelerate.biquadm_settargets!) also accept
+coefficients whose precision differs from the setup's, so filters designed in `Float64`
+can retune a `Float32` processing chain (or the reverse) without a converted temporary.
+The interpolation rate and threshold are always taken in the setup's precision.
+
+```@example filtering_xprec
+using AppleAccelerate
+setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float32)
+designed = Float64[0.5, 0, 0, 0, 0]                                   # Float64 design
+AppleAccelerate.biquadm_setcoefficients!(setup, designed, 0, 1, 1, 1) # channel 1 → ×0.5
+x = Float32.(1:4)
+AppleAccelerate.biquadm([copy(x), copy(x)], 4, setup)
+```
+
+Wraps [`vDSP_biquadm_SetCoefficientsDouble`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_setcoefficientsdouble),
+`vDSP_biquadm_SetCoefficientsSingleD`,
+[`vDSP_biquadm_SetTargetsDouble`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_settargetsdouble)
+and `vDSP_biquadm_SetTargetsSingleD`.
