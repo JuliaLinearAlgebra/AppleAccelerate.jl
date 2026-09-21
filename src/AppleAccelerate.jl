@@ -191,6 +191,7 @@ end
     include("simdmath.jl")
     include("complexarray.jl")
     include("dsp.jl")
+    include("fftplan.jl")
     include("sparse.jl")
     include("quadrature.jl")
     include("bnns.jl")
