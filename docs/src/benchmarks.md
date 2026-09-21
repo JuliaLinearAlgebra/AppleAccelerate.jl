@@ -28,6 +28,29 @@ thread-scaling sweeps like the GEMM table below:
 BENCH_THREADS=4 julia --project=test/bench test/bench/run_benchmarks.jl dense
 ```
 
+## Checking for regressions before a release
+
+The tables below compare Accelerate with other libraries. A separate
+[BenchmarkTools](https://github.com/JuliaCI/BenchmarkTools.jl) suite,
+[`benchmark/benchmarks.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/benchmark/benchmarks.jl),
+answers a different question — *did AppleAccelerate itself get slower since the last
+release?* It defines the conventional `SUITE` over a subset of the same workloads (array
+ops, dense LA through LBT, FFT, sparse), measuring only the AppleAccelerate side.
+[`benchmark/compare.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/benchmark/compare.jl)
+runs it against two git revisions, each in its own process and environment, and prints a
+BenchmarkTools `judge` of the minimum times:
+
+```
+julia --project=benchmark benchmark/compare.jl v0.8.0          # last release vs HEAD
+julia --project=benchmark benchmark/compare.jl v0.8.0 my-branch
+```
+
+It exits non-zero if any benchmark regressed by more than the tolerance (10% by default;
+set `TOLERANCE=0.05` to tighten, `BENCH_SECONDS` to change the per-benchmark budget). Only
+committed code is measured. This is a manual pre-release step, not a CI job: shared CI
+runners are too noisy to time a co-processor, so run it on an otherwise idle Mac and
+re-run any flagged benchmark before believing it.
+
 ## Array Operations
 
 Performance comparison of vDSP array operations vs Julia Base equivalents (`map(Base.f, X)` for unary, `@simd` loops for binary/compound). Source: [`bench_array.jl`](https://github.com/JuliaLinearAlgebra/AppleAccelerate.jl/blob/master/test/bench/bench_array.jl).

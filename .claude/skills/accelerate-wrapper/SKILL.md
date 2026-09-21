@@ -248,14 +248,14 @@ julia --project=test/bench test/bench/run_benchmarks.jl [fft|sparse|dense|array]
 julia --project=docs -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'  # once
 julia --project=docs docs/make.jl                                  # runs @example + doctests
 julia --project=gen  gen/generate.jl                               # only when the raw layer must change
-# ALSO test on the MINIMUM Julia in [compat] (`julia = "1.10"` today) before pushing:
-julia +1.10 --project=. -e 'using Pkg; Pkg.instantiate(); using AppleAccelerate'  # precompile check (min)
+# ALSO test on the MINIMUM Julia in [compat] (`julia = "1.11"` today) before pushing:
+julia +1.11 --project=. -e 'using Pkg; Pkg.instantiate(); using AppleAccelerate'  # precompile check (min)
 ```
 
 **Always test on the minimum Julia declared in `Project.toml` `[compat]`, not just the one
 on your PATH.** Code that precompiles/runs on a newer Julia can fail on the floor — e.g. a
-runtime-`Symbol` `cglobal` is accepted on ≥1.11 but Julia 1.10 rejects it at precompile
-("first argument not a valid constant expression"; use `Libdl.dlsym` for a run-time name).
+zero-allocation test passed on 1.13 while 1.11 still heap-allocated two `Ref`s per ccall (#221),
+and before the floor moved to 1.11 a runtime-`Symbol` `cglobal` precompiled on ≥1.11 but not on 1.10.
 `juliaup` makes this one command (`julia +<min>`); at minimum precompile-load, ideally run
 the changed subsystem's tests. CI's `Julia min` job catches it — running it locally first
 avoids a red round-trip on an otherwise-green PR.

@@ -3,6 +3,20 @@ using AppleAccelerate
 using DSP, FFTW, Random, Statistics, Test
 using Aqua
 
+# The package exports nothing on any platform, and off macOS it is a no-op: it loads, but
+# none of the subsystems (whose `include`s are gated on `Sys.isapple()`) are defined. One
+# representative name per subsystem file; on macOS the same list is checked the other way
+# round so a rename can't leave the non-Apple assertion vacuously true.
+@testset "Namespace contract" begin
+    @test names(AppleAccelerate) == [:AppleAccelerate]
+    subsystem_names = [:LibAccelerate, :exp, :VMATH_COVERAGE, :SIMDMath, :vmags, :fft,
+                       :AASparseMatrix, :integrate, :bnns_reduce, :scale_PlanarF]
+    defined = names(AppleAccelerate; all = true, imported = false)
+    for name in subsystem_names
+        @test (name in defined) == Sys.isapple()
+    end
+end
+
 if !Sys.isapple()
     @info("AppleAccelerate.jl will be tested only on macOS. Exiting.")
     exit(0)
