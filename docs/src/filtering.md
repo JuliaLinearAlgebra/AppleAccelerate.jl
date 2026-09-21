@@ -259,13 +259,19 @@ coefficients whose precision differs from the setup's, so filters designed in `F
 can retune a `Float32` processing chain (or the reverse) without a converted temporary.
 The interpolation rate and threshold are always taken in the setup's precision.
 
-```@example filtering_xprec
-using AppleAccelerate
-setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float32)
-designed = Float64[0.5, 0, 0, 0, 0]                                   # Float64 design
-AppleAccelerate.biquadm_setcoefficients!(setup, designed, 0, 1, 1, 1) # channel 1 → ×0.5
-x = Float32.(1:4)
-AppleAccelerate.biquadm([copy(x), copy(x)], 4, setup)
+```jldoctest; setup = :(using AppleAccelerate)
+julia> setup = AppleAccelerate.biquadm_create([1.0,0,0,0,0, 1.0,0,0,0,0], 2, 1, Float32);  # 2 pass-through channels
+
+julia> designed = Float64[0.5, 0, 0, 0, 0];   # a Float64 design for the Float32 setup
+
+julia> AppleAccelerate.biquadm_setcoefficients!(setup, designed, 0, 1, 1, 1);   # section 0, channel 1 (0-based): gain 0.5
+
+julia> x = Float32.(1:4);
+
+julia> AppleAccelerate.biquadm([copy(x), copy(x)], 4, setup)
+2-element Vector{Vector{Float32}}:
+ [1.0, 2.0, 3.0, 4.0]
+ [0.5, 1.0, 1.5, 2.0]
 ```
 
 Wraps [`vDSP_biquadm_SetCoefficientsDouble`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_setcoefficientsdouble),

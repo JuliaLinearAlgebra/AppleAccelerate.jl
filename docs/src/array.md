@@ -660,17 +660,22 @@ spelled into the function name. They call the same vDSP kernels.
 | [`float_to_int`](@ref AppleAccelerate.float_to_int) / [`float_to_int!`](@ref AppleAccelerate.float_to_int!) | `Float32`/`Float64` → `Int8`/`Int16`/`Int32`/`UInt8`/`UInt16`/`UInt32`, `rounding = :trunc` (default) or `:nearest` |
 | [`int_to_float`](@ref AppleAccelerate.int_to_float) / [`int_to_float!`](@ref AppleAccelerate.int_to_float!) | the same integer types → `Float32`/`Float64` |
 
-```@example array
-X = Float64[-1.7, 0.5, 1.5, 2.5, 2.9]
+```jldoctest; setup = :(using AppleAccelerate)
+julia> X = Float64[-1.7, 0.5, 1.5, 2.5, 2.9];
 
-AppleAccelerate.float_to_int(Int16, X)                       # Int16[-1, 0, 1, 2, 2]
-AppleAccelerate.float_to_int(Int16, X; rounding = :nearest)  # Int16[-2, 0, 2, 2, 3] (ties → even)
-AppleAccelerate.int_to_float(Float32, UInt8[0, 128, 255])    # Float32[0, 128, 255]
+julia> show(AppleAccelerate.float_to_int(Int16, X))                       # truncate toward zero
+Int16[-1, 0, 1, 2, 2]
 
-# Strided views work copy-free, e.g. one channel of interleaved 16-bit audio:
-pcm  = Int16[100, -100, 200, -200, 300, -300]                # L R L R L R
-left = AppleAccelerate.int_to_float(Float32, view(pcm, 1:2:6))
-nothing # hide
+julia> show(AppleAccelerate.float_to_int(Int16, X; rounding = :nearest))  # ties go to even
+Int16[-2, 0, 2, 2, 3]
+
+julia> show(AppleAccelerate.int_to_float(Float32, UInt8[0, 128, 255]))
+Float32[0.0, 128.0, 255.0]
+
+julia> pcm = Int16[100, -100, 200, -200, 300, -300];   # interleaved 16-bit audio: L R L R L R
+
+julia> show(AppleAccelerate.int_to_float(Float32, view(pcm, 1:2:6)))      # left channel, copy-free strided view
+Float32[100.0, 200.0, 300.0]
 ```
 
 !!! warning "Out-of-range input is unspecified"
