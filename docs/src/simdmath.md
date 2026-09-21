@@ -134,9 +134,11 @@ occursin("_simd_log_d2", asm)   # the scalar `log` became a 2-lane SIMD call
 `Float32` runs 4 lanes at a time (`_simd_*_f4`), `Float64` runs 2 (`_simd_*_d2`).
 
 !!! note "Strided loops"
-    A stride that is a compile-time constant (`for i in 1:3:length(X)`) vectorises. A
-    stride only known at run time (`for i in 1:stride:length(X)`) does **not** — the
-    loop vectoriser gives up on the unknown-stride gather and the call stays scalar.
+    A stride that is a compile-time constant (`for i in 1:3:length(X)`) vectorises
+    (for `Float64` on Apple silicon, only from Julia 1.13; older LLVMs judge the 2-lane
+    gather unprofitable and keep the call scalar). A stride only known at run time
+    (`for i in 1:stride:length(X)`) does **not** — the loop vectoriser gives up on the
+    unknown-stride gather and the call stays scalar.
 
 ## Available functions
 
