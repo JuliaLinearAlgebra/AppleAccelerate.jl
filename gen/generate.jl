@@ -30,6 +30,13 @@ const VECLIB = joinpath(
 isdir(VECLIB) || error("vecLib header directory not found in the SDK: $VECLIB\n" *
                        "The SDK at $SDK appears to lack the Accelerate framework headers; " *
                        "reinstall/update Xcode or the Command Line Tools.")
+const VIMAGE = joinpath(
+    SDK,
+    "System/Library/Frameworks/Accelerate.framework/Frameworks/vImage.framework/Headers",
+)
+isdir(VIMAGE) || error("vImage header directory not found in the SDK: $VIMAGE\n" *
+                       "The SDK at $SDK appears to lack the Accelerate framework headers; " *
+                       "reinstall/update Xcode or the Command Line Tools.")
 
 # The framework binary we dlopen for the dead-symbol strip pass, and the path the
 # generated bindings ccall at runtime. MUST match `const libacc = ...` in gen/prologue.jl
@@ -47,18 +54,34 @@ options = load_options(joinpath(@__DIR__, "generator.toml"))
 
 args = get_default_args()
 push!(args, "-isysroot", SDK)
+# Sparse/Solve.h does `#if __has_include(<Accelerate/Accelerate.h>) / #include <Accelerate/
+# Accelerate.h> / #else / #include <cblas.h>`. With the framework search path below the
+# umbrella resolves, and it drags in *all* of Accelerate — LAPACK, the C++ Sparse BLAS, and
+# <vImage/vImage.h> with its CoreGraphics / CoreVideo interop headers → CoreFoundation →
+# libdispatch, whose `dispatch_queue_t` typedef Clang.jl cannot resolve (generation aborts
+# with "There is no definition for dispatch_queue_t's underlying type"). Pre-defining the
+# umbrella's include guard makes that `#include` a no-op, and force-including cblas.h gives
+# Solve.h the CBLAS enum types it actually wanted (the `#else` branch). Scope is then decided
+# solely by the `headers` list below, not by whatever the umbrella happens to include.
+push!(args, "-D__ACCELERATE__", "-include", joinpath(VECLIB, "cblas.h"))
 push!(args, "-I", VECLIB)
 # Resolve `<CoreFoundation/CFAvailability.h>` and other framework headers that vDSP.h pulls
 # in for its availability annotations.
 push!(args, "-iframework", joinpath(SDK, "System", "Library", "Frameworks"))
+# The vImage headers include each other as `<vImage/vImage_Types.h>`; vImage.framework is
+# nested inside Accelerate.framework, so it needs its own framework search path.
+push!(args, "-iframework", joinpath(SDK, "System", "Library", "Frameworks",
+                                    "Accelerate.framework", "Frameworks"))
 
 # In-scope headers. Excluded by design:
 #   - cblas*.h / blas_new.h / lapack*.h / clapack.h / fortran_blas.h
 #     → BLAS/LAPACK are forwarded via libblastrampoline, not ccall.
 #   - LinearAlgebra/  → C++ generics, not C-mappable.
 #   - Sparse/BLAS.h   → C++ name-mangled dense×sparse multiply (hand-wrapped in sparse.jl).
-#   - vImage          → a separate Accelerate sub-framework (Accelerate.framework/
-#     Frameworks/vImage.framework), not part of vecLib and not currently in scope.
+#   - vImage/vImage_Utilities.h, vImage/vImage_CVUtilities.h → CoreGraphics / CoreVideo
+#     interop (CGImage, CVPixelBuffer). They drag in the whole CG/CV header graph and have
+#     no array-based surface, so they are left out. For the same reason we list the vImage
+#     operation headers individually instead of the `vImage.h` umbrella, which includes both.
 # We include Sparse/Solve.h (the C solver API) directly rather than Sparse/Sparse.h so we
 # don't pull in the C++ BLAS.h. Likewise the BNNS umbrella + graph headers pull in the
 # struct/constant headers transitively.
@@ -75,6 +98,17 @@ headers = [
     # attributes which otherwise break Clang.jl's anonymous-struct typedef resolution.
     joinpath(@__DIR__, "shims", "bnns_graph_shim.h"),
     joinpath(VECLIB, "Quadrature", "Quadrature.h"),
+    # vImage — a separate sub-framework binary, but the Accelerate umbrella re-exports every
+    # vImage symbol, so the generated wrappers share `libacc` with everything else.
+    joinpath(VIMAGE, "vImage_Types.h"),
+    joinpath(VIMAGE, "Alpha.h"),
+    joinpath(VIMAGE, "BasicImageTypes.h"),
+    joinpath(VIMAGE, "Conversion.h"),
+    joinpath(VIMAGE, "Convolution.h"),
+    joinpath(VIMAGE, "Geometry.h"),
+    joinpath(VIMAGE, "Histogram.h"),
+    joinpath(VIMAGE, "Morphology.h"),
+    joinpath(VIMAGE, "Transform.h"),
 ]
 let missing = filter(!isfile, headers)
     isempty(missing) || error(
@@ -170,6 +204,56 @@ function strip_dead_symbol_wrappers!(path)
     return removed
 end
 
+# Post-process: honour `__asm__("_symbol")` labels. A C declaration such as
+#
+#     int BNNSGraphContextExecute(bnns_graph_context_t context, …) __asm__("_BNNSGraphContextExecute_v2");
+#
+# keeps the source-level name but links against a *different* exported symbol. Apple uses
+# this in bnns_graph.h to move an API to a new ABI: the header's argument list is the `_v2`
+# one, while the un-suffixed symbol is still exported with the OLD argument list. Clang.jl
+# ignores the label and emits `@ccall libacc.BNNSGraphContextExecute(<v2 arguments>)`, which
+# resolves — so the dead-symbol pass cannot catch it — and then crashes at the first call.
+# Scan every in-scope header for asm labels and retarget the matching `@ccall`s. The Julia
+# function keeps its header name; only the linked symbol changes. Idempotent.
+function collect_asm_labels(dirs)
+    # `name ( … ) [attributes] __asm__("_label")` with no `;`/`{`/`}` in between.
+    pat = r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*?)\)[^;{}()]*?__asm(?:__)?\s*\(\s*\"_([A-Za-z_][A-Za-z0-9_$]*)\"\s*\)"s
+    labels = Dict{String,String}()
+    for dir in dirs, (root, _, files) in walkdir(dir), f in files
+        endswith(f, ".h") || continue
+        # Drop comments first: doc comments contain call-like text (`min(a, b)`) that
+        # would otherwise be taken for the declaration an asm label belongs to.
+        text = replace(read(joinpath(root, f), String), r"/\*.*?\*/"s => " ", r"//[^\n]*" => " ")
+        for m in eachmatch(pat, text)
+            name, label = m.captures[1], m.captures[3]
+            name == label && continue
+            get!(labels, name, label) == label || error(
+                "conflicting __asm__ labels for `$name`: `$(labels[name])` vs `$label`")
+        end
+    end
+    return labels
+end
+
+function apply_asm_labels!(path, labels)
+    lines = readlines(path)
+    ccallsym = r"(@ccall\s+libacc\.)([A-Za-z_][A-Za-z0-9_]*)(?=\()"
+    final = Set(values(labels))
+    applied = String[]
+    for i in eachindex(lines)
+        m = match(ccallsym, lines[i])
+        m === nothing && continue
+        sym = m.captures[2]
+        if haskey(labels, sym)
+            lines[i] = replace(lines[i], ccallsym => SubstitutionString("\\1" * labels[sym]); count = 1)
+            push!(applied, sym)
+        elseif sym in final
+            push!(applied, sym)             # already retargeted by an earlier run
+        end
+    end
+    write(path, join(lines, "\n") * "\n")
+    return applied
+end
+
 # Post-process: correct the double-precision complex typedefs. Apple's headers define the
 # complex element types via anonymous `_Complex` typedefs (e.g. `typedef _Complex double
 # __double_complex_t;`). Clang.jl mis-resolves these anonymous-`_Complex` typedefs and emits
@@ -210,6 +294,15 @@ removed > 0 || error(
     "Clang.jl's emitted wrapper format changed and the pass no-oped. Inspect $out_path " *
     "and update the pass (or, if BLAS really is no longer pulled in, update this check).")
 @info "Stripped $removed out-of-scope BLAS/LAPACK wrappers (forwarded via libblastrampoline)"
+
+labels = collect_asm_labels((VECLIB, VIMAGE))
+relabelled = apply_asm_labels!(out_path, labels)
+isempty(relabelled) && error(
+    "apply_asm_labels! retargeted no `@ccall`s. bnns_graph.h redirects its entry points to " *
+    "`_v2` symbols with `__asm__` labels, so a zero count means either the label regex no " *
+    "longer matches the headers or the `@ccall libacc.<sym>` pattern drifted — and the " *
+    "BNNSGraph bindings in $out_path link against the old, ABI-incompatible symbols.")
+@info "Retargeted $(length(relabelled)) wrappers to their __asm__-labelled symbols" relabelled
 
 dead = strip_dead_symbol_wrappers!(out_path)
 isempty(dead) && error(

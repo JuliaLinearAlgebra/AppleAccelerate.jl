@@ -48,12 +48,14 @@ ls "$VECLIB" "$VECLIB/Sparse" "$VECLIB/BNNS" "$VECLIB/Quadrature"
 
 In-scope headers today (`gen/generate.jl`): `vDSP.h`, `vForce.h`, `vBasicOps.h`,
 `vfp.h`, `vectorOps.h`, `vBigNum.h`, `Sparse/Solve.h`, `BNNS/bnns.h`,
-`Quadrature/Quadrature.h`. Accelerate has exactly **two** subframeworks on disk —
-`vecLib` (all of the above) and **`vImage`** (image processing: convolution,
-geometry/resize/warp, format conversion, histogram, morphology, alpha compositing,
-Core Video interop), which is entirely out of scope. **To bring a new capability area
-in scope** (vImage, or a future subframework), add its umbrella header to the
-`headers` list in `gen/generate.jl` and regenerate (Phase 2).
+`Quadrature/Quadrature.h`, plus the array-based **vImage** headers (`vImage_Types.h`,
+`Alpha.h`, `BasicImageTypes.h`, `Conversion.h`, `Convolution.h`, `Geometry.h`,
+`Histogram.h`, `Morphology.h`, `Transform.h`). Accelerate has exactly **two**
+subframeworks on disk — `vecLib` and `vImage`; only vImage's CoreGraphics / CoreVideo
+interop headers (`vImage_Utilities.h`, `vImage_CVUtilities.h`) are out of scope. **To
+bring a new capability area in scope**, add its headers to the `headers` list in
+`gen/generate.jl` and regenerate (Phase 2). List headers individually if the umbrella
+drags in CoreGraphics/CoreFoundation — Clang.jl cannot resolve libdispatch's typedefs.
 
 **Coverage-gap scan.** Don't use a literal `comm -23` of raw-vs-referenced symbols —
 it over-reports catastrophically (wrappers build names dynamically, e.g.

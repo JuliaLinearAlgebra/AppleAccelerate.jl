@@ -11,10 +11,10 @@ AppleAccelerate is built in two layers:
 - **Raw ABI layer — `AppleAccelerate.LibAccelerate`.** This submodule
   (`src/lib/LibAccelerate.jl`) is **auto-generated** with
   [Clang.jl](https://github.com/JuliaInterop/Clang.jl) directly from Apple's
-  Accelerate C headers. It is a near 1:1 mirror of the C API — roughly a thousand
+  Accelerate C headers. It is a near 1:1 mirror of the C API — roughly 1400
   `@ccall` wrappers plus the matching structs and enums — and is committed but never
   hand-edited (regenerate it with `julia --project=gen gen/generate.jl`). Because
-  Accelerate's struct- and enum-heavy subframeworks (Quadrature, Sparse, BNNS) are
+  Accelerate's struct- and enum-heavy subframeworks (Quadrature, Sparse, BNNS, vImage) are
   painful and error-prone to bind by hand, generating this layer keeps every field
   offset and enum value in sync with the SDK automatically.
 

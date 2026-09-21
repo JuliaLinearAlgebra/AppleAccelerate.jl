@@ -27,6 +27,16 @@ output_ignorelist = [
     # which dangles once CF_ENUM is gone; neither is a usable binding.
     "CF_ENUM",
     "vDSP_ENUM",
+    # The rest of CoreFoundation/CFAvailability.h's preprocessor machinery, which vDSP.h
+    # includes for `CF_ENUM`. None of it is API; the feature-test one is emitted as a
+    # `const` referencing `__cplusplus`/`__has_feature`, which would throw UndefVarError
+    # when the module loads, and the others alias `__attribute__` macros Clang.jl skips.
+    "__COREFOUNDATION_CFAVAILABILITY__",
+    "__CF_ENUM_FIXED_IS_AVAILABLE",
+    "CF_STRING_ENUM",
+    "CF_EXTENSIBLE_STRING_ENUM",
+    "CF_TYPED_ENUM",
+    "CF_TYPED_EXTENSIBLE_ENUM",
 ]
 
 # Keep generated structs immutable — they are plain C value types we build and
