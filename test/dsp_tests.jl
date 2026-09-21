@@ -1166,3 +1166,12 @@ end
 end
 
 end # @testset "Signal Processing"
+
+# The two-argument `conv!(X, K)` / `xcorr!(X, Y)` forwarded to `conv!(X, X, K)`, whose
+# length check needs `length(X) >= length(X) + length(K) - 1` — so they threw for every
+# kernel longer than one element. A full convolution cannot be computed in place; the
+# methods were removed rather than left as a trap.
+@testset "conv!/xcorr! have no in-place two-argument form" begin
+    @test !hasmethod(AppleAccelerate.conv!, Tuple{Vector{Float64}, Vector{Float64}})
+    @test !hasmethod(AppleAccelerate.xcorr!, Tuple{Vector{Float32}, Vector{Float32}})
+end

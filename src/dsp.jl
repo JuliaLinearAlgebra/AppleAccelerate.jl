@@ -92,17 +92,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
 
 
     """
-    In-place convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-
-    Returns: 'X'. 'X' is overwritten with computation result.
-    """
-    @eval begin
-        function conv!(X::StridedVector{$T}, K::StridedVector{$T})
-            conv!(X, X, K)
-        end
-    end
-
-    """
     Cross-correlation of two Vector{T}'s 'X' and 'Y'.
     Result vector should have at least length(X) + length(Y) - 1 elements
 
@@ -140,16 +129,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     end
 
 
-    """
-    In-place cross-correlation of two Vector{T}'s 'X' and 'Y'.
-
-    Returns: 'X'. 'X' is overwritten with the result of the cross-correlation.
-    """
-    @eval begin
-        function xcorr!(X::StridedVector{$T}, Y::StridedVector{$T})
-            xcorr!(X, X, Y)
-        end
-    end
 
 
     """
@@ -175,11 +154,9 @@ conv
 
 """
     conv!(result::Vector{T}, X::Vector{T}, K::Vector{T})
-    conv!(X::Vector{T}, K::Vector{T})
 
-In-place convolution. The 3-argument form stores the result in `result`
-(which must have at least `length(X) + length(K) - 1` elements).
-The 2-argument form overwrites `X`.
+Convolution into a preallocated `result`, which must have at least
+`length(X) + length(K) - 1` elements.
 Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 conv!
@@ -197,10 +174,9 @@ xcorr
 
 """
     xcorr!(result::Vector{T}, X::Vector{T}, Y::Vector{T})
-    xcorr!(X::Vector{T}, Y::Vector{T})
 
-In-place cross-correlation. The 3-argument form stores the result in `result`.
-The 2-argument form overwrites `X`.
+Cross-correlation into a preallocated `result`, which must have at least
+`length(X) + length(Y) - 1` elements.
 Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 xcorr!
