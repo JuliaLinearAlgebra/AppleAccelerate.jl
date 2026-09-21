@@ -26,7 +26,7 @@ elsewhere in your session does. See [Architecture](@ref architecture).
 !!! warning "Key Limitations"
     - **macOS only** — this package uses Apple's Accelerate framework, which is not available on Linux or Windows.
     - **FFT size limits** — 1D complex `fft`/`ifft`/`bfft` support lengths `f * 2^k` with `f ∈ {1, 3, 5, 15}`; 2D transforms and the real FFT (`rfft`/`brfft`) are power-of-2 only. DFT also supports `f * 2^n` where `f ∈ {1, 3, 5, 15}`. Use FFTW.jl for other sizes or N-D transforms.
-    - **Precision** — the vectorized array/DSP ops are `Float32`/`Float64` only; BNNS is `Float32`-centric; sparse solvers also accept `ComplexF32`/`ComplexF64`; vImage covers the usual 8-/16-bit and float pixel formats.
+    - **Precision** — the vectorized array/DSP ops are `Float32`/`Float64` only; BNNS covers `Float32` and `Float16` (plus integer tensors where the kernel supports them); sparse solvers also accept `ComplexF32`/`ComplexF64`; vImage covers the usual 8-/16-bit and float pixel formats.
 
 ## Installation
 
