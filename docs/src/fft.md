@@ -302,3 +302,29 @@ AppleAccelerate.dct
 AppleAccelerate.idct
 AppleAccelerate.plan_destroy
 ```
+
+## Allocation-Free Fixed-Size FFTs
+
+The mutating forms of the 16-/32-point transforms use vDSP's *interleaved*-complex
+kernels, which read and write the memory of a `Vector{ComplexF32}` directly — no
+split-complex repacking and no allocation. Use them in tight per-block loops.
+
+| Function | Description |
+|----------|-------------|
+| [`fft16!`](@ref AppleAccelerate.fft16!) / [`fft32!`](@ref AppleAccelerate.fft32!) | Forward transform, in place (`f!(x)`) or into `out` (`f!(out, x)`) |
+| [`bfft16!`](@ref AppleAccelerate.bfft16!) / [`bfft32!`](@ref AppleAccelerate.bfft32!) | Unnormalized inverse, same two forms |
+
+```@example fft_fixed
+using AppleAccelerate
+x = randn(ComplexF32, 16); x0 = copy(x)
+AppleAccelerate.fft16!(x)                  # in place
+AppleAccelerate.bfft16!(x)                 # back again, scaled by 16
+x ≈ 16 .* x0
+```
+
+```@docs
+AppleAccelerate.fft16!
+AppleAccelerate.bfft16!
+AppleAccelerate.fft32!
+AppleAccelerate.bfft32!
+```

@@ -71,6 +71,22 @@ coverage by appending headers to that list.
   CG/CV header graph. The vImage operation headers are listed individually (not via the
   `vImage.h` umbrella) to keep these out.
 
+## Auditing idiomatic coverage
+
+```sh
+julia --project=. gen/coverage_audit.jl          # vDSP_* (default)
+julia --project=. gen/coverage_audit.jl BNNS     # any other name prefix
+```
+
+Lists the generated functions that nothing in the idiomatic layer calls. It inspects
+the **lowered IR** of every method in the package, so it is exact where a text search
+is not: most wrappers assemble the C name at macro-expansion time
+(`Symbol(string("vDSP_vfix", intname, suff))`), which makes fully wrapped families look
+"missing" to `grep`. The surviving vDSP names and the reason each is left to the raw
+layer are recorded in `AppleAccelerate.VDSP_COVERAGE`. For opaque-handle families
+(Sparse, BNNS) judge the result at the capability level — those wrappers reach public
+umbrella symbols, so private per-type implementations legitimately show as unreferenced.
+
 ## Known limitations
 
 - **Bitfield structs are not safe to pass by value.** Clang.jl emits any struct that
@@ -106,6 +122,7 @@ coverage by appending headers to that list.
 | File | Purpose |
 |------|---------|
 | `generate.jl` | Entry point: resolves SDK paths, runs Clang.jl, strips out-of-scope BLAS |
+| `coverage_audit.jl` | Exact list of raw functions the idiomatic layer never calls (IR walk, not grep) |
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
 | `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
 | `shims/bnns_graph_shim.h` | Neutralizes availability attributes that break Clang.jl |
