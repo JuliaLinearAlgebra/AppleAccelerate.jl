@@ -8,6 +8,36 @@ These functions are **not exported** to avoid conflicts with Base. Access them v
 using AppleAccelerate
 ```
 
+## [Array types and strides](@id strided-contract)
+
+Every array-taking function in AppleAccelerate — here, in [Complex Array Operations (vDSP)](complex.md),
+[FFT & Transforms (vDSP)](fft.md) and [Filtering & Spectral (vDSP)](filtering.md) — follows one rule
+for what it accepts. Arguments are typed as `StridedVector` / `StridedMatrix` / `StridedArray`,
+so a `Vector`, a `Matrix`, or a `view`/`reshape` of one all dispatch; what happens next depends
+on the underlying C routine:
+
+| The C routine… | Behaviour | Examples |
+|----------------|-----------|----------|
+| takes a stride per operand | The real `stride(X, 1)` is passed through. Any strided view works — offset, stepped (`1:2:n`), even reversed — for inputs *and* for the output of `!` variants, which is written only at the selected positions. | vDSP vector arithmetic and reductions, all split-complex vector ops (`vmul`, `zvadd`, `vabs`, …), `conv`, `xcorr`, `biquad` (signal), `deq22` |
+| copies its input into an internal buffer | Any strided array works; the copy honours the view. | out-of-place `fft`/`bfft`/`ifft`/`rfft`/`brfft`/`irfft` (1-D, 2-D, batched), `fft!`/`bfft!`, `dft`, `dft_interleaved`, `fftradix3/5`, `fft16/32`, spectral helpers (`zaspec`, `zcspec`, …) |
+| needs contiguous memory (no stride parameter) | Contiguous views are accepted; anything else throws an `ArgumentError` telling you to `collect` first. Nothing is ever read or written as if it were dense. | vForce math (`exp`, `sin`, …), matrix ops (`mmul`, `mtrans`, `mmov`, `f3x3`, `zmmul`, …), `dct`, `rfft!`, window generators (`hanning!`, …), `desamp`, `wiener`, `polar`, `ctoz`/`ztoc`, filter coefficient/delay vectors |
+
+```@example array
+x = randn(16)
+v = view(x, 1:2:16)                       # stride-2 view, no copy
+AppleAccelerate.vadd(v, v) == 2 .* x[1:2:16]
+```
+
+```@example array
+try
+    AppleAccelerate.exp(v)                # vForce has no stride parameter
+catch err
+    println(err.msg)
+end
+```
+
+Allocating variants always return a freshly allocated dense `Array`.
+
 ## Element-wise Math Functions
 
 These functions wrap Apple's [vecLib](https://developer.apple.com/documentation/accelerate/veclib) `vv*` routines.

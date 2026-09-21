@@ -1698,7 +1698,8 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function mmul!(C::Matrix{$T}, A::Matrix{$T}, B::Matrix{$T})
+        function mmul!(C::StridedMatrix{$T}, A::StridedMatrix{$T}, B::StridedMatrix{$T})
+            _check_contiguous(C, A, B)
             # Julia (col-major) A is m×p, B is p×n → C is m×n
             # vDSP sees transposed layouts, so we compute Bᵀ × Aᵀ = (AB)ᵀ
             m, p = size(A)
@@ -1708,7 +1709,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             LibAccelerate.$(Symbol(string("vDSP_mmul", suff)))(B,1,A,1,C,1,UInt64(n),UInt64(m),UInt64(p))
             return C
         end
-        function mmul(A::Matrix{$T}, B::Matrix{$T})
+        function mmul(A::StridedMatrix{$T}, B::StridedMatrix{$T})
             m = size(A, 1)
             n = size(B, 2)
             C = Matrix{$T}(undef, m, n)
@@ -1717,7 +1718,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function mtrans!(C::Matrix{$T}, A::Matrix{$T})
+        function mtrans!(C::StridedMatrix{$T}, A::StridedMatrix{$T})
+            _check_contiguous(C, A)
             m, n = size(A)
             size(C) == (n, m) || throw(DimensionMismatch("C must be $n×$m"))
             # vDSP_mtrans(__A, __IA, __C, __IC, __M, __N):
@@ -1727,7 +1729,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             LibAccelerate.$(Symbol(string("vDSP_mtrans", suff)))(A,1,C,1,UInt64(m),UInt64(n))
             return C
         end
-        function mtrans(A::Matrix{$T})
+        function mtrans(A::StridedMatrix{$T})
             m, n = size(A)
             C = Matrix{$T}(undef, n, m)
             mtrans!(C, A)
@@ -1735,14 +1737,16 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        function mmov!(C::Matrix{$T}, A::Matrix{$T})
+        function mmov!(C::StridedMatrix{$T}, A::StridedMatrix{$T})
+            _check_contiguous(C, A)
             m, n = size(A)
+            size(C) == (m, n) || throw(DimensionMismatch("C must be $m×$n, got $(size(C))"))
             ta = UInt64(m)  # column stride of source (= number of rows in col-major)
             tc = UInt64(size(C, 1))  # column stride of destination
             LibAccelerate.$(Symbol(string("vDSP_mmov", suff)))(A,C,UInt64(m),UInt64(n),ta,tc)
             return C
         end
-        function mmov(A::Matrix{$T})
+        function mmov(A::StridedMatrix{$T})
             C = similar(A)
             mmov!(C, A)
         end
@@ -1888,7 +1892,8 @@ end
 # ============================================================
 for (T, suff) in ((Float32, ""), (Float64, "D"))
     @eval begin
-        function f3x3!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+        function f3x3!(C::StridedMatrix{$T}, A::StridedMatrix{$T}, F::StridedMatrix{$T})
+            _check_contiguous(C, A, F)
             nr, nc = size(A)
             size(F) == (3, 3) || throw(DimensionMismatch("Filter must be 3×3"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
@@ -1900,11 +1905,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             LibAccelerate.$(Symbol(string("vDSP_f3x3", suff)))(A,UInt64(nc),UInt64(nr),F,C)
             return C
         end
-        function f3x3(A::Matrix{$T}, F::Matrix{$T})
+        function f3x3(A::StridedMatrix{$T}, F::StridedMatrix{$T})
             C = similar(A)
             f3x3!(C, A, F)
         end
-        function f5x5!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+        function f5x5!(C::StridedMatrix{$T}, A::StridedMatrix{$T}, F::StridedMatrix{$T})
+            _check_contiguous(C, A, F)
             nr, nc = size(A)
             size(F) == (5, 5) || throw(DimensionMismatch("Filter must be 5×5"))
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
@@ -1912,11 +1918,12 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             LibAccelerate.$(Symbol(string("vDSP_f5x5", suff)))(A,UInt64(nc),UInt64(nr),F,C)
             return C
         end
-        function f5x5(A::Matrix{$T}, F::Matrix{$T})
+        function f5x5(A::StridedMatrix{$T}, F::StridedMatrix{$T})
             C = similar(A)
             f5x5!(C, A, F)
         end
-        function imgfir!(C::Matrix{$T}, A::Matrix{$T}, F::Matrix{$T})
+        function imgfir!(C::StridedMatrix{$T}, A::StridedMatrix{$T}, F::StridedMatrix{$T})
+            _check_contiguous(C, A, F)
             nr, nc = size(A)
             fr, fc = size(F)
             size(C) == (nr, nc) || throw(DimensionMismatch("C must match A size"))
@@ -1925,7 +1932,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             LibAccelerate.$(Symbol(string("vDSP_imgfir", suff)))(A,UInt64(nc),UInt64(nr),F,C,UInt64(fc),UInt64(fr))
             return C
         end
-        function imgfir(A::Matrix{$T}, F::Matrix{$T})
+        function imgfir(A::StridedMatrix{$T}, F::StridedMatrix{$T})
             C = similar(A)
             imgfir!(C, A, F)
         end

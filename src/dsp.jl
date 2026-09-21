@@ -58,7 +58,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: 'result'. Computation result is also stored in 'result' argument.
     """
     @eval begin
-        function conv!(result::Vector{$T}, X::Vector{$T}, K::Vector{$T})
+        function conv!(result::StridedVector{$T}, X::StridedVector{$T}, K::StridedVector{$T})
             ksize = length(K)
             xsize = length(X)
             rsize = length(result)
@@ -72,7 +72,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             xpadded::Vector{$T} = [zeros($T, ksize-1); X; zeros($T, rsize + ksize - xsize)]
             # `pointer(K, ksize)` is a bare pointer into K's buffer; root K across
             # the ccall so it cannot be collected mid-call.
-            GC.@preserve K LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-1,result,1,rsize,ksize)
+            GC.@preserve K LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,pointer(K, ksize),-stride(K,1),result,stride(result,1),rsize,ksize)
             return result
         end
     end
@@ -84,23 +84,12 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: Vector{T} with length = length(X) + length(K) - 1
     """
     @eval begin
-        function conv(X::Vector{$T}, K::Vector{$T})
+        function conv(X::StridedVector{$T}, K::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(K) - 1)
             conv!(result, X, K)
         end
     end
 
-
-    """
-    In-place convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-
-    Returns: 'X'. 'X' is overwritten with computation result.
-    """
-    @eval begin
-        function conv!(X::Vector{$T}, K::Vector{$T})
-            conv!(X, X, K)
-        end
-    end
 
     """
     Cross-correlation of two Vector{T}'s 'X' and 'Y'.
@@ -109,7 +98,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: 'result'. The result of the computation is also stored in 'result'
     """
     @eval begin
-        function xcorr!(result::Vector{$T}, X::Vector{$T}, Y::Vector{$T})
+        function xcorr!(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
             ysize = length(Y)
             xsize = length(X)
             rsize = length(result)
@@ -121,7 +110,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
             # padded length = rsize + 2*ysize - 1 (front pad ysize-1).
             xpadded::Vector{$T} = [zeros($T, ysize-1); X; zeros($T, rsize + ysize - xsize)]
             # Y backs the kernel argument; root it across the ccall.
-            GC.@preserve Y LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,1,result,1,rsize,ysize)
+            GC.@preserve Y LibAccelerate.$(Symbol(string("vDSP_conv", suff)))(xpadded,1,Y,stride(Y,1),result,stride(result,1),rsize,ysize)
             return result
         end
     end
@@ -133,23 +122,13 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: Vector{T} with length(X) + length(Y) - 1
     """
     @eval begin
-        function xcorr(X::Vector{$T}, Y::Vector{$T})
+        function xcorr(X::StridedVector{$T}, Y::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(Y) - 1)
             xcorr!(result, X, Y)
         end
     end
 
 
-    """
-    In-place cross-correlation of two Vector{T}'s 'X' and 'Y'.
-
-    Returns: 'X'. 'X' is overwritten with the result of the cross-correlation.
-    """
-    @eval begin
-        function xcorr!(X::Vector{$T}, Y::Vector{$T})
-            xcorr!(X, X, Y)
-        end
-    end
 
 
     """
@@ -158,7 +137,7 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
     Returns: Vector{T} with length = 2*length(X) - 1
     """
     @eval begin
-        function xcorr(X::Vector{$T})
+        function xcorr(X::StridedVector{$T})
             xcorr(X, X)
         end
     end
@@ -175,11 +154,9 @@ conv
 
 """
     conv!(result::Vector{T}, X::Vector{T}, K::Vector{T})
-    conv!(X::Vector{T}, K::Vector{T})
 
-In-place convolution. The 3-argument form stores the result in `result`
-(which must have at least `length(X) + length(K) - 1` elements).
-The 2-argument form overwrites `X`.
+Convolution into a preallocated `result`, which must have at least
+`length(X) + length(K) - 1` elements.
 Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 conv!
@@ -197,10 +174,9 @@ xcorr
 
 """
     xcorr!(result::Vector{T}, X::Vector{T}, Y::Vector{T})
-    xcorr!(X::Vector{T}, Y::Vector{T})
 
-In-place cross-correlation. The 3-argument form stores the result in `result`.
-The 2-argument form overwrites `X`.
+Cross-correlation into a preallocated `result`, which must have at least
+`length(X) + length(Y) - 1` elements.
 Wraps [`vDSP_conv`](https://developer.apple.com/documentation/accelerate/vdsp_conv).
 """
 xcorr!
@@ -222,7 +198,8 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
 
         Returns: Biquad{$($T)}
         """
-        function biquadcreate(coefficients::Vector{Float64}, sections::Int, ::Type{$T})
+        function biquadcreate(coefficients::StridedVector{Float64}, sections::Int, ::Type{$T})
+            _check_contiguous(coefficients)
             if length(coefficients) < 5*sections
                 error("Incomplete biquad specification provided - coefficients must
                             contain 5 elements for each filter section")
@@ -243,7 +220,8 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
 
         Returns: Vector{$($T)}
         """
-        function biquad(X::Vector{$T}, delays::Vector{$T}, numelem::Int, biquad::Biquad{$T})
+        function biquad(X::StridedVector{$T}, delays::StridedVector{$T}, numelem::Int, biquad::Biquad{$T})
+            _check_contiguous(delays)
             if length(delays) < (2*(biquad.sections)+2)
                 error("Incomplete delay specification provided - delays must contain 2*M + 2
                                 values where M is the number of sections in the biquad")
@@ -252,7 +230,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
                 error("numelem = $numelem exceeds the input length $(length(X))")
             end
             result::Vector{$T} = Vector{$T}(undef, numelem)
-            LibAccelerate.$(Symbol(string("vDSP_biquad", suff)))(biquad.setup,delays,X,1,result,1,numelem)
+            LibAccelerate.$(Symbol(string("vDSP_biquad", suff)))(biquad.setup,delays,X,stride(X,1),result,1,numelem)
             return result
         end
     end
@@ -272,7 +250,7 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
 end
 
 # Backward-compatible method: biquadcreate(::Vector{Float64}, ::Int) defaults to Float64
-biquadcreate(coefficients::Vector{Float64}, sections::Int) = biquadcreate(coefficients, sections, Float64)
+biquadcreate(coefficients::StridedVector{Float64}, sections::Int) = biquadcreate(coefficients, sections, Float64)
 
 """
     biquadcreate(coefficients::Vector{Float64}, sections::Int, [T=Float64])
@@ -330,7 +308,8 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
 
         Returns: BiquadMulti{$($T)}
         """
-        function biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int, ::Type{$T})
+        function biquadm_create(coefficients::StridedVector{Float64}, channels::Int, sections::Int, ::Type{$T})
+            _check_contiguous(coefficients)
             if length(coefficients) < 5 * channels * sections
                 error("Incomplete biquadm specification - coefficients must contain 5*channels*sections elements")
             end
@@ -376,7 +355,7 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
 end
 
 # Convenience: default to Float32
-biquadm_create(coefficients::Vector{Float64}, channels::Int, sections::Int) =
+biquadm_create(coefficients::StridedVector{Float64}, channels::Int, sections::Int) =
     biquadm_create(coefficients, channels, sections, Float32)
 
 """
@@ -410,7 +389,8 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
 
         Wraps [`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec).
         """
-        function zaspec!(C::Vector{$T}, A::Vector{Complex{$T}})
+        function zaspec!(C::StridedVector{$T}, A::StridedVector{Complex{$T}})
+            _check_contiguous(C)
             n = length(A)
             length(C) >= n || throw(DimensionMismatch(
                 "zaspec!: output `C` must have at least length(A) = $n elements; got $(length(C))"))
@@ -423,7 +403,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             return C
         end
 
-        function zaspec(A::Vector{Complex{$T}})
+        function zaspec(A::StridedVector{Complex{$T}})
             C = zeros($T, length(A))
             zaspec!(C, A)
         end
@@ -434,7 +414,8 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
 
         Wraps [`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher).
         """
-        function zcoher!(D::Vector{$T}, A::Vector{$T}, B::Vector{$T}, C::Vector{Complex{$T}})
+        function zcoher!(D::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{Complex{$T}})
+            _check_contiguous(D, A, B)
             n = length(A)
             (length(B) >= n && length(C) >= n && length(D) >= n) || throw(DimensionMismatch(
                 "zcoher!: `B`, `C`, and `D` must each have at least length(A) = $n elements; " *
@@ -448,7 +429,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             return D
         end
 
-        function zcoher(A::Vector{$T}, B::Vector{$T}, C::Vector{Complex{$T}})
+        function zcoher(A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{Complex{$T}})
             D = Vector{$T}(undef, length(A))
             zcoher!(D, A, B, C)
         end
@@ -459,7 +440,8 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
 
         Wraps [`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans).
         """
-        function ztrans!(C::Vector{Complex{$T}}, A::Vector{$T}, B::Vector{Complex{$T}})
+        function ztrans!(C::StridedVector{Complex{$T}}, A::StridedVector{$T}, B::StridedVector{Complex{$T}})
+            _check_contiguous(A)
             n = length(A)
             (length(B) >= n && length(C) >= n) || throw(DimensionMismatch(
                 "ztrans!: `B` and `C` must each have at least length(A) = $n elements; " *
@@ -479,7 +461,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             return C
         end
 
-        function ztrans(A::Vector{$T}, B::Vector{Complex{$T}})
+        function ztrans(A::StridedVector{$T}, B::StridedVector{Complex{$T}})
             C = Vector{Complex{$T}}(undef, length(A))
             ztrans!(C, A, B)
         end
@@ -490,7 +472,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
 
         Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec).
         """
-        function zcspec!(C::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zcspec!(C::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             n = length(A)
             (length(B) >= n && length(C) >= n) || throw(DimensionMismatch(
                 "zcspec!: `B` and `C` must each have at least length(A) = $n elements; " *
@@ -513,7 +495,7 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             return C
         end
 
-        function zcspec(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zcspec(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             C = zeros(Complex{$T}, length(A))
             zcspec!(C, A, B)
         end
@@ -577,12 +559,13 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Returns: `C`
         """
-        function deq22!(C::Vector{$T}, A::Vector{$T}, B::Vector{$T})
+        function deq22!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T})
+            _check_contiguous(B)
             length(B) == 5 || error("B must have exactly 5 coefficients")
             length(A) >= 3 || error("A must have at least 3 elements (2 state + 1 sample)")
             length(C) == length(A) || error("C must have the same length as A")
             N = UInt64(length(A) - 2)
-            LibAccelerate.$(Symbol(string("vDSP_deq22", suff)))(A,1,B,C,1,N)
+            LibAccelerate.$(Symbol(string("vDSP_deq22", suff)))(A,stride(A,1),B,C,stride(C,1),N)
             return C
         end
 
@@ -594,7 +577,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Returns: `Vector{$($T)}` of length `length(A)`
         """
-        function deq22(A::Vector{$T}, B::Vector{$T})
+        function deq22(A::StridedVector{$T}, B::StridedVector{$T})
             N = length(A)
             Apad = [$T(0); $T(0); A]
             C = zeros($T, N + 2)
@@ -614,7 +597,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Returns: `C`
         """
-        function desamp!(C::Vector{$T}, A::Vector{$T}, DF::Int, F::Vector{$T})
+        function desamp!(C::StridedVector{$T}, A::StridedVector{$T}, DF::Int, F::StridedVector{$T})
+            _check_contiguous(C, A, F)
             # Compute the output count in SIGNED arithmetic; converting to
             # UInt64 first would underflow when length(F) > length(A).
             length(A) >= length(F) ||
@@ -634,7 +618,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Returns: `Vector{$($T)}`
         """
-        function desamp(A::Vector{$T}, DF::Int, F::Vector{$T})
+        function desamp(A::StridedVector{$T}, DF::Int, F::StridedVector{$T})
             length(A) >= length(F) ||
                 error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
             P = length(F)
@@ -655,7 +639,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Returns: `(F, error_code)` where error_code is 0 on success.
         """
-        function wiener!(F::Vector{$T}, P::Vector{$T}, A::Vector{$T}, C::Vector{$T}; flag::Int=0)
+        function wiener!(F::StridedVector{$T}, P::StridedVector{$T}, A::StridedVector{$T}, C::StridedVector{$T}; flag::Int=0)
+            _check_contiguous(F, P, A, C)
             L = UInt64(length(A))
             length(C) == L || error("C must have the same length as A")
             length(F) >= L || error("F must have at least L elements")
@@ -670,7 +655,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
 
         Allocating version of `wiener!`. Returns `(F, error_code)`.
         """
-        function wiener(A::Vector{$T}, C::Vector{$T}; flag::Int=0)
+        function wiener(A::StridedVector{$T}, C::StridedVector{$T}; flag::Int=0)
             L = length(A)
             F = Vector{$T}(undef, L)
             P = Vector{$T}(undef, L)
@@ -724,7 +709,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function blackman!(result::Vector{$T},  length::Int, flag::Int=0)
+        function blackman!(result::StridedVector{$T},  length::Int, flag::Int=0)
+            _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_blkman_window", suff)))(result,length,flag)
             return result
         end
@@ -739,7 +725,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hamming!(result::Vector{$T},  length::Int, flag::Int=0)
+        function hamming!(result::StridedVector{$T},  length::Int, flag::Int=0)
+            _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hamm_window", suff)))(result,length,flag)
             return result
         end
@@ -758,7 +745,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     Returns: Vector{$T}
     """
     @eval begin
-        function hanning!(result::Vector{$T},  length::Int, flag::Int=0)
+        function hanning!(result::StridedVector{$T},  length::Int, flag::Int=0)
+            _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hann_window", suff)))(result,length,flag)
             return result
         end
@@ -805,14 +793,15 @@ Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/
     `dct` or `idct` with a `Vector{Float64}` therefore throws an `ArgumentError`.
     Convert the input to `Float32`, or use FFTW.jl for a double-precision DCT.
 """
-function dct(X::Vector{Float32}, setup::DFTSetup)
+function dct(X::StridedVector{Float32}, setup::DFTSetup)
+    _check_contiguous(X)
     result = similar(X)
     LibAccelerate.vDSP_DCT_Execute(setup.setup,X,result)
     return result
 end
 
 
-function dct(X::Vector{Float32}, dct_type::Int=2)
+function dct(X::StridedVector{Float32}, dct_type::Int=2)
     setup = plan_dct(length(X), dct_type)
     return dct(X, setup)
 end
@@ -823,8 +812,8 @@ end
     "Convert the input to Float32 (e.g. dct(Float32.(x))) or use FFTW.jl for a ",
     "double-precision DCT.")))
 
-dct(X::Vector{Float64}, setup::DFTSetup) = _dct_no_float64()
-dct(X::Vector{Float64}, dct_type::Int=2) = _dct_no_float64()
+dct(X::StridedVector{Float64}, setup::DFTSetup) = _dct_no_float64()
+dct(X::StridedVector{Float64}, dct_type::Int=2) = _dct_no_float64()
 
 """
     idct(X::Vector{Float32})
@@ -837,8 +826,8 @@ Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/
 
 Not available for `Float64` inputs: see the note in [`dct`](@ref).
 """
-idct(X::Vector{Float32}) = dct(X, 3) .* (2.0f0 / length(X))
-idct(X::Vector{Float64}) = _dct_no_float64()
+idct(X::StridedVector{Float32}) = dct(X, 3) .* (2.0f0 / length(X))
+idct(X::StridedVector{Float64}) = _dct_no_float64()
 
 
 """
@@ -892,7 +881,8 @@ Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/
 
 Returns: `(Or, Oi)` — real and imaginary parts of the output.
 """
-function dft(Ir::Vector{Float32}, Ii::Vector{Float32}, setup::DFTSetup{Float32})
+function dft(Ir::StridedVector{Float32}, Ii::StridedVector{Float32}, setup::DFTSetup{Float32})
+    _check_contiguous(Ir, Ii)
     n = length(Ir)
     Or = Vector{Float32}(undef, n)
     Oi = Vector{Float32}(undef, n)
@@ -900,7 +890,8 @@ function dft(Ir::Vector{Float32}, Ii::Vector{Float32}, setup::DFTSetup{Float32})
     return (Or, Oi)
 end
 
-function dft(Ir::Vector{Float64}, Ii::Vector{Float64}, setup::DFTSetup{Float64})
+function dft(Ir::StridedVector{Float64}, Ii::StridedVector{Float64}, setup::DFTSetup{Float64})
+    _check_contiguous(Ir, Ii)
     n = length(Ir)
     Or = Vector{Float64}(undef, n)
     Oi = Vector{Float64}(undef, n)
@@ -916,7 +907,7 @@ Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/
 
 Returns: `Vector{Complex{T}}`
 """
-function dft(X::Vector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
+function dft(X::StridedVector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
     Ir = T.(real.(X))
     Ii = T.(imag.(X))
     Or, Oi = dft(Ir, Ii, setup)
@@ -932,12 +923,12 @@ Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/
 
 Returns: `Vector{Complex{T}}`
 """
-function dft(X::Vector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
+function dft(X::StridedVector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
     setup = _cached_dftsetup(T, length(X), direction)
     return dft(X, setup)
 end
 
-function dft(X::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+function dft(X::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
     dft(X, DFT_FORWARD)
 end
 
@@ -951,11 +942,11 @@ Wraps [`vDSP_DFT_Execute`](https://developer.apple.com/documentation/accelerate/
 
 Returns: `Vector{Complex{T}}`
 """
-function idft(X::Vector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
+function idft(X::StridedVector{Complex{T}}, setup::DFTSetup{T}) where {T<:Union{Float32,Float64}}
     return dft(X, setup) ./ length(X)
 end
 
-function idft(X::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+function idft(X::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
     setup = _cached_dftsetup(T, length(X), DFT_INVERSE)
     return dft(X, setup) ./ length(X)
 end
@@ -1014,11 +1005,11 @@ function plan_fft(n::Integer, ::Type{T}=Float64, radix::Integer = 2) where T <: 
     FFTSetup{T}(n, radix)
 end
 
-function plan_fft(x::Vector{Complex{T}}) where T <: Union{Float32, Float64}
+function plan_fft(x::StridedVector{Complex{T}}) where T <: Union{Float32, Float64}
     FFTSetup{T}(length(x))
 end
 
-function plan_fft(x::Matrix{Complex{T}}) where T <: Union{Float32, Float64}
+function plan_fft(x::StridedMatrix{Complex{T}}) where T <: Union{Float32, Float64}
     nrows, ncols = size(x)
     FFTSetup{T}(max(nrows, ncols))
 end
@@ -1056,11 +1047,11 @@ function _cached_fftsetup(::Type{T}, n::Integer, radix::Integer=2) where {T<:Uni
     end::FFTSetup{T}
 end
 
-_cached_fftsetup(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} =
+_cached_fftsetup(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} =
     _cached_fftsetup(T, length(x))
 # 2D transforms only need a setup large enough for the bigger dimension (setups
 # support all transforms of equal or smaller size), matching `plan_fft(::Matrix)`.
-_cached_fftsetup(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} =
+_cached_fftsetup(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} =
     _cached_fftsetup(T, max(size(x)...))
 
 # Shared, cached DFTSetup{T} for mixed-radix (f*2^k) transforms, keyed by length and direction.
@@ -1105,7 +1096,7 @@ end
 
 # --- Internal 1D FFT (direction-based) ---
 
-function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+function _fft1d(r::StridedVector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     n = length(r)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1125,7 +1116,7 @@ function _fft1d(r::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     return complex.(retr, reti)
 end
 
-function _fft1d(r::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+function _fft1d(r::StridedVector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     n = length(r)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1147,7 +1138,7 @@ end
 
 # --- Internal 2D FFT (direction-based) ---
 
-function _fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+function _fft2d(r::StridedMatrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     nrows, ncols = size(r)
     ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
@@ -1169,7 +1160,7 @@ function _fft2d(r::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     return complex.(retr, reti)
 end
 
-function _fft2d(r::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+function _fft2d(r::StridedMatrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     nrows, ncols = size(r)
     ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
@@ -1195,7 +1186,7 @@ end
 
 # Mixed-radix 1D complex transform via the vDSP DFT (non-power-of-2). `direction` is
 # DFT_FORWARD or DFT_INVERSE. Result is unnormalized (matching bfft/dft conventions).
-function _fft1d_dft(x::Vector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
+function _fft1d_dft(x::StridedVector{Complex{T}}, direction::Int) where {T<:Union{Float32,Float64}}
     setup = _cached_dftsetup(T, length(x), direction)  # shared cached setup
     return dft(x, setup)
 end
@@ -1220,15 +1211,15 @@ transforms see [`fftplan`](@ref).
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
-fft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
-fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
-function fft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
+fft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_FORWARD)
+fft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_FORWARD)
+function fft(x::StridedVector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return fft(x, _cached_fftsetup(x))
     is_supported_fft_length(n) || return _fft_fallback(fallback, _unsupported_fft_length, n, x)
     return _fft1d_dft(x, DFT_FORWARD)
 end
-fft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, _cached_fftsetup(x))
+fft(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft(x, _cached_fftsetup(x))
 
 # --- Public API: bfft (backward/unnormalized inverse FFT) ---
 
@@ -1245,15 +1236,15 @@ or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
-bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
-bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
-function bfft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
+bfft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, FFT_INVERSE)
+bfft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, FFT_INVERSE)
+function bfft(x::StridedVector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return bfft(x, _cached_fftsetup(x))
     is_supported_fft_length(n) || return _fft_fallback(fallback, _unsupported_fft_length, n, x)
     return _fft1d_dft(x, DFT_INVERSE)
 end
-bfft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, _cached_fftsetup(x))
+bfft(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft(x, _cached_fftsetup(x))
 
 # --- Public API: ifft (normalized inverse FFT) ---
 
@@ -1270,19 +1261,19 @@ or for 2D inputs, all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zop) (1D) /
 [`vDSP_fft2d_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zop) (2D).
 """
-ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
-ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
+ifft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
+ifft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup) ./ length(x)
 # No-setup 1D routes through bfft, which handles both power-of-2 and mixed-radix lengths.
-function ifft(x::Vector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
+function ifft(x::StridedVector{Complex{T}}; fallback=nothing) where {T<:Union{Float32,Float64}}
     is_supported_fft_length(length(x)) ||
         return _fft_fallback(fallback, _unsupported_fft_length, length(x), x)
     return bfft(x) ./ length(x)
 end
-ifft(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, _cached_fftsetup(x))
+ifft(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft(x, _cached_fftsetup(x))
 
 # --- Internal in-place 1D complex FFT ---
 
-function _fft1d!(x::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+function _fft1d!(x::StridedVector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     n = length(x)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1301,7 +1292,7 @@ function _fft1d!(x::Vector{ComplexF64}, setup::FFTSetup{Float64}, direction::Int
     return x
 end
 
-function _fft1d!(x::Vector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+function _fft1d!(x::StridedVector{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     n = length(x)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1322,7 +1313,7 @@ end
 
 # --- Internal in-place 2D complex FFT ---
 
-function _fft2d!(x::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
+function _fft2d!(x::StridedMatrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int)
     nrows, ncols = size(x)
     ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
@@ -1343,7 +1334,7 @@ function _fft2d!(x::Matrix{ComplexF64}, setup::FFTSetup{Float64}, direction::Int
     return x
 end
 
-function _fft2d!(x::Matrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
+function _fft2d!(x::StridedMatrix{ComplexF32}, setup::FFTSetup{Float32}, direction::Int)
     nrows, ncols = size(x)
     ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
     log2nr = trailing_zeros(nrows)
@@ -1373,10 +1364,10 @@ Compute the forward FFT of `x` in-place via Apple vDSP, overwriting `x` with the
 Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
 [`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
-fft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_FORWARD)
-fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_FORWARD)
-fft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, _cached_fftsetup(x))
-fft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, _cached_fftsetup(x))
+fft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_FORWARD)
+fft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_FORWARD)
+fft!(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, _cached_fftsetup(x))
+fft!(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = fft!(x, _cached_fftsetup(x))
 
 # --- Public API: bfft! (in-place backward/unnormalized inverse FFT) ---
 
@@ -1387,10 +1378,10 @@ Compute the unnormalized inverse FFT of `x` in-place via Apple vDSP.
 Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
 [`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
-bfft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_INVERSE)
-bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_INVERSE)
-bfft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, _cached_fftsetup(x))
-bfft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, _cached_fftsetup(x))
+bfft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, FFT_INVERSE)
+bfft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, FFT_INVERSE)
+bfft!(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, _cached_fftsetup(x))
+bfft!(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = bfft!(x, _cached_fftsetup(x))
 
 # --- Public API: ifft! (in-place normalized inverse FFT) ---
 
@@ -1402,16 +1393,16 @@ Satisfies `ifft!(fft!(copy(x))) ≈ x`.
 Wraps [`vDSP_fft_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zip) (1D) /
 [`vDSP_fft2d_zip`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zip) (2D).
 """
-function ifft!(x::Vector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
+function ifft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup)
     x ./= length(x)
 end
-function ifft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
+function ifft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup)
     x ./= length(x)
 end
-ifft!(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cached_fftsetup(x))
-ifft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cached_fftsetup(x))
+ifft!(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cached_fftsetup(x))
+ifft!(x::StridedMatrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cached_fftsetup(x))
 
 # --- Internal 1D real FFT ---
 # vDSP real FFT uses packed split-complex format:
@@ -1419,7 +1410,7 @@ ifft!(x::Matrix{Complex{T}}) where {T<:Union{Float32,Float64}} = ifft!(x, _cache
 #   Forward scale: output is 2x the mathematical DFT
 # We unpack to standard format: Complex vector of length N/2+1
 
-function _rfft1d(x::Vector{Float64}, setup::FFTSetup{Float64})
+function _rfft1d(x::StridedVector{Float64}, setup::FFTSetup{Float64})
     n = length(x)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1448,7 +1439,7 @@ function _rfft1d(x::Vector{Float64}, setup::FFTSetup{Float64})
     return result
 end
 
-function _rfft1d(x::Vector{Float32}, setup::FFTSetup{Float32})
+function _rfft1d(x::StridedVector{Float32}, setup::FFTSetup{Float32})
     n = length(x)
     ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
@@ -1478,7 +1469,7 @@ end
 # --- Internal 1D inverse real FFT (unnormalized) ---
 # Pack standard complex input back into vDSP format, run inverse, unpack real output.
 
-function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
+function _brfft1d(X::StridedVector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
     ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
@@ -1513,7 +1504,7 @@ function _brfft1d(X::Vector{ComplexF64}, n::Int, setup::FFTSetup{Float64})
     return result
 end
 
-function _brfft1d(X::Vector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
+function _brfft1d(X::StridedVector{ComplexF32}, n::Int, setup::FFTSetup{Float32})
     ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
     logn = trailing_zeros(n)
     half = n >> 1
@@ -1579,7 +1570,7 @@ end
 for (T, SC, fft2d_zrop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zropD),
                             (Float32, :DSPSplitComplex, :vDSP_fft2d_zrop))
     @eval begin
-        function _rfft2d(x::Matrix{$T}, setup::FFTSetup{$T})
+        function _rfft2d(x::StridedMatrix{$T}, setup::FFTSetup{$T})
             n1, n2 = size(x)
             ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
             n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
@@ -1622,7 +1613,7 @@ for (T, SC, fft2d_zrop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zropD)
             return result
         end
 
-        function _brfft2d(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T})
+        function _brfft2d(X::StridedMatrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T})
             n2 = size(X, 2)
             ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
             n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
@@ -1713,7 +1704,7 @@ for (T, createfn, execfn) in ((Float64, :vDSP_DFT_zrop_CreateSetupD, :vDSP_DFT_E
             return DFTSetup($T, Ptr{Cvoid}(setup), direction)
         end
 
-        function _rfft1d_dft(x::Vector{$T})
+        function _rfft1d_dft(x::StridedVector{$T})
             n = length(x)
             half = n >> 1
             setup = _cached_rdftsetup($T, n, DFT_FORWARD)
@@ -1733,7 +1724,7 @@ for (T, createfn, execfn) in ((Float64, :vDSP_DFT_zrop_CreateSetupD, :vDSP_DFT_E
             return result
         end
 
-        function _brfft1d_dft(X::Vector{Complex{$T}}, n::Int)
+        function _brfft1d_dft(X::StridedVector{Complex{$T}}, n::Int)
             half = n >> 1
             length(X) == half + 1 || throw(DimensionMismatch(
                 "brfft: input must have length n÷2+1 = $(half + 1); got $(length(X))"))
@@ -1771,8 +1762,8 @@ For a matrix, the setup covers both dimensions (and can also be reused for the
 matching inverse transforms).
 Wraps [`vDSP_create_fftsetup`](https://developer.apple.com/documentation/accelerate/vdsp_create_fftsetup).
 """
-plan_rfft(x::Vector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
-plan_rfft(x::Matrix{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(max(size(x)...))
+plan_rfft(x::StridedVector{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(length(x))
+plan_rfft(x::StridedMatrix{T}) where {T<:Union{Float32,Float64}} = FFTSetup{T}(max(size(x)...))
 
 """
     rfft(x::VecOrMat{T}, [setup::FFTSetup{T}])
@@ -1789,9 +1780,9 @@ Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vds
 [`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D) /
 [`vDSP_DFT_zrop_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_dft_zrop_createsetup) (1D mixed-radix).
 """
-rfft(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
-rfft(x::Matrix{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup)
-function rfft(x::Vector{T}; fallback=nothing) where {T<:Union{Float32,Float64}}
+rfft(x::StridedVector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup)
+rfft(x::StridedMatrix{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup)
+function rfft(x::StridedVector{T}; fallback=nothing) where {T<:Union{Float32,Float64}}
     n = length(x)
     ispow2(n) && return rfft(x, _cached_fftsetup(T, n))
     (iseven(n) && is_supported_fft_length(n)) ||
@@ -1800,7 +1791,7 @@ function rfft(x::Vector{T}; fallback=nothing) where {T<:Union{Float32,Float64}}
     (fallback === nothing || _rdft_supported(T, n)) || return fallback(x)
     return _rfft1d_dft(x)
 end
-rfft(x::Matrix{T}) where {T<:Union{Float32,Float64}} = rfft(x, _cached_fftsetup(T, max(size(x)...)))
+rfft(x::StridedMatrix{T}) where {T<:Union{Float32,Float64}} = rfft(x, _cached_fftsetup(T, max(size(x)...)))
 
 # --- Public API: brfft (backward/unnormalized inverse real FFT) ---
 
@@ -1818,14 +1809,14 @@ Apple's real-input mixed-radix DFT are also accepted (see [`rfft`](@ref)).
 Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop) (1D) /
 [`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D).
 """
-brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
-brfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft2d(X, n1, setup)
-function brfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}}
+brfft(X::StridedVector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup)
+brfft(X::StridedMatrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfft2d(X, n1, setup)
+function brfft(X::StridedVector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}}
     ispow2(n) && return brfft(X, n, _cached_fftsetup(T, n))
     (iseven(n) && is_supported_fft_length(n)) || _unsupported_rfft_length(n)
     return _brfft1d_dft(X, n)
 end
-brfft(X::Matrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
+brfft(X::StridedMatrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
     brfft(X, n1, _cached_fftsetup(T, max(n1, size(X, 2))))
 
 # --- Public API: irfft (normalized inverse real FFT) ---
@@ -1843,11 +1834,11 @@ Apple's real-input mixed-radix DFT are also accepted (see [`rfft`](@ref)).
 Wraps [`vDSP_fft_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zrop) (1D) /
 [`vDSP_fft2d_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zrop) (2D).
 """
-irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
-irfft(X::Vector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n) ./ n
-irfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+irfft(X::StridedVector{Complex{T}}, n::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup) ./ n
+irfft(X::StridedVector{Complex{T}}, n::Int) where {T<:Union{Float32,Float64}} = brfft(X, n) ./ n
+irfft(X::StridedMatrix{Complex{T}}, n1::Int, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
     brfft(X, n1, setup) ./ (n1 * size(X, 2))
-irfft(X::Matrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
+irfft(X::StridedMatrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
     brfft(X, n1) ./ (n1 * size(X, 2))
 
 # --- Batched 1D complex FFT (vDSP_fftm_*) ---
@@ -1855,7 +1846,7 @@ irfft(X::Matrix{Complex{T}}, n1::Int) where {T<:Union{Float32,Float64}} =
 for (T, SC, fftm_zop) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fftm_zopD),
                           (Float32, :DSPSplitComplex, :vDSP_fftm_zop))
     @eval begin
-        function _fftm(x::Matrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T}, direction::Int)
+        function _fftm(x::StridedMatrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T}, direction::Int)
             dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
             nrows, ncols = size(x)
             n = size(x, dims)                      # transform length
@@ -1893,9 +1884,9 @@ Batched 1D forward FFT: transform each column (`dims = 1`) or each row
 length (`size(x, dims)`) must be a power of 2.
 Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
 """
-fft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+fft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
     _fftm(x, dims, setup, FFT_FORWARD)
-fft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+fft(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
     fft(x, dims, _cached_fftsetup(T, size(x, dims)))
 
 """
@@ -1905,9 +1896,9 @@ Batched 1D unnormalized inverse (backward) FFT along dimension `dims`
 (1 = columns, 2 = rows). Use [`ifft`](@ref) for the normalized version.
 Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
 """
-bfft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+bfft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
     _fftm(x, dims, setup, FFT_INVERSE)
-bfft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+bfft(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
     bfft(x, dims, _cached_fftsetup(T, size(x, dims)))
 
 """
@@ -1917,9 +1908,9 @@ Batched 1D normalized inverse FFT along dimension `dims` (1 = columns, 2 = rows)
 Satisfies `ifft(fft(x, dims), dims) ≈ x`.
 Wraps [`vDSP_fftm_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zop).
 """
-ifft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
+ifft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} =
     bfft(x, dims, setup) ./ size(x, dims)
-ifft(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
+ifft(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} =
     bfft(x, dims) ./ size(x, dims)
 
 # =====================================================================
@@ -1962,7 +1953,7 @@ FFTWorkspace(x::AbstractArray{T}) where {T<:Union{Float32,Float64}} =
 for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zoptD, :vDSP_fft_ziptD),
                             (Float32, :DSPSplitComplex, :vDSP_fft_zopt, :vDSP_fft_zipt))
     @eval begin
-        function _fft1d(r::Vector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
+        function _fft1d(r::StridedVector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             n = length(r)
             ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             length(ws.realp) >= n || _ws_too_small(length(ws.realp), n)
@@ -1980,7 +1971,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zoptD, :
             return complex.(retr, reti)
         end
 
-        function _fft1d!(x::Vector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
+        function _fft1d!(x::StridedVector{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             n = length(x)
             ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             length(ws.realp) >= n || _ws_too_small(length(ws.realp), n)
@@ -2005,7 +1996,7 @@ end
 for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zoptD, :vDSP_fft2d_ziptD),
                             (Float32, :DSPSplitComplex, :vDSP_fft2d_zopt, :vDSP_fft2d_zipt))
     @eval begin
-        function _fft2d(r::Matrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
+        function _fft2d(r::StridedMatrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             nrows, ncols = size(r)
             ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
             length(ws.realp) >= nrows*ncols || _ws_too_small(length(ws.realp), nrows*ncols)
@@ -2024,7 +2015,7 @@ for (T, SC, zopt, zipt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zoptD,
             return complex.(retr, reti)
         end
 
-        function _fft2d!(x::Matrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
+        function _fft2d!(x::StridedMatrix{Complex{$T}}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T}, direction::Int)
             nrows, ncols = size(x)
             ispow2(nrows) && ispow2(ncols) || throw(ArgumentError("dimensions must be powers of 2 (got nrows = $(nrows), ncols = $(ncols))"))
             length(ws.realp) >= nrows*ncols || _ws_too_small(length(ws.realp), nrows*ncols)
@@ -2058,10 +2049,10 @@ Wraps [`vDSP_fft_zopt`](https://developer.apple.com/documentation/accelerate/vds
 [`vDSP_fft2d_zopt`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zopt) /
 [`vDSP_fft2d_zipt`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zipt) (2D).
 """
-fft(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, ws, FFT_FORWARD)
-fft(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, ws, FFT_FORWARD)
-fft!(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, ws, FFT_FORWARD)
-fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, ws, FFT_FORWARD)
+fft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, ws, FFT_FORWARD)
+fft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, ws, FFT_FORWARD)
+fft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, ws, FFT_FORWARD)
+fft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, ws, FFT_FORWARD)
 
 """
     bfft(x, setup::FFTSetup, ws::FFTWorkspace)
@@ -2070,10 +2061,10 @@ fft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:U
 Temp-buffer unnormalized inverse FFT (see [`bfft`](@ref)/[`bfft!`](@ref)), using
 `ws` as scratch. Wraps the `zopt`/`zipt` vDSP variants.
 """
-bfft(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, ws, FFT_INVERSE)
-bfft(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, ws, FFT_INVERSE)
-bfft!(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, ws, FFT_INVERSE)
-bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, ws, FFT_INVERSE)
+bfft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d(x, setup, ws, FFT_INVERSE)
+bfft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d(x, setup, ws, FFT_INVERSE)
+bfft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft1d!(x, setup, ws, FFT_INVERSE)
+bfft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fft2d!(x, setup, ws, FFT_INVERSE)
 
 """
     ifft(x, setup::FFTSetup, ws::FFTWorkspace)
@@ -2082,12 +2073,12 @@ bfft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:
 Temp-buffer normalized inverse FFT (see [`ifft`](@ref)/[`ifft!`](@ref)), using
 `ws` as scratch.
 """
-ifft(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup, ws) ./ length(x)
-ifft(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup, ws) ./ length(x)
-function ifft!(x::Vector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
+ifft(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup, ws) ./ length(x)
+ifft(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, setup, ws) ./ length(x)
+function ifft!(x::StridedVector{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup, ws); x ./= length(x)
 end
-function ifft!(x::Matrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
+function ifft!(x::StridedMatrix{Complex{T}}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, setup, ws); x ./= length(x)
 end
 
@@ -2099,7 +2090,7 @@ end
 for (T, SC, zropt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zroptD),
                        (Float32, :DSPSplitComplex, :vDSP_fft_zropt))
     @eval begin
-        function _rfft1d(x::Vector{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
+        function _rfft1d(x::StridedVector{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n = length(x)
             ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             half = n >> 1
@@ -2124,7 +2115,7 @@ for (T, SC, zropt) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zroptD),
             return result
         end
 
-        function _brfft1d(X::Vector{Complex{$T}}, n::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
+        function _brfft1d(X::StridedVector{Complex{$T}}, n::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             ispow2(n) || throw(ArgumentError("output length must be a power of 2 (got n = $(n))"))
             half = n >> 1
             length(X) == half + 1 || throw(DimensionMismatch("input must have length n÷2+1"))
@@ -2162,7 +2153,8 @@ end
 for (T, SC, zrip, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft_zripD, :vDSP_fft_zriptD),
                              (Float32, :DSPSplitComplex, :vDSP_fft_zrip, :vDSP_fft_zript))
     @eval begin
-        function _rfft1d!(x::Vector{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
+        function _rfft1d!(x::StridedVector{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
+            _check_contiguous(x)
             n = length(x)
             ispow2(n) || throw(ArgumentError("length of input must be a power of 2 (got n = $(n))"))
             n >= 2 || throw(ArgumentError("length must be at least 2 (got n = $(n))"))
@@ -2201,7 +2193,7 @@ end
 for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zroptD, :vDSP_fft2d_zriptD),
                               (Float32, :DSPSplitComplex, :vDSP_fft2d_zropt, :vDSP_fft2d_zript))
     @eval begin
-        function _rfft2d(x::Matrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
+        function _rfft2d(x::StridedMatrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n1, n2 = size(x)
             ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
             n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
@@ -2223,7 +2215,7 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
         end
 
         # In-place real 2D (zript): C is both input and output.
-        function _rfft2d!(x::Matrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
+        function _rfft2d!(x::StridedMatrix{$T}, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n1, n2 = size(x)
             ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
             n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
@@ -2241,7 +2233,7 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
             return _unpack_rfft2d(realp, imagp, n1, n2)
         end
 
-        function _brfft2d(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
+        function _brfft2d(X::StridedMatrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::FFTWorkspace{$T})
             n2 = size(X, 2)
             ispow2(n1) && ispow2(n2) || throw(ArgumentError("dimensions must be powers of 2 (got n1 = $(n1), n2 = $(n2))"))
             n1 >= 2 && n2 >= 2 || throw(ArgumentError("each dimension must be at least 2 (got n1 = $(n1), n2 = $(n2))"))
@@ -2270,7 +2262,7 @@ for (T, SC, zropt, zript) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft2d_zrop
 end
 
 # Shared 2D real (un)packing helpers (identical layout to _rfft2d/_brfft2d above).
-function _unpack_rfft2d(out_realp::Matrix{T}, out_imagp::Matrix{T}, n1::Int, n2::Int) where {T}
+function _unpack_rfft2d(out_realp::StridedMatrix{T}, out_imagp::StridedMatrix{T}, n1::Int, n2::Int) where {T}
     h1 = n1 >> 1; h2 = n2 >> 1
     result = Matrix{Complex{T}}(undef, h1 + 1, n2)
     @inbounds for j in 1:n2, k in 2:h1
@@ -2289,7 +2281,7 @@ function _unpack_rfft2d(out_realp::Matrix{T}, out_imagp::Matrix{T}, n1::Int, n2:
     return result
 end
 
-function _pack_rfft2d(X::Matrix{Complex{T}}, n1::Int, n2::Int) where {T}
+function _pack_rfft2d(X::StridedMatrix{Complex{T}}, n1::Int, n2::Int) where {T}
     h1 = n1 >> 1; h2 = n2 >> 1
     inp_realp = Matrix{T}(undef, h1, n2); inp_imagp = Matrix{T}(undef, h1, n2)
     @inbounds for j in 1:n2, k in 2:h1
@@ -2315,12 +2307,12 @@ matrices; all dimensions must be powers of 2.
 Wraps [`vDSP_fft_zropt`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zropt) (1D) /
 [`vDSP_fft2d_zropt`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zropt) (2D).
 """
-rfft(x::Vector{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup, ws)
-rfft(x::Matrix{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup, ws)
-brfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup, ws)
-brfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfft2d(X, n1, setup, ws)
-irfft(X::Vector{Complex{T}}, n::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup, ws) ./ n
-irfft(X::Matrix{Complex{T}}, n1::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = brfft(X, n1, setup, ws) ./ (n1 * size(X, 2))
+rfft(x::StridedVector{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft1d(x, setup, ws)
+rfft(x::StridedMatrix{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft2d(x, setup, ws)
+brfft(X::StridedVector{Complex{T}}, n::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfft1d(X, n, setup, ws)
+brfft(X::StridedMatrix{Complex{T}}, n1::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfft2d(X, n1, setup, ws)
+irfft(X::StridedVector{Complex{T}}, n::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = brfft(X, n, setup, ws) ./ n
+irfft(X::StridedMatrix{Complex{T}}, n1::Int, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = brfft(X, n1, setup, ws) ./ (n1 * size(X, 2))
 
 """
     rfft!(x::Vector{T}, [setup::FFTSetup{T}, [ws::FFTWorkspace{T}]])
@@ -2336,10 +2328,10 @@ Wraps [`vDSP_fft_zrip`](https://developer.apple.com/documentation/accelerate/vds
 [`vDSP_fft_zript`](https://developer.apple.com/documentation/accelerate/vdsp_fft_zript) (1D) /
 [`vDSP_fft2d_zript`](https://developer.apple.com/documentation/accelerate/vdsp_fft2d_zript) (2D).
 """
-rfft!(x::Vector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, setup, nothing)
-rfft!(x::Vector{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, setup, ws)
-rfft!(x::Vector{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, _cached_fftsetup(T, length(x)), nothing)
-rfft!(x::Matrix{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft2d!(x, setup, ws)
+rfft!(x::StridedVector{T}, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, setup, nothing)
+rfft!(x::StridedVector{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, setup, ws)
+rfft!(x::StridedVector{T}) where {T<:Union{Float32,Float64}} = _rfft1d!(x, _cached_fftsetup(T, length(x)), nothing)
+rfft!(x::StridedMatrix{T}, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfft2d!(x, setup, ws)
 
 # =====================================================================
 # Batched 1D FFT extra variants (vDSP_fftm_z*): in-place, temp-buffer, real
@@ -2354,7 +2346,7 @@ for (T, SC, zip, zipt, zopt) in
         ((Float64, :DSPDoubleSplitComplex, :vDSP_fftm_zipD, :vDSP_fftm_ziptD, :vDSP_fftm_zoptD),
          (Float32, :DSPSplitComplex, :vDSP_fftm_zip, :vDSP_fftm_zipt, :vDSP_fftm_zopt))
     @eval begin
-        function _fftm!(x::Matrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T},
+        function _fftm!(x::StridedMatrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T},
                         ws::Union{Nothing,FFTWorkspace{$T}}, direction::Int)
             dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
             nrows, ncols = size(x)
@@ -2383,7 +2375,7 @@ for (T, SC, zip, zipt, zopt) in
             return x
         end
 
-        function _fftm(x::Matrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T},
+        function _fftm(x::StridedMatrix{Complex{$T}}, dims::Integer, setup::FFTSetup{$T},
                        ws::FFTWorkspace{$T}, direction::Int)
             dims == 1 || dims == 2 || throw(ArgumentError("dims must be 1 or 2; got $dims"))
             nrows, ncols = size(x)
@@ -2417,34 +2409,34 @@ See [`fft`](@ref). Wraps [`vDSP_fftm_zip`](https://developer.apple.com/documenta
 [`vDSP_fftm_zipt`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zipt) /
 [`vDSP_fftm_zopt`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zopt).
 """
-fft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm(x, dims, setup, ws, FFT_FORWARD)
-fft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, nothing, FFT_FORWARD)
-fft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, ws, FFT_FORWARD)
-fft!(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing, FFT_FORWARD)
+fft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm(x, dims, setup, ws, FFT_FORWARD)
+fft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, nothing, FFT_FORWARD)
+fft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, ws, FFT_FORWARD)
+fft!(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing, FFT_FORWARD)
 
 """
     bfft(x::Matrix, dims, setup, ws)  ;  bfft!(x::Matrix, dims, setup[, ws])
 
 Batched unnormalized inverse FFT along `dims`, temp-buffer and/or in-place. See [`bfft`](@ref).
 """
-bfft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm(x, dims, setup, ws, FFT_INVERSE)
-bfft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, nothing, FFT_INVERSE)
-bfft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, ws, FFT_INVERSE)
-bfft!(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing, FFT_INVERSE)
+bfft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm(x, dims, setup, ws, FFT_INVERSE)
+bfft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, nothing, FFT_INVERSE)
+bfft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, setup, ws, FFT_INVERSE)
+bfft!(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}} = _fftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing, FFT_INVERSE)
 
 """
     ifft(x::Matrix, dims, setup, ws)  ;  ifft!(x::Matrix, dims, setup[, ws])
 
 Batched normalized inverse FFT along `dims`, temp-buffer and/or in-place. See [`ifft`](@ref).
 """
-ifft(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, dims, setup, ws) ./ size(x, dims)
-function ifft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
+ifft(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = bfft(x, dims, setup, ws) ./ size(x, dims)
+function ifft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, dims, setup); x ./= size(x, dims)
 end
-function ifft!(x::Matrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
+function ifft!(x::StridedMatrix{Complex{T}}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}}
     bfft!(x, dims, setup, ws); x ./= size(x, dims)
 end
-function ifft!(x::Matrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}}
+function ifft!(x::StridedMatrix{Complex{T}}, dims::Integer) where {T<:Union{Float32,Float64}}
     bfft!(x, dims); x ./= size(x, dims)
 end
 
@@ -2453,7 +2445,7 @@ end
 # transposing (each row becomes a column), which independently exercises the same
 # batched real symbols. Output matches FFTW's `rfft(x, dims)`.
 
-function _unpack_rfftm(outr::Matrix{T}, outi::Matrix{T}, half::Int, m::Int) where {T}
+function _unpack_rfftm(outr::StridedMatrix{T}, outi::StridedMatrix{T}, half::Int, m::Int) where {T}
     result = Matrix{Complex{T}}(undef, half + 1, m)
     @inbounds for j in 1:m
         result[1, j] = complex(outr[1, j] / 2)
@@ -2465,7 +2457,7 @@ function _unpack_rfftm(outr::Matrix{T}, outi::Matrix{T}, half::Int, m::Int) wher
     return result
 end
 
-function _pack_rfftm(X::Matrix{Complex{T}}, half::Int, m::Int) where {T}
+function _pack_rfftm(X::StridedMatrix{Complex{T}}, half::Int, m::Int) where {T}
     inr = Matrix{T}(undef, half, m); ini = Matrix{T}(undef, half, m)
     @inbounds for j in 1:m
         inr[1, j] = real(X[1, j]); ini[1, j] = real(X[half + 1, j])
@@ -2481,7 +2473,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
          (Float32, :DSPSplitComplex, :vDSP_fftm_zrop, :vDSP_fftm_zropt, :vDSP_fftm_zrip, :vDSP_fftm_zript))
     @eval begin
         # Forward, column transforms; ws===nothing selects zrop, else zropt.
-        function _rfftm1(x::Matrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
+        function _rfftm1(x::StridedMatrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             n1, n2 = size(x)
             ispow2(n1) && n1 >= 2 || throw(ArgumentError("column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
@@ -2509,7 +2501,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
         end
 
         # Forward in-place (x consumed); ws===nothing selects zrip, else zript.
-        function _rfftm1!(x::Matrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
+        function _rfftm1!(x::StridedMatrix{$T}, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             n1, n2 = size(x)
             ispow2(n1) && n1 >= 2 || throw(ArgumentError("column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
@@ -2532,7 +2524,7 @@ for (T, SC, zrop, zropt, zrip, zript) in
         end
 
         # Inverse, column transforms; ws===nothing selects zrop, else zropt.
-        function _brfftm1(X::Matrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
+        function _brfftm1(X::StridedMatrix{Complex{$T}}, n1::Int, setup::FFTSetup{$T}, ws::Union{Nothing,FFTWorkspace{$T}})
             ispow2(n1) && n1 >= 2 || throw(ArgumentError("output column length must be a power of 2 ≥ 2 (got n1 = $(n1))"))
             half = n1 >> 1; logn = trailing_zeros(n1)
             size(X, 1) == half + 1 || throw(DimensionMismatch("input must have $(half+1) rows"))
@@ -2567,15 +2559,15 @@ for (T, SC, zrop, zropt, zrip, zript) in
 end
 
 # Dispatch helpers routing dims=2 through a transpose.
-_rfftm(x::Matrix{T}, dims::Integer, setup, ws) where {T} =
+_rfftm(x::StridedMatrix{T}, dims::Integer, setup, ws) where {T} =
     dims == 1 ? _rfftm1(x, setup, ws) :
     dims == 2 ? permutedims(_rfftm1(permutedims(x), setup, ws)) :
     throw(ArgumentError("dims must be 1 or 2; got $dims"))
-_rfftm!(x::Matrix{T}, dims::Integer, setup, ws) where {T} =
+_rfftm!(x::StridedMatrix{T}, dims::Integer, setup, ws) where {T} =
     dims == 1 ? _rfftm1!(x, setup, ws) :
     dims == 2 ? permutedims(_rfftm1!(permutedims(x), setup, ws)) :
     throw(ArgumentError("dims must be 1 or 2; got $dims"))
-_brfftm(X::Matrix, dims::Integer, n::Integer, setup, ws) =
+_brfftm(X::StridedMatrix, dims::Integer, n::Integer, setup, ws) =
     dims == 1 ? _brfftm1(X, n, setup, ws) :
     dims == 2 ? permutedims(_brfftm1(permutedims(X), n, setup, ws)) :
     throw(ArgumentError("dims must be 1 or 2; got $dims"))
@@ -2595,12 +2587,12 @@ Wraps [`vDSP_fftm_zrop`](https://developer.apple.com/documentation/accelerate/vd
 [`vDSP_fftm_zrip`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zrip) /
 [`vDSP_fftm_zript`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zript).
 """
-rfft(x::Matrix{T}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, setup, nothing)
-rfft(x::Matrix{T}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, setup, ws)
-rfft(x::Matrix{T}, dims::Integer) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, _cached_fftsetup(T, size(x, dims)), nothing)
-rfft!(x::Matrix{T}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, setup, nothing)
-rfft!(x::Matrix{T}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, setup, ws)
-rfft!(x::Matrix{T}, dims::Integer) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing)
+rfft(x::StridedMatrix{T}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, setup, nothing)
+rfft(x::StridedMatrix{T}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, setup, ws)
+rfft(x::StridedMatrix{T}, dims::Integer) where {T<:Union{Float32,Float64}} = _rfftm(x, dims, _cached_fftsetup(T, size(x, dims)), nothing)
+rfft!(x::StridedMatrix{T}, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, setup, nothing)
+rfft!(x::StridedMatrix{T}, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, setup, ws)
+rfft!(x::StridedMatrix{T}, dims::Integer) where {T<:Union{Float32,Float64}} = _rfftm!(x, dims, _cached_fftsetup(T, size(x, dims)), nothing)
 
 """
     brfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer, [setup, ws])
@@ -2612,12 +2604,12 @@ Batched inverse real FFT along `dims`, the inverse of [`rfft`](@ref)`(x, dims)`.
 Wraps [`vDSP_fftm_zrop`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zrop) /
 [`vDSP_fftm_zropt`](https://developer.apple.com/documentation/accelerate/vdsp_fftm_zropt).
 """
-brfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, nothing)
-brfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, ws)
-brfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, _cached_fftsetup(T, n), nothing)
-irfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, nothing) ./ n
-irfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, ws) ./ n
-irfft(X::Matrix{Complex{T}}, n::Integer, dims::Integer) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, _cached_fftsetup(T, n), nothing) ./ n
+brfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, nothing)
+brfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, ws)
+brfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, _cached_fftsetup(T, n), nothing)
+irfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, nothing) ./ n
+irfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer, setup::FFTSetup{T}, ws::FFTWorkspace{T}) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, setup, ws) ./ n
+irfft(X::StridedMatrix{Complex{T}}, n::Integer, dims::Integer) where {T<:Union{Float32,Float64}} = _brfftm(X, dims, n, _cached_fftsetup(T, n), nothing) ./ n
 
 # =====================================================================
 # Small-radix complex FFTs (vDSP_fft3_zop / vDSP_fft5_zop)
@@ -2636,7 +2628,7 @@ const _FFTRADIX5 = 2   # kFFTRadix5
 for (T, SC, fft3, fft5) in ((Float64, :DSPDoubleSplitComplex, :vDSP_fft3_zopD, :vDSP_fft5_zopD),
                             (Float32, :DSPSplitComplex, :vDSP_fft3_zop, :vDSP_fft5_zop))
     for (radix, radixcode, fn, base) in ((3, _FFTRADIX3, fft3, :fft3), (5, _FFTRADIX5, fft5, :fft5))
-        @eval function $(Symbol("_", base))(x::Vector{Complex{$T}}, direction::Int)
+        @eval function $(Symbol("_", base))(x::StridedVector{Complex{$T}}, direction::Int)
             n = length(x)
             m = n ÷ $radix
             (m >= 1 && n == $radix * m && ispow2(m)) ||
@@ -2668,10 +2660,10 @@ mixed-radix DFT path cannot (e.g. 12, 20).
 Wraps [`vDSP_fft3_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft3_zop) /
 [`vDSP_fft5_zop`](https://developer.apple.com/documentation/accelerate/vdsp_fft5_zop).
 """
-fftradix3(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft3(x, FFT_FORWARD)
-bfftradix3(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft3(x, FFT_INVERSE)
-fftradix5(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft5(x, FFT_FORWARD)
-bfftradix5(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft5(x, FFT_INVERSE)
+fftradix3(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft3(x, FFT_FORWARD)
+bfftradix3(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft3(x, FFT_INVERSE)
+fftradix5(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft5(x, FFT_FORWARD)
+bfftradix5(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft5(x, FFT_INVERSE)
 
 @doc (@doc fftradix3) bfftradix3
 @doc (@doc fftradix3) fftradix5
@@ -2688,7 +2680,7 @@ bfftradix5(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = _fft5(x, F
 
 for (N, copv, zopv) in ((16, :vDSP_FFT16_copv, :vDSP_FFT16_zopv),
                         (32, :vDSP_FFT32_copv, :vDSP_FFT32_zopv))
-    @eval function $(Symbol("_fft", N))(x::Vector{ComplexF32}, direction::Int)
+    @eval function $(Symbol("_fft", N))(x::StridedVector{ComplexF32}, direction::Int)
         length(x) == $N || throw(DimensionMismatch(string("input must have length ", $N,
                                                           "; got ", length(x))))
         Or = Vector{Float32}(undef, $N); Oi = Vector{Float32}(undef, $N)
@@ -2710,10 +2702,10 @@ required). `fft*` is the forward transform, `bfft*` the unnormalized inverse
 Wraps [`vDSP_FFT16_zopv`](https://developer.apple.com/documentation/accelerate/vdsp_fft16_zopv) /
 [`vDSP_FFT32_zopv`](https://developer.apple.com/documentation/accelerate/vdsp_fft32_zopv).
 """
-fft16(x::Vector{ComplexF32}) = _fft16(x, FFT_FORWARD)
-bfft16(x::Vector{ComplexF32}) = _fft16(x, FFT_INVERSE)
-fft32(x::Vector{ComplexF32}) = _fft32(x, FFT_FORWARD)
-bfft32(x::Vector{ComplexF32}) = _fft32(x, FFT_INVERSE)
+fft16(x::StridedVector{ComplexF32}) = _fft16(x, FFT_FORWARD)
+bfft16(x::StridedVector{ComplexF32}) = _fft16(x, FFT_INVERSE)
+fft32(x::StridedVector{ComplexF32}) = _fft32(x, FFT_FORWARD)
+bfft32(x::StridedVector{ComplexF32}) = _fft32(x, FFT_INVERSE)
 
 @doc (@doc fft16) bfft16
 @doc (@doc fft16) fft32
@@ -2767,7 +2759,7 @@ end
 for (T, CT, execfn) in ((Float32, :DSPComplex, :vDSP_DFT_Interleaved_Execute),
                         (Float64, :DSPDoubleComplex, :vDSP_DFT_Interleaved_ExecuteD))
     @eval begin
-        function dft_interleaved(x::Vector{Complex{$T}}, setup::InterleavedDFTSetup{$T})
+        function dft_interleaved(x::StridedVector{Complex{$T}}, setup::InterleavedDFTSetup{$T})
             n = length(x)
             n == setup.length || throw(DimensionMismatch(
                 "input length $n does not match setup length $(setup.length)"))
@@ -2796,17 +2788,17 @@ Execute an interleaved-complex DFT on `x`. With no `setup`, one is created (and
 cached) for the length/direction of `x`.
 Wraps [`vDSP_DFT_Interleaved_Execute`](https://developer.apple.com/documentation/accelerate/vdsp_dft_interleaved_execute).
 """
-function dft_interleaved(x::Vector{Complex{T}}, direction::Integer) where {T<:Union{Float32,Float64}}
+function dft_interleaved(x::StridedVector{Complex{T}}, direction::Integer) where {T<:Union{Float32,Float64}}
     dft_interleaved(x, plan_dft_interleaved(length(x), direction, T))
 end
-dft_interleaved(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}} = dft_interleaved(x, DFT_FORWARD)
+dft_interleaved(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = dft_interleaved(x, DFT_FORWARD)
 
 """
     idft_interleaved(x::Vector{Complex{T}})
 
 Normalized inverse interleaved-complex DFT: `dft_interleaved(x, DFT_INVERSE) ./ length(x)`.
 """
-function idft_interleaved(x::Vector{Complex{T}}) where {T<:Union{Float32,Float64}}
+function idft_interleaved(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
     dft_interleaved(x, plan_dft_interleaved(length(x), DFT_INVERSE, T)) ./ length(x)
 end
 
@@ -2825,8 +2817,9 @@ end
 for (CT, setfn) in ((Float32, :vDSP_biquad_SetCoefficientsSingle),
                     (Float64, :vDSP_biquad_SetCoefficientsDouble))
     @eval begin
-        function biquad_setcoefficients!(bq::Biquad{Float32}, coeffs::Vector{$CT},
+        function biquad_setcoefficients!(bq::Biquad{Float32}, coeffs::StridedVector{$CT},
                                          start_sec::Integer=0, nsec::Integer=length(coeffs) ÷ 5)
+            _check_contiguous(coeffs)
             length(coeffs) >= 5 * nsec ||
                 throw(DimensionMismatch("coeffs must contain 5 values per section (need $(5*nsec))"))
             start_sec >= 0 && nsec >= 1 && start_sec + nsec <= bq.sections ||
@@ -2869,9 +2862,10 @@ for (T, coefffn, targetfn, resetfn, activefn, copyfn) in
          (Float64, :vDSP_biquadm_SetCoefficientsDoubleD, :vDSP_biquadm_SetTargetsDoubleD,
           :vDSP_biquadm_ResetStateD, :vDSP_biquadm_SetActiveFiltersD, :vDSP_biquadm_CopyStateD))
     @eval begin
-        function biquadm_setcoefficients!(setup::BiquadMulti{$T}, coeffs::Vector{$T},
+        function biquadm_setcoefficients!(setup::BiquadMulti{$T}, coeffs::StridedVector{$T},
                                           start_sec::Integer, start_chn::Integer,
                                           nsec::Integer, nchn::Integer)
+            _check_contiguous(coeffs)
             length(coeffs) >= 5 * nsec * nchn ||
                 throw(DimensionMismatch("coeffs must contain 5*nsec*nchn values (need $(5*nsec*nchn))"))
             start_sec >= 0 && start_sec + nsec <= setup.sections ||
@@ -2884,10 +2878,11 @@ for (T, coefffn, targetfn, resetfn, activefn, copyfn) in
             return setup
         end
 
-        function biquadm_settargets!(setup::BiquadMulti{$T}, targets::Vector{$T},
+        function biquadm_settargets!(setup::BiquadMulti{$T}, targets::StridedVector{$T},
                                      interp_rate::Real, interp_threshold::Real,
                                      start_sec::Integer, start_chn::Integer,
                                      nsec::Integer, nchn::Integer)
+            _check_contiguous(targets)
             length(targets) >= 5 * nsec * nchn ||
                 throw(DimensionMismatch("targets must contain 5*nsec*nchn values (need $(5*nsec*nchn))"))
             start_sec >= 0 && start_sec + nsec <= setup.sections ||

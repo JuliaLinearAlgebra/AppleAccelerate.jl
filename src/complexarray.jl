@@ -52,14 +52,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vneg: negate complex vector
     @eval begin
-        function vneg!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
+        function vneg!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vneg!: X and result must have equal lengths"))
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvneg", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
@@ -70,7 +70,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Complex negation: `result[i] = -X[i]`.
         Wraps [`vDSP_zvneg`](https://developer.apple.com/documentation/accelerate/vdsp_zvneg).
         """
-        function vneg(X::Vector{Complex{$T}})
+        function vneg(X::StridedVector{Complex{$T}})
             result = similar(X)
             vneg!(result, X)
         end
@@ -78,18 +78,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vconj: conjugate complex vector
     @eval begin
-        function vconj!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}})
+        function vconj!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vconj!: X and result must have equal lengths"))
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvconj", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function vconj(X::Vector{Complex{$T}})
+        function vconj(X::StridedVector{Complex{$T}})
             result = similar(X)
             vconj!(result, X)
         end
@@ -97,14 +97,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vcopy: copy complex vector (via vDSP_zvmov)
     @eval begin
-        function vcopy(X::Vector{Complex{$T}})
+        function vcopy(X::StridedVector{Complex{$T}})
             n = length(X)
             result = Vector{Complex{$T}}(undef, n)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvmov", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(osplit), _CSTRIDE, n)
             end
             return result
         end
@@ -134,7 +134,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vmul: element-wise complex multiply (conjugate flag = +1 for normal multiply)
     @eval begin
-        function vmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function vmul!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) == length(result) || throw(DimensionMismatch("vmul!: X, Y, and result must have equal lengths"))
             n = length(X)
             GC.@preserve X Y result begin
@@ -142,7 +142,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvmul", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n, Cint(1))
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(ysplit), _CSTRIDE * stride(Y, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n, Cint(1))
             end
             return result
         end
@@ -153,7 +153,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Element-wise complex multiplication: `result[i] = X[i] * Y[i]`.
         Wraps [`vDSP_zvmul`](https://developer.apple.com/documentation/accelerate/vdsp_zvmul).
         """
-        function vmul(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function vmul(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             result = similar(X)
             vmul!(result, X, Y)
         end
@@ -162,7 +162,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vdiv: element-wise complex divide
     # Note: vDSP_zvdiv computes B/A, so we swap: pass Y as A and X as B to get X/Y
     @eval begin
-        function vdiv!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function vdiv!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) == length(result) || throw(DimensionMismatch("vdiv!: X, Y, and result must have equal lengths"))
             n = length(X)
             GC.@preserve X Y result begin
@@ -170,7 +170,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvdiv", suff)))(
-                      Ref(ysplit), _CSTRIDE, Ref(xsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(ysplit), _CSTRIDE * stride(Y, 1), Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
@@ -181,7 +181,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Element-wise complex division: `result[i] = X[i] / Y[i]`.
         Wraps [`vDSP_zvdiv`](https://developer.apple.com/documentation/accelerate/vdsp_zvdiv).
         """
-        function vdiv(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function vdiv(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             result = similar(X)
             vdiv!(result, X, Y)
         end
@@ -190,7 +190,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # vsmul: complex vector * complex scalar
     # vDSP_zvzsml: A * B → C where B is a single split-complex element
     @eval begin
-        function vsmul!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, c::Complex{$T})
+        function vsmul!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}}, c::Complex{$T})
             length(X) == length(result) || throw(DimensionMismatch("vsmul!: X and result must have equal lengths"))
             n = length(X)
             c2 = $T[real(c), imag(c)]
@@ -199,7 +199,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 csplit = _split_view($DSPSplit, pointer(c2))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvzsml", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(csplit), Ref(osplit), _CSTRIDE, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(csplit), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
@@ -210,7 +210,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Complex vector-scalar multiplication: `result[i] = X[i] * c`.
         Wraps [`vDSP_zvzsml`](https://developer.apple.com/documentation/accelerate/vdsp_zvzsml).
         """
-        function vsmul(X::Vector{Complex{$T}}, c::Complex{$T})
+        function vsmul(X::StridedVector{Complex{$T}}, c::Complex{$T})
             result = similar(X)
             vsmul!(result, X, c)
         end
@@ -225,13 +225,13 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vabs: complex absolute value (modulus)
     @eval begin
-        function vabs!(result::Vector{$T}, X::Vector{Complex{$T}})
+        function vabs!(result::StridedVector{$T}, X::StridedVector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vabs!: X and result must have equal lengths"))
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 LibAccelerate.$(Symbol(string("vDSP_zvabs", suff)))(
-                      Ref(xsplit), _CSTRIDE, result, 1, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), result, stride(result, 1), n)
             end
             return result
         end
@@ -242,7 +242,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Complex absolute value (modulus): `result[i] = abs(X[i])`.
         Wraps [`vDSP_zvabs`](https://developer.apple.com/documentation/accelerate/vdsp_zvabs).
         """
-        function vabs(X::Vector{Complex{$T}})
+        function vabs(X::StridedVector{Complex{$T}})
             result = Vector{$T}(undef, length(X))
             vabs!(result, X)
         end
@@ -250,17 +250,17 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vphase: complex phase (angle)
     @eval begin
-        function vphase!(result::Vector{$T}, X::Vector{Complex{$T}})
+        function vphase!(result::StridedVector{$T}, X::StridedVector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vphase!: X and result must have equal lengths"))
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 LibAccelerate.$(Symbol(string("vDSP_zvphas", suff)))(
-                      Ref(xsplit), _CSTRIDE, result, 1, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), result, stride(result, 1), n)
             end
             return result
         end
-        function vphase(X::Vector{Complex{$T}})
+        function vphase(X::StridedVector{Complex{$T}})
             result = Vector{$T}(undef, length(X))
             vphase!(result, X)
         end
@@ -268,17 +268,17 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vmags: squared magnitude (abs2)
     @eval begin
-        function vmags!(result::Vector{$T}, X::Vector{Complex{$T}})
+        function vmags!(result::StridedVector{$T}, X::StridedVector{Complex{$T}})
             length(X) == length(result) || throw(DimensionMismatch("vmags!: X and result must have equal lengths"))
             n = length(X)
             GC.@preserve X result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 LibAccelerate.$(Symbol(string("vDSP_zvmags", suff)))(
-                      Ref(xsplit), _CSTRIDE, result, 1, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), result, stride(result, 1), n)
             end
             return result
         end
-        function vmags(X::Vector{Complex{$T}})
+        function vmags(X::StridedVector{Complex{$T}})
             result = Vector{$T}(undef, length(X))
             vmags!(result, X)
         end
@@ -286,17 +286,17 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # vmagsa: squared magnitude + accumulate: abs2(X) + B
     @eval begin
-        function vmagsa!(result::Vector{$T}, X::Vector{Complex{$T}}, B::Vector{$T})
+        function vmagsa!(result::StridedVector{$T}, X::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(X) == length(B) == length(result) || throw(DimensionMismatch("vmagsa!: X, B, and result must have equal lengths"))
             n = length(X)
             GC.@preserve X B result begin
                 xsplit = _split_view($DSPSplit, pointer(X))
                 LibAccelerate.$(Symbol(string("vDSP_zvmgsa", suff)))(
-                      Ref(xsplit), _CSTRIDE, B, 1, result, 1, n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), B, stride(B, 1), result, stride(result, 1), n)
             end
             return result
         end
-        function vmagsa(X::Vector{Complex{$T}}, B::Vector{$T})
+        function vmagsa(X::StridedVector{Complex{$T}}, B::StridedVector{$T})
             result = Vector{$T}(undef, length(X))
             vmagsa!(result, X, B)
         end
@@ -341,7 +341,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         [`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr).
         For the un-conjugated product `sum(X .* Y)` use [`dotu`](@ref).
         """
-        function dot(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function dot(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dot: X and Y must have equal lengths"))
             n = length(X)
             out = $T[0, 0]                 # interleaved [re, im] scalar result
@@ -351,7 +351,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 osplit = _split_view($DSPSplit, pointer(out))
                 # vDSP_zidotpr conjugates its FIRST argument: result = sum(conj(X) .* Y).
                 LibAccelerate.$(Symbol(string("vDSP_zidotpr", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(ysplit), _CSTRIDE * stride(Y, 1), Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -364,7 +364,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         [`vDSP_zdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zdotpr).
         For the conjugated product matching `LinearAlgebra.dot` use [`dot`](@ref).
         """
-        function dotu(X::Vector{Complex{$T}}, Y::Vector{Complex{$T}})
+        function dotu(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dotu: X and Y must have equal lengths"))
             n = length(X)
             out = $T[0, 0]                 # interleaved [re, im] scalar result
@@ -373,7 +373,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 ysplit = _split_view($DSPSplit, pointer(Y))
                 osplit = _split_view($DSPSplit, pointer(out))
                 LibAccelerate.$(Symbol(string("vDSP_zdotpr", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(ysplit), _CSTRIDE, Ref(osplit), n)
+                      Ref(xsplit), _CSTRIDE * stride(X, 1), Ref(ysplit), _CSTRIDE * stride(Y, 1), Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -388,7 +388,8 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # polar: Cartesian (re, im interleaved) → (magnitude, angle) interleaved
     # vDSP_polar takes interleaved input [re, im, re, im, ...] and writes [mag, angle, mag, angle, ...]
     @eval begin
-        function polar(X::Vector{Complex{$T}})
+        function polar(X::StridedVector{Complex{$T}})
+            _check_contiguous(X)
             n = length(X)
             interleaved_out = Vector{$T}(undef, 2 * n)
             GC.@preserve X interleaved_out begin
@@ -404,7 +405,7 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     # rect: (magnitude, angle) → Cartesian complex
     # vDSP_rect takes interleaved [mag, angle, mag, angle, ...] and writes [re, im, re, im, ...]
     @eval begin
-        function rect(magnitudes::Vector{$T}, angles::Vector{$T})
+        function rect(magnitudes::StridedVector{$T}, angles::StridedVector{$T})
             length(magnitudes) == length(angles) || throw(DimensionMismatch("rect: magnitudes and angles must have equal lengths"))
             n = length(magnitudes)
             interleaved_in = Vector{$T}(undef, 2 * n)
@@ -445,7 +446,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvadd: C = A + B
     @eval begin
-        function zvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvadd!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvadd!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
@@ -453,11 +454,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvadd", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvadd(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvadd(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             result = similar(A)
             zvadd!(result, A, B)
         end
@@ -465,7 +466,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvsub: C = A - B  (NOTE: vDSP_zvsub computes __A - __B, pass A as first, B as second)
     @eval begin
-        function zvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvsub!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvsub!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
@@ -473,11 +474,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvsub", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvsub(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvsub(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             result = similar(A)
             zvsub!(result, A, B)
         end
@@ -485,7 +486,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvcmul: C = conj(A) * B
     @eval begin
-        function zvcmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvcmul!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zvcmul!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
@@ -493,11 +494,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvcmul", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvcmul(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zvcmul(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             result = similar(A)
             zvcmul!(result, A, B)
         end
@@ -507,18 +508,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zrvmul: C = A * B (complex * real)
     @eval begin
-        function zrvmul!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvmul!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvmul!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zrvmul", suff)))(
-                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), B, stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zrvmul(A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvmul(A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             result = similar(A)
             zrvmul!(result, A, B)
         end
@@ -526,18 +527,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zrvdiv: C = A / B (complex / real). vDSP_zrvdiv computes A/B directly (no operand swap, unlike vDSP_zvdiv).
     @eval begin
-        function zrvdiv!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvdiv!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvdiv!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zrvdiv", suff)))(
-                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), B, stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zrvdiv(A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvdiv(A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             result = similar(A)
             zrvdiv!(result, A, B)
         end
@@ -545,18 +546,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zrvadd: C = A + B (add real to complex, adds to real part)
     @eval begin
-        function zrvadd!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvadd!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvadd!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zrvadd", suff)))(
-                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), B, stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zrvadd(A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvadd(A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             result = similar(A)
             zrvadd!(result, A, B)
         end
@@ -564,18 +565,18 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zrvsub: C = A - B (complex - real). vDSP_zrvsub computes A-B directly (no operand swap).
     @eval begin
-        function zrvsub!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvsub!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(A) == length(B) == length(result) || throw(DimensionMismatch("zrvsub!: A, B, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B result begin
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zrvsub", suff)))(
-                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), B, stride(B, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zrvsub(A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrvsub(A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             result = similar(A)
             zrvsub!(result, A, B)
         end
@@ -585,7 +586,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvcma: D = conj(A)*B + C
     @eval begin
-        function zvcma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+        function zvcma!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}})
             length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvcma!: A, B, C, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B C result begin
@@ -594,11 +595,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvcma", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(csplit), _CSTRIDE * stride(C, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvcma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+        function zvcma(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}})
             result = similar(A)
             zvcma!(result, A, B, C)
         end
@@ -606,7 +607,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvma: D = A*B + C
     @eval begin
-        function zvma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+        function zvma!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}})
             length(A) == length(B) == length(C) == length(result) || throw(DimensionMismatch("zvma!: A, B, C, and result must have equal lengths"))
             n = length(A)
             GC.@preserve A B C result begin
@@ -615,11 +616,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvma", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(csplit), _CSTRIDE * stride(C, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvma(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}})
+        function zvma(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}})
             result = similar(A)
             zvma!(result, A, B, C)
         end
@@ -627,7 +628,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvsma: D = A*b[scalar] + C
     @eval begin
-        function zvsma!(result::Vector{Complex{$T}}, A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
+        function zvsma!(result::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, b::Complex{$T}, C::StridedVector{Complex{$T}})
             length(A) == length(C) == length(result) || throw(DimensionMismatch("zvsma!: A, C, and result must have equal lengths"))
             n = length(A)
             b2 = $T[real(b), imag(b)]
@@ -637,11 +638,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 csplit = _split_view($DSPSplit, pointer(C))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvsma", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), Ref(csplit), _CSTRIDE, Ref(osplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), Ref(csplit), _CSTRIDE * stride(C, 1), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
-        function zvsma(A::Vector{Complex{$T}}, b::Complex{$T}, C::Vector{Complex{$T}})
+        function zvsma(A::StridedVector{Complex{$T}}, b::Complex{$T}, C::StridedVector{Complex{$T}})
             result = similar(A)
             zvsma!(result, A, b, C)
         end
@@ -651,7 +652,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zidotpr: conjugate dot product — sum(conj(A) .* B)
     @eval begin
-        function zidotpr(A::Vector{Complex{$T}}, B::Vector{Complex{$T}})
+        function zidotpr(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             length(A) == length(B) || throw(DimensionMismatch("zidotpr: A and B must have equal lengths"))
             n = length(A)
             out = $T[0, 0]
@@ -660,7 +661,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 bsplit = _split_view($DSPSplit, pointer(B))
                 osplit = _split_view($DSPSplit, pointer(out))
                 LibAccelerate.$(Symbol(string("vDSP_zidotpr", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(osplit), n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -668,7 +669,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zrdotpr: complex-real dot product — sum(A .* B) where B is real
     @eval begin
-        function zrdotpr(A::Vector{Complex{$T}}, B::Vector{$T})
+        function zrdotpr(A::StridedVector{Complex{$T}}, B::StridedVector{$T})
             length(A) == length(B) || throw(DimensionMismatch("zrdotpr: A and B must have equal lengths"))
             n = length(A)
             out = $T[0, 0]
@@ -676,7 +677,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 asplit = _split_view($DSPSplit, pointer(A))
                 osplit = _split_view($DSPSplit, pointer(out))
                 LibAccelerate.$(Symbol(string("vDSP_zrdotpr", suff)))(
-                      Ref(asplit), _CSTRIDE, B, 1, Ref(osplit), n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), B, stride(B, 1), Ref(osplit), n)
             end
             return complex(out[1], out[2])
         end
@@ -686,14 +687,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zvfill: fill complex vector with complex scalar
     @eval begin
-        function zvfill!(result::Vector{Complex{$T}}, c::Complex{$T})
+        function zvfill!(result::StridedVector{Complex{$T}}, c::Complex{$T})
             n = length(result)
             c2 = $T[real(c), imag(c)]
             GC.@preserve result c2 begin
                 csplit = _split_view($DSPSplit, pointer(c2))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zvfill", suff)))(
-                      Ref(csplit), Ref(osplit), _CSTRIDE, n)
+                      Ref(csplit), Ref(osplit), _CSTRIDE * stride(result, 1), n)
             end
             return result
         end
@@ -703,7 +704,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zconv: complex convolution
     @eval begin
-        function zconv!(result::Vector{Complex{$T}}, X::Vector{Complex{$T}}, K::Vector{Complex{$T}})
+        function zconv!(result::StridedVector{Complex{$T}}, X::StridedVector{Complex{$T}}, K::StridedVector{Complex{$T}})
             xn = length(X)
             kn = length(K)
             rn = length(result)
@@ -720,11 +721,11 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 ksplit = _split_view($DSPSplit, pointer(K))
                 osplit = _split_view($DSPSplit, pointer(result))
                 LibAccelerate.$(Symbol(string("vDSP_zconv", suff)))(
-                      Ref(xsplit), _CSTRIDE, Ref(ksplit), _CSTRIDE, Ref(osplit), _CSTRIDE, rn, kn)
+                      Ref(xsplit), _CSTRIDE, Ref(ksplit), _CSTRIDE * stride(K, 1), Ref(osplit), _CSTRIDE * stride(result, 1), rn, kn)
             end
             return result
         end
-        function zconv(X::Vector{Complex{$T}}, K::Vector{Complex{$T}})
+        function zconv(X::StridedVector{Complex{$T}}, K::StridedVector{Complex{$T}})
             rn = length(X) + length(K) - 1
             result = Vector{Complex{$T}}(undef, rn)
             zconv!(result, X, K)
@@ -735,7 +736,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 
     # zmmul: complex matrix multiply C = A * B
     @eval begin
-        function zmmul!(C::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}})
+        function zmmul!(C::StridedMatrix{Complex{$T}}, A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}})
+            _check_contiguous(C, A, B)
             m, p = size(A)
             p2, n = size(B)
             p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
@@ -750,7 +752,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return C
         end
-        function zmmul(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}})
+        function zmmul(A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}})
             m = size(A, 1)
             n = size(B, 2)
             C = Matrix{Complex{$T}}(undef, m, n)
@@ -765,7 +767,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # additive term C (same shape as D) aligns element-wise in the same buffer layout.
     for (fname, vname) in ((:zmma, "zmma"), (:zmms, "zmms"))
         @eval begin
-            function $(Symbol(fname, :!))(D::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+            function $(Symbol(fname, :!))(D::StridedMatrix{Complex{$T}}, A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}}, C::StridedMatrix{Complex{$T}})
+                _check_contiguous(D, A, B, C)
                 m, p = size(A)
                 p2, n = size(B)
                 p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
@@ -782,7 +785,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 end
                 return D
             end
-            function $fname(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+            function $fname(A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}}, C::StridedMatrix{Complex{$T}})
                 D = Matrix{Complex{$T}}(undef, size(A, 1), size(B, 2))
                 $(Symbol(fname, :!))(D, A, B, C)
             end
@@ -832,7 +835,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # zmsm: D = C - A*B (vDSP's "reverse subtract"; verified empirically —
     # NOT (A-B)*C, see the section note above)
     @eval begin
-        function zmsm!(D::Matrix{Complex{$T}}, A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+        function zmsm!(D::StridedMatrix{Complex{$T}}, A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}}, C::StridedMatrix{Complex{$T}})
+            _check_contiguous(D, A, B, C)
             m, p = size(A)
             p2, n = size(B)
             p == p2 || throw(DimensionMismatch("A columns ($p) ≠ B rows ($p2)"))
@@ -858,7 +862,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         (the vDSP.h header labels this "matrix multiply and reverse subtract";
         confirmed empirically to compute `C - A*B`, not `(A-B)*C`).
         """
-        function zmsm(A::Matrix{Complex{$T}}, B::Matrix{Complex{$T}}, C::Matrix{Complex{$T}})
+        function zmsm(A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}}, C::StridedMatrix{Complex{$T}})
             m = size(A, 1)
             n = size(B, 2)
             D = Matrix{Complex{$T}}(undef, m, n)
@@ -870,7 +874,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # multiply, multiply, add, and add" — verified empirically that the 5th
     # operand E is a genuine additive term, not unused)
     @eval begin
-        function zvmmaa!(F::Vector{Complex{$T}}, A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}}, D::Vector{Complex{$T}}, E::Vector{Complex{$T}})
+        function zvmmaa!(F::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}}, D::StridedVector{Complex{$T}}, E::StridedVector{Complex{$T}})
             n = length(A)
             (length(B) == n && length(C) == n && length(D) == n && length(E) == n && length(F) == n) ||
                 throw(DimensionMismatch("zvmmaa!: A, B, C, D, E, and F must have equal lengths"))
@@ -882,8 +886,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                 esplit = _split_view($DSPSplit, pointer(E))
                 fsplit = _split_view($DSPSplit, pointer(F))
                 LibAccelerate.$(Symbol(string("vDSP_zvmmaa", suff)))(
-                      Ref(asplit), _CSTRIDE, Ref(bsplit), _CSTRIDE, Ref(csplit), _CSTRIDE,
-                      Ref(dsplit), _CSTRIDE, Ref(esplit), _CSTRIDE, Ref(fsplit), _CSTRIDE, n)
+                      Ref(asplit), _CSTRIDE * stride(A, 1), Ref(bsplit), _CSTRIDE * stride(B, 1), Ref(csplit), _CSTRIDE * stride(C, 1),
+                      Ref(dsplit), _CSTRIDE * stride(D, 1), Ref(esplit), _CSTRIDE * stride(E, 1), Ref(fsplit), _CSTRIDE * stride(F, 1), n)
             end
             return F
         end
@@ -894,7 +898,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Elementwise vector multiply-multiply-add-add: `F[i] = A[i]*B[i] + C[i]*D[i] + E[i]`.
         Wraps [`vDSP_zvmmaa`](https://developer.apple.com/documentation/accelerate/vdsp_zvmmaa).
         """
-        function zvmmaa(A::Vector{Complex{$T}}, B::Vector{Complex{$T}}, C::Vector{Complex{$T}}, D::Vector{Complex{$T}}, E::Vector{Complex{$T}})
+        function zvmmaa(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}}, D::StridedVector{Complex{$T}}, E::StridedVector{Complex{$T}})
             F = similar(A)
             zvmmaa!(F, A, B, C, D, E)
         end
@@ -915,7 +919,8 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
     # So this wrapper deinterleaves into genuine contiguous real/imag
     # buffers (à la `ctoz`/`ztoc`) rather than reusing `_split_view`.
     @eval begin
-        function zrdesamp!(C::Vector{Complex{$T}}, A::Vector{Complex{$T}}, DF::Int, F::Vector{$T})
+        function zrdesamp!(C::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, DF::Int, F::StridedVector{$T})
+            _check_contiguous(F)
             length(A) >= length(F) ||
                 error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
             P = length(F)
@@ -947,7 +952,7 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed).
         Wraps [`vDSP_zrdesamp`](https://developer.apple.com/documentation/accelerate/vdsp_zrdesamp).
         """
-        function zrdesamp(A::Vector{Complex{$T}}, DF::Int, F::Vector{$T})
+        function zrdesamp(A::StridedVector{Complex{$T}}, DF::Int, F::StridedVector{$T})
             length(A) >= length(F) ||
                 error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
             P = length(F)
@@ -964,7 +969,8 @@ end
 for (T, suff, DSPSplit, DSPCplx) in ((Float32, "", :DSPSplitComplex, :DSPComplex),
                                      (Float64, "D", :DSPDoubleSplitComplex, :DSPDoubleComplex))
     @eval begin
-        function ctoz(X::Vector{Complex{$T}})
+        function ctoz(X::StridedVector{Complex{$T}})
+            _check_contiguous(X)
             n = length(X)
             o_re = Vector{$T}(undef, n)
             o_im = Vector{$T}(undef, n)
@@ -978,13 +984,14 @@ for (T, suff, DSPSplit, DSPCplx) in ((Float32, "", :DSPSplitComplex, :DSPComplex
             end
             return (o_re, o_im)
         end
-        function ztoc(re::Vector{$T}, im::Vector{$T})
+        function ztoc(re::StridedVector{$T}, im::StridedVector{$T})
             length(re) == length(im) ||
                 throw(DimensionMismatch("re and im must have the same length"))
+            _check_contiguous(re, im)
             n = length(re)
             result = Vector{Complex{$T}}(undef, n)
             GC.@preserve re im begin
-                isplit = $DSPSplit(re, im)
+                isplit = $DSPSplit(pointer(re), pointer(im))
                 LibAccelerate.$(Symbol(string("vDSP_ztoc", suff)))(
                       Ref(isplit), 1, reinterpret(LibAccelerate.$DSPCplx, result), 2, n)
             end
