@@ -1460,4 +1460,140 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test_throws ArgumentError AA.AAPreconditioner(A; kind = :bogus)
         end
     end
+
+    # One-call entry points that take a SparseMatrixCSC directly (any index type,
+    # any numeric eltype), cross-checked against dense `\`.
+    @testset "SparseMatrixCSC entry points" begin
+        AA = AppleAccelerate
+        lu_ok = something(AA.get_macos_version(), v"0.0.0") >= v"15.5"
+        n = 40
+        R = sprandn(n, n, 0.15)
+        Aspd = R * R' + n * I                       # symmetric positive-definite
+        Agen = sprandn(n, n, 0.15) + n * I          # square, non-symmetric
+        Arect = sprandn(n + 15, n, 0.3)             # tall, least squares
+        evs = eigvals(Symmetric(Matrix(Aspd)))
+        Aind = Aspd - (evs[n÷2] + evs[n÷2+1]) / 2 * I   # symmetric indefinite: shift mid-spectrum
+
+        @testset "AASparseMatrix from any index / element type" begin
+            for Ti in (Int32, Int64), Tv in (Float32, Float64)
+                S = SparseMatrixCSC{Tv,Ti}(Agen)
+                M = AASparseMatrix(S)
+                @test eltype(M) == Tv
+                @test SparseMatrixCSC(M) ≈ S
+            end
+            Sint = sparse([1, 2, 3, 1], [1, 2, 3, 3], [4, 5, 6, 1])       # Int values
+            @test eltype(AASparseMatrix(Sint)) == Float64
+            @test SparseMatrixCSC(AASparseMatrix(Sint)) == Sint
+            @test eltype(AASparseMatrix(SparseMatrixCSC{Float16,Int32}(Agen))) == Float64
+            @test eltype(AASparseMatrix(sparse([1, 2], [1, 2], Complex{Int}[1+2im, 3]))) == ComplexF64
+            @test AAFactorization(SparseMatrixCSC{Float64,Int32}(Agen)) isa AAFactorization{Float64}
+        end
+
+        @testset "factor $T / $Ti" for T in (Float32, Float64), Ti in (Int32, Int64)
+            tol = T == Float32 ? 1e-2 : 1e-9
+            b = rand(T, n)
+            S = SparseMatrixCSC{T,Ti}(Aspd)
+            for kind in (:auto, :cholesky, :ldlt, :qr, AA.SparseFactorizationLDLTSBK)
+                f = AA.factor(S, kind)
+                @test f isa AAFactorization{T}
+                @test f._factorization.status == AA.SparseStatusOk
+                @test solve(f, b) ≈ Matrix(S) \ b rtol = tol
+            end
+            @test AA.factor(S)._factorization.symbolicFactorization.type == AA.SparseFactorizationCholesky
+            G = SparseMatrixCSC{T,Ti}(Agen)
+            if lu_ok
+                # libSparse resolves the generic LU request to a concrete LU variant
+                @test AA._is_lu_kind(AA.factor(G)._factorization.symbolicFactorization.type)
+                @test solve(AA.factor(G, :lu), b) ≈ Matrix(G) \ b rtol = tol
+            end
+            @test AA.factor(G, :qr) \ b ≈ Matrix(G) \ b rtol = tol
+            # rectangular: least squares through QR
+            Rm = SparseMatrixCSC{T,Ti}(Arect); br = rand(T, n + 15)
+            @test solve(AA.factor(Rm), br) ≈ Matrix(Rm) \ br rtol = 10tol
+            # an already-wrapped matrix works too
+            @test solve(AA.factor(AASparseMatrix(S), :cholesky), b) ≈ Matrix(S) \ b rtol = tol
+        end
+
+        @testset "factor guards" begin
+            @test_throws ArgumentError AA.factor(Aspd, :bogus)
+            # Cholesky of a non-symmetric matrix is rejected by libSparse
+            @test_throws Exception AA.factor(Agen, :cholesky)
+        end
+
+        @testset "solve(A::SparseMatrixCSC, b)" begin
+            b = rand(n); B = rand(n, 3)
+            @test solve(Aspd, b) ≈ Matrix(Aspd) \ b
+            @test solve(Aspd, B) ≈ Matrix(Aspd) \ B
+            @test solve(Aspd, b; kind = :ldlt) ≈ Matrix(Aspd) \ b
+            @test solve(AASparseMatrix(Aspd), b) ≈ Matrix(Aspd) \ b
+            @test solve(Arect, rand(n + 15)) isa Vector{Float64}
+            # index / element type promotion
+            S32 = SparseMatrixCSC{Float64,Int32}(Aspd)
+            @test solve(S32, b) ≈ Matrix(Aspd) \ b
+            x = solve(SparseMatrixCSC{Float32,Int32}(Aspd), b)          # F32 matrix, F64 rhs
+            @test x isa Vector{Float64}
+            @test x ≈ Matrix(Aspd) \ b rtol = 1e-5
+            bi = collect(1:n)                                           # integer rhs
+            @test solve(Aspd, bi) ≈ Matrix(Aspd) \ bi
+            @test solve(Aspd, view(B, :, 2)) ≈ Matrix(Aspd) \ B[:, 2]
+            # iterative methods keep working, now for any index type
+            @test solve(S32, b; method = :cg, rtol = 1e-10, maxiter = 500) ≈ Matrix(Aspd) \ b rtol = 1e-6
+            @test_throws ArgumentError solve(Aspd, b; method = :bogus)
+            @test_throws DimensionMismatch solve(Aspd, rand(n + 1))
+        end
+
+        @testset "mul! $T" for T in (Float32, Float64)
+            S = SparseMatrixCSC{T,Int64}(Arect)                          # non-square
+            M = AASparseMatrix(S)
+            x = rand(T, n); X = rand(T, n, 3)
+            y = fill(T(NaN), n + 15); Y = fill(T(NaN), n + 15, 3)
+            @test mul!(y, M, x) === y
+            @test y ≈ S * x
+            @test mul!(Y, M, X) ≈ S * X
+            y0 = rand(T, n + 15); Y0 = rand(T, n + 15, 3)
+            for (α, β) in ((2, 0), (2, 1), (-1.5, 0.5), (1, 0))
+                @test mul!(copy(y0), M, x, α, β) ≈ α * (S * x) + β * y0
+                @test mul!(copy(Y0), M, X, α, β) ≈ α * (S * X) + β * Y0
+            end
+            # β = 0 must overwrite, not propagate, NaNs already in the output
+            @test mul!(fill(T(NaN), n + 15), M, x, 1, 0) ≈ S * x
+            # transpose view: n ← n+15
+            @test mul!(zeros(T, n), transpose(M), y0) ≈ transpose(S) * y0
+            @test_throws DimensionMismatch mul!(zeros(T, n), M, x)
+            @test_throws DimensionMismatch mul!(zeros(T, n + 15, 2), M, X)
+        end
+
+        @testset "inertia $T" for T in (Float32, Float64)
+            Sind = SparseMatrixCSC{T,Int64}(Aind)
+            ev = eigvals(Symmetric(Matrix{Float64}(Aind)))
+            for kind in (:ldlt, AA.SparseFactorizationLDLT, AA.SparseFactorizationLDLTTPP)
+                ine = AA.inertia(AA.factor(Sind, kind))
+                @test ine.positive == count(>(0), ev)
+                @test ine.negative == count(<(0), ev)
+                @test ine.zero == 0
+                @test ine.positive > 0 && ine.negative > 0          # discriminating input
+            end
+            pd = AA.inertia(AA.factor(SparseMatrixCSC{T,Int64}(Aspd), :ldlt))
+            @test pd == (positive = n, zero = 0, negative = 0)
+            @test_throws ArgumentError AA.inertia(AA.factor(Sind, :qr))          # not LDLᵀ
+            # libSparse only reports inertia for the TPP variant
+            @test_throws ArgumentError AA.inertia(AA.factor(Sind, AA.SparseFactorizationLDLTSBK))
+            @test_throws ArgumentError AA.inertia(AAFactorization(Sind))         # not factored
+        end
+
+        lu_ok && @testset "complex" begin
+            H = sprandn(ComplexF64, n, n, 0.15); H = H * H' + n * I
+            bc = rand(ComplexF64, n)
+            Hi = SparseMatrixCSC{ComplexF64,Int32}(H)
+            @test solve(Hi, bc) ≈ Matrix(H) \ bc
+            @test solve(H, rand(n)) isa Vector{ComplexF64}                       # real rhs promotes
+            @test AA.factor(Hi)._factorization.symbolicFactorization.type == AA.SparseFactorizationCholesky
+            shifted = H - 2n * I
+            ine = AA.inertia(AA.factor(shifted, :ldlt))
+            ev = eigvals(Hermitian(Matrix(shifted)))
+            @test (ine.positive, ine.negative) == (count(>(0), ev), count(<(0), ev))
+            M = AASparseMatrix(H); xc = rand(ComplexF64, n); yc = rand(ComplexF64, n)
+            @test mul!(copy(yc), M, xc, 2 - im, 0.5im) ≈ (2 - im) * (H * xc) + 0.5im * yc
+        end
+    end
 end

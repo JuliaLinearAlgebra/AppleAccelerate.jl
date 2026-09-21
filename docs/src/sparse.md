@@ -6,6 +6,39 @@ AppleAccelerate wraps Apple's [Sparse Solvers](https://developer.apple.com/docum
 using AppleAccelerate, SparseArrays, LinearAlgebra
 ```
 
+## Quick start: straight from a `SparseMatrixCSC`
+
+[`factor`](@ref AppleAccelerate.factor) and [`solve`](@ref AppleAccelerate.solve)
+take a plain `SparseMatrixCSC` — any index type, any numeric element type — so
+there is nothing to wrap or convert by hand:
+
+```@example sparse
+S = sprandn(200, 200, 0.02); S = S * S' + 200I      # symmetric positive-definite
+b = randn(200)
+
+x = AppleAccelerate.solve(S, b)                     # one-shot direct solve
+
+f = AppleAccelerate.factor(S)                       # keep the factorization …
+x = AppleAccelerate.solve(f, b)                     # … and reuse it (also `f \ b`)
+
+g = AppleAccelerate.factor(S, :ldlt)                # pick the kind: :cholesky, :ldlt, :lu, :qr
+AppleAccelerate.inertia(g)                          # pivot signs of the LDLᵀ
+```
+
+`factor(A)` picks Cholesky for a Hermitian matrix, LU for a square one (macOS
+15.5+) and QR otherwise. Element types other than `Float32`/`Float64`/`ComplexF32`/
+`ComplexF64` are converted to `Float64`/`ComplexF64`, and `solve` promotes the
+matrix and right-hand side to a common type.
+
+!!! note "Why `factor`, and not `cholesky(S)`?"
+    `AppleAccelerate.cholesky` *is* `LinearAlgebra.cholesky` (likewise `lu`, `qr`,
+    `ldlt`, `factorize`). A `SparseMatrixCSC` method on those would be type piracy:
+    it would replace SuiteSparse for every package in the session. `factor` and
+    `solve` are AppleAccelerate's own functions, so they can accept a
+    `SparseMatrixCSC` without changing what anything else does. The `LinearAlgebra`
+    spellings remain available for the package's own `AASparseMatrix` type (see
+    [Factorization conveniences](@ref)).
+
 ## AASparseMatrix
 
 A wrapper around Apple's [`SparseMatrix`](https://developer.apple.com/documentation/accelerate/sparsematrix_double) format. Construct it either from Julia's `SparseMatrixCSC` or directly from coordinate (COO) triplets.
@@ -51,8 +84,23 @@ constructor uses Accelerate's `SparseConvertFromCoordinate` and accepts
 | `A * x` | Sparse matrix-vector or matrix-matrix multiply |
 | `alpha * A * x` | Scaled sparse multiply |
 | [`muladd!`](@ref AppleAccelerate.muladd!) | Multiply-add: `y += A * x` or `y += alpha * A * x` |
+| `mul!(y, A, x)` / `mul!(y, A, x, α, β)` | Non-allocating `y = A*x` / `y = α*A*x + β*y` (`LinearAlgebra.mul!`) |
 | `transpose(A)` | Transpose (sets flag, no copy) |
 | `adjoint(A)` / `A'` | Conjugate transpose (complex; equals `transpose` for real) |
+
+`x` and `y` may be vectors or dense matrices, so the same calls give sparse ×
+dense-matrix products (one libSparse call for all columns). `mul!` makes an
+`AASparseMatrix` usable as the operator in iterative methods written against
+`LinearAlgebra.mul!`:
+
+```@example sparse
+using LinearAlgebra: mul!
+X = randn(100, 4); Y = similar(X)
+mul!(Y, A, X)                 # Y = A*X, no allocation
+mul!(Y, A, X, 2.0, 0.5)       # Y = 2*A*X + 0.5*Y
+mul!(Y, transpose(A), X)      # transpose/adjoint are flags, not copies
+nothing # hide
+```
 
 ### Query functions
 
@@ -134,6 +182,8 @@ nothing # hide
 
 | Function | Description |
 |----------|-------------|
+| [`factor`](@ref AppleAccelerate.factor)`(A, kind = :auto)` | Factorize a `SparseMatrixCSC` or `AASparseMatrix` now; returns an `AAFactorization` |
+| `solve(A, b)` | One-shot direct solve from a `SparseMatrixCSC` or `AASparseMatrix` |
 | [`AAFactorization`](@ref AppleAccelerate.AAFactorization) | Lazy factorization wrapper |
 | `solve(f, b)` | Solve `Ax = b`, returns new vector/matrix |
 | `solve!(f, xb)` | Solve in-place (`xb` is overwritten with solution) |
@@ -215,8 +265,9 @@ nothing # hide
 
 ## Iterative solvers (CG / GMRES / LSMR)
 
-Krylov iterative solvers are available through `solve` with a `method` keyword,
-dispatching on `AASparseMatrix` (or a `SparseMatrixCSC` directly). Choose `:cg`
+Krylov iterative solvers are available through `solve` with a `method` keyword
+(the default, `method = :direct`, factorizes instead), dispatching on
+`AASparseMatrix` or a `SparseMatrixCSC` directly. Choose `:cg`
 for symmetric positive-definite systems, `:gmres` for square non-symmetric or
 indefinite systems, and `:lsmr` for rectangular or singular least-squares systems.
 
@@ -302,11 +353,24 @@ the L/U values a from-scratch LU would alter (requires macOS 15.5+). Distinct fr
 [`symbolic_options`](@ref AppleAccelerate.symbolic_options) read back the options
 libSparse recorded for a completed factorization.
 
+[`inertia`](@ref AppleAccelerate.inertia) returns the number of positive, zero and
+negative pivots of an LDLᵀ factorization — the signs of the eigenvalues of the
+matrix, e.g. to test definiteness or count eigenvalues below a shift:
+
+```@example sparse
+K = sprandn(100, 100, 0.05); K = K + K' + 5I         # symmetric, indefinite
+AppleAccelerate.inertia(AppleAccelerate.factor(K, :ldlt))
+```
+
+libSparse has no determinant or log-determinant query (and no way to read a
+factor's diagonal short of applying the sub-factor to every unit vector), so
+`det`/`logdet` are not provided.
+
 ### Iterative / advanced solve functions
 
 | Function | Description |
 |----------|-------------|
-| `solve(A::AASparseMatrix, b; method, …)` | Iterative CG/GMRES/LSMR solve |
+| `solve(A, b; method, …)` | Iterative CG/GMRES/LSMR solve (`A` an `AASparseMatrix` or `SparseMatrixCSC`) |
 | [`AAPreconditioner`](@ref AppleAccelerate.AAPreconditioner) | Diagonal / diagonal-scaling preconditioner |
 | [`solve_workspace_size`](@ref AppleAccelerate.solve_workspace_size) | Bytes needed for a preallocated-workspace solve |
 | `solve!(f, b, x, ws)` | Solve reusing a caller-owned workspace buffer |
@@ -314,11 +378,13 @@ libSparse recorded for a completed factorization.
 | [`update_partial_lu!`](@ref AppleAccelerate.update_partial_lu!) | Partial LU refactorization for a low-rank change |
 | [`numeric_options`](@ref AppleAccelerate.numeric_options) | Read back numeric-factor options |
 | [`symbolic_options`](@ref AppleAccelerate.symbolic_options) | Read back symbolic-factor options |
+| [`inertia`](@ref AppleAccelerate.inertia) | Positive / zero / negative pivot counts of an LDLᵀ factorization |
 
 ```@docs
 AppleAccelerate.AASparseMatrix
 AppleAccelerate.AAFactorization
 AppleAccelerate.muladd!
+AppleAccelerate.factor
 AppleAccelerate.factor!
 AppleAccelerate.solve
 AppleAccelerate.solve!
@@ -329,4 +395,5 @@ AppleAccelerate.subfactor
 AppleAccelerate.update_partial_lu!
 AppleAccelerate.numeric_options
 AppleAccelerate.symbolic_options
+AppleAccelerate.inertia
 ```
