@@ -46,6 +46,51 @@ W = fill(0.5, 1000)
 weighted_logsum(X, W) ≈ sum(W .* Base.log.(X))
 ```
 
+## Scoping it to one loop: `@simdmath`
+
+`using AppleAccelerate.SIMDMath: log` replaces `log` for the *whole* enclosing module.
+Since these functions only have `Float32`/`Float64` methods, every other `log(2)` or
+`rem(i, n)` in that module then throws a `MethodError`. [`SIMDMath.@simdmath`](@ref
+AppleAccelerate.SIMDMath.@simdmath) confines the substitution to one expression
+instead, and imports nothing:
+
+```@example simdmacro
+using AppleAccelerate
+using AppleAccelerate.SIMDMath: @simdmath
+
+function weighted_logsum(X, W)
+    u = zero(eltype(X))
+    @simdmath @simd for i in eachindex(X, W)
+        @inbounds u += W[i] * log(X[i])^W[i]     # _simd_log_d2, _simd_pow_d2
+    end
+    u
+end
+
+X = rand(1000) .+ 1; W = rand(1000)
+weighted_logsum(X, W) ≈ sum(W .* log.(X) .^ W)
+```
+
+It can go outside or inside `@simd`. It does not add `@simd` or `@inbounds` for you,
+and the loop still has to vectorise for any of this to matter.
+
+| Rewritten | Left alone |
+|---|---|
+| unqualified calls to a name from [Available functions](@ref) with a matching number of positional arguments | qualified calls — `Base.log(x)` |
+| `x^y` → `pow(x, y)` | `x^2` and other literal integer exponents, which Julia already lowers to multiplications |
+| | broadcasts — `log.(x)`, `x .^ y` |
+| | calls with keyword or splatted arguments |
+| | the signature of a method defined inside the expression, and anything quoted |
+| | every function `SIMDMath` does not provide (`sqrt`, `erf`, your own, …) |
+
+A rewritten call uses the SIMD routine only when its arguments are all `Float32` or
+all `Float64`; for anything else it falls back to the `Base` function. So index
+arithmetic like `rem(i, 4)`, integer powers `x^n`, and complex or `BigFloat` values
+keep working inside the block. (`nextafter` and `remainder` have no `Base`
+counterpart to fall back to.)
+
+The rewrite is purely syntactic: a local variable or argument that is named `log` and
+then *called* is rewritten too. The accuracy caveats below apply unchanged.
+
 ## Accuracy
 
 !!! warning
@@ -89,9 +134,11 @@ occursin("_simd_log_d2", asm)   # the scalar `log` became a 2-lane SIMD call
 `Float32` runs 4 lanes at a time (`_simd_*_f4`), `Float64` runs 2 (`_simd_*_d2`).
 
 !!! note "Strided loops"
-    A stride that is a compile-time constant (`for i in 1:3:length(X)`) vectorises. A
-    stride only known at run time (`for i in 1:stride:length(X)`) does **not** — the
-    loop vectoriser gives up on the unknown-stride gather and the call stays scalar.
+    A stride that is a compile-time constant (`for i in 1:3:length(X)`) vectorises
+    (for `Float64` on Apple silicon, only from Julia 1.13; older LLVMs judge the 2-lane
+    gather unprofitable and keep the call scalar). A stride only known at run time
+    (`for i in 1:stride:length(X)`) does **not** — the loop vectoriser gives up on the
+    unknown-stride gather and the call stays scalar.
 
 ## Available functions
 
@@ -104,7 +151,12 @@ All are defined for `Float32` and `Float64` only.
 
 `nextafter`, `pow` and `remainder` have no `Base` counterpart with matching
 semantics, so they are named after their C equivalents. Use `pow(x, y)` rather than
-`x^y`.
+`x^y`, or let `@simdmath` rewrite `x^y` for you.
+
+That is every one- and two-argument routine `<simd/math.h>` offers that is worth
+calling. `copysign`, `min`/`max` (C's `fmin`/`fmax`) and `fdim` have no `_simd_*`
+entry point at all — the header implements them inline, and LLVM already vectorises
+the `Base` versions natively.
 
 Deliberately **absent**:
 
@@ -186,4 +238,5 @@ Julia's default, using one source for both keeps accuracy consistent across type
 
 ```@docs
 AppleAccelerate.SIMDMath
+AppleAccelerate.SIMDMath.@simdmath
 ```

@@ -55,6 +55,43 @@ for (tbl, nargs) in ((SM.UNARY, 1), (SM.BINARY, 2))
         end
     end
 end
+# `@simdmath` must reach the same SIMD routines, through its dispatchers, as the
+# scoped-import spelling -- and then produce the same bits, since it is the same call.
+macro_loop(o, x, y) = (SM.@simdmath @simd for i in eachindex(x, y, o)
+    @inbounds o[i] = log(x[i])^y[i] + atan(y[i], x[i]) + x[i]^2 + rem(i, 4)
+end; o)
+inner_loop(o, x, y) = (@simd for i in eachindex(x, y, o)
+    SM.@simdmath @inbounds o[i] = log(x[i])^y[i] + atan(y[i], x[i]) + x[i]^2 + rem(i, 4)
+end; o)
+plain_loop(o, x, y) = (@simd for i in eachindex(x, y, o)
+    @inbounds o[i] = SM.pow(SM.log(x[i]), y[i]) + SM.atan(y[i], x[i]) + x[i]^2 + rem(i, 4)
+end; o)
+for (T, suffix) in ((Float64, "d2"), (Float32, "f4"))
+    for (label, g) in (("@simdmath outside @simd", macro_loop), ("@simdmath inside @simd", inner_loop))
+        io = IOBuffer()
+        code_native(io, g, ntuple(_ -> Vector{T}, 3); debuginfo = :none)
+        asm = String(take!(io))
+        for base in ("log", "pow", "atan2")
+            occursin(Regex("\\b__simd_$(base)_$(suffix)\\b"), asm) || push!(failures, "$label/$T -> _simd_$(base)_$(suffix)")
+        end
+        x = rand(T, 1003) .+ T(1.5); y = rand(T, 1003)
+        g(similar(x), x, y) == plain_loop(similar(x), x, y) || push!(failures, "$label/$T differs from scoped calls")
+    end
+end
+# Strided access vectorises only when the stride is a compile-time constant. A stride
+# known only at run time (`for i in 1:stride:length(x)` with `stride::Int`) leaves the
+# call scalar on every LLVM tried so far; that is a vectoriser limitation, not a broken
+# mapping, so it is deliberately not asserted either way here.
+# Even a constant stride is a cost-model decision: on arm64 the 2-lane Float64 gather is
+# judged unprofitable before Julia 1.13 and the call stays scalar, so Float64 is only
+# asserted from 1.13 on. The 4-lane Float32 loop vectorises everywhere.
+const_stride(x) = (u = zero(eltype(x)); @simd for i in 1:2:length(x); @inbounds u += SM.log(x[i]); end; u)
+for (T, suffix) in ((Float64, "d2"), (Float32, "f4"))
+    T === Float64 && VERSION < v"1.13" && continue
+    io = IOBuffer()
+    code_native(io, const_stride, (Vector{T},); debuginfo = :none)
+    occursin(Regex("\\b__simd_log_$(suffix)\\b"), String(take!(io))) || push!(failures, "constant stride/$T -> _simd_log_$(suffix)")
+end
 print(join(failures, ","))
 """
 
@@ -164,6 +201,97 @@ print(join(failures, ","))
                 @inbounds O[i] = SM.log(X[i])
             end
             @test all(i -> _ulps(O[i], log(X[i])) <= ULP_TOL, eachindex(X))
+        end
+    end
+
+    # Every table entry names two C symbols; a typo in either only shows up as a
+    # link error at first call, or (for the SIMD one) as a silent loss of speed.
+    @testset "table symbols resolve" begin
+        libm = AppleAccelerate.Libdl.dlopen("/usr/lib/system/libsystem_m.dylib")
+        for tbl in (SM.UNARY, SM.BINARY), (_jl, c64, c32, simd) in tbl
+            for sym in (c64, c32, "_simd_$(simd)_d2", "_simd_$(simd)_f4")
+                @test AppleAccelerate.Libdl.dlsym_e(libm, sym) != C_NULL
+            end
+        end
+    end
+
+    @testset "@simdmath" begin
+        rewritten(ex) = SM._rewrite(ex)
+        disp(f) = GlobalRef(SM, SM._dispatcher(f))
+
+        @testset "what is rewritten" begin
+            @test rewritten(:(log(x))) == Expr(:call, disp(:log), :x)
+            @test rewritten(:(atan(y, x))) == Expr(:call, disp(:atan), :y, :x)
+            @test rewritten(:(atan(x))) == Expr(:call, disp(:atan), :x)
+            @test rewritten(:(x^y)) == Expr(:call, disp(:pow), :x, :y)
+            # nested, and through the macros it has to compose with
+            @test rewritten(:(exp(log(x)))) == Expr(:call, disp(:exp), Expr(:call, disp(:log), :x))
+            loop = quote
+                @simd for i in r
+                    @inbounds u += log(X[i])
+                end
+            end
+            @test occursin("_simdmath_log", string(rewritten(loop)))
+        end
+
+        @testset "what is left alone" begin
+            for ex in (:(Base.log(x)), :(log.(x)), :(x .^ y), :(x^2), :(foo(x)), :(sqrt(x)),
+                       :(log(x; base = 2)), :(log(xs...)), :(atan(a, b, c)), :(hypot(x)),
+                       :(erf(x)), :(:(log(x))), :(quote log(x) end))
+                @test rewritten(ex) == ex
+            end
+            # the signature of a method defined inside the block is a binding, not a call
+            @test rewritten(:(log(x) = exp(x))).args[1] == :(log(x))
+            @test rewritten(:(function log(x); exp(x); end)).args[1] == :(log(x))
+            @test occursin("_simdmath_exp", string(rewritten(:(log(x) = exp(x)))))
+        end
+
+        @testset "values" begin
+            for T in (Float32, Float64)
+                x, y = T(1.7), T(0.3)
+                @test (SM.@simdmath log(x)) === SM.log(x)
+                @test (SM.@simdmath x^y) === SM.pow(x, y)
+                @test (SM.@simdmath atan(y, x)) === SM.atan(y, x)
+                @test (SM.@simdmath x^2) === x^2
+                @test @inferred(SM._simdmath_log(x)) isa T
+                @test @inferred(SM._simdmath_pow(x, y)) isa T
+            end
+            # Types SIMDMath has no method for keep their Base meaning instead of
+            # throwing, which is what makes the macro safe around index arithmetic.
+            n = 3
+            @test (SM.@simdmath rem(7, 4)) === 3
+            @test (SM.@simdmath 2.0^n) === 8.0
+            @test (SM.@simdmath 2^n) === 8
+            @test (SM.@simdmath log(1)) === 0.0
+            @test (SM.@simdmath exp(1.0im)) == exp(1.0im)
+            @test (SM.@simdmath hypot(3.0f0, 4.0)) === 5.0
+            @test (SM.@simdmath log(big"2.0")) == log(big"2.0")
+            # no Base counterpart to fall back to
+            @test_throws MethodError SM.@simdmath nextafter(1, 2)
+        end
+
+        # The macro must not leak or capture names: it works from a module that has
+        # never heard of SIMDMath, and leaves that module's own `log` alone.
+        @testset "hygiene" begin
+            m = Module()
+            Core.eval(m, :(using AppleAccelerate))
+            Core.eval(m, :(f(x) = AppleAccelerate.SIMDMath.@simdmath log(x) + exp(x)))
+            @test Base.invokelatest(m.f, 2.0) == SM.log(2.0) + SM.exp(2.0)
+            @test Core.eval(m, :(log)) === Base.log
+        end
+
+        @testset "loop matches explicit SIMDMath calls" begin
+            for T in (Float32, Float64), n in (1, 3, 8, 33)
+                X = rand(T, n) .+ T(1.5); Y = rand(T, n)
+                A = similar(X); B = similar(X)
+                SM.@simdmath @simd for i in eachindex(X, Y, A)
+                    @inbounds A[i] = log(X[i])^Y[i] + hypot(X[i], Y[i])
+                end
+                @simd for i in eachindex(X, Y, B)
+                    @inbounds B[i] = SM.pow(SM.log(X[i]), Y[i]) + SM.hypot(X[i], Y[i])
+                end
+                @test A == B
+            end
         end
     end
 

@@ -17,7 +17,7 @@ A Julia interface to Apple's [Accelerate framework](https://developer.apple.com/
 - **Dense linear algebra** — all of `LinearAlgebra` (`lu`, `qr`, `svd`, `cholesky`, `eigen`, …) accelerated transparently via [libblastrampoline](https://github.com/JuliaLinearAlgebra/libblastrampoline) — **6–13× faster** single-threaded GEMM than OpenBLAS on Apple Silicon (SME/AMX co-processor), plus **2–4× faster** factorizations and solves
 - **Sparse linear algebra** via `libSparse` — direct (Cholesky / LDLᵀ / LU / QR) and iterative (CG / GMRES / LSMR) solvers, real and complex
 - **Signal processing** — 1D/2D real & complex FFT (batched, mixed-radix), DCT, convolution, biquad filtering, window functions; cached setups make no-plan `fft(x)` competitive with FFTW and drop the FFTW dependency
-- **SIMD math inside `@simd` loops** via `AppleAccelerate.SIMDMath` — scalar math functions that LLVM turns into SIMD calls, for loops the array API can't express (strided access, values computed on the fly) — **2–4× faster** than a scalar Base loop
+- **SIMD math inside `@simd` loops** via `AppleAccelerate.SIMDMath` — scalar math functions that LLVM turns into SIMD calls, for loops the array API can't express (fused reductions, values computed on the fly, no temporaries); `@simdmath` rewrites the calls in a loop for you — **2–4× faster** than a scalar Base loop
 - **Neural-network primitives** via BNNS — Core ML model inference through the BNNS Graph API (`Float16`/`Float32`), plus reductions, top-k, and random generation
 - **Image processing** via vImage — geometry (scale, rotate, affine warp), convolution, morphology, histogram, alpha compositing, and format/colorspace conversion (incl. Y′CbCr)
 
@@ -62,15 +62,18 @@ when you can — they're faster.
 
 ```julia
 using AppleAccelerate
-using AppleAccelerate.SIMDMath: log
+using AppleAccelerate.SIMDMath: @simdmath        # rewrites log, exp, x^y, … in this loop only
 function weighted_logsum(X, W)   # no temporary for log.(X), unlike the array API
     u = zero(eltype(X))
-    @simd for i in eachindex(X, W)
+    @simdmath @simd for i in eachindex(X, W)
         @inbounds u += W[i] * log(X[i])
     end
     u
 end
 ```
+
+Unit-stride loops vectorise everywhere; strided loops depend on the Julia/LLVM version
+(see the [SIMDMath docs](https://JuliaLinearAlgebra.github.io/AppleAccelerate.jl/dev/simdmath/)).
 
 ### Signal processing — FFT / DCT / convolution / biquad filtering
 
