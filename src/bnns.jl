@@ -1241,7 +1241,6 @@ scores of `input` along Julia dimension `dim` (`BNNSDirectApplyInTopK`). `input`
 may be `Float32` or `Float16`.
 """
 function bnns_in_topk(input::Array{<:Union{Float32,Float16}}, targets::Array{Int32}, K::Integer; dim::Integer = 1)
-    batch = length(targets)
     out = Array{Bool}(undef, size(targets))
     di = _desc(input); dt = _desc(targets); do_ = _desc(out)
     GC.@preserve input targets out begin

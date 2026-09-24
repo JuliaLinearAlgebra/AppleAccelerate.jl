@@ -241,7 +241,6 @@ for sfx in (:Planar8, :Planar16S, :Planar16U, :PlanarF, :ARGB8888, :ARGB16U,
             :ARGB16S, :ARGBFFFF, :Planar16F, :ARGB16F, :CbCr16F, :CbCr16U, :CbCr8)
     sym  = Symbol("vImageScale_", sfx)
     bang = Symbol(_jlname(sym), "!")
-    alloc = _jlname(sym)
     @eval begin
         function $bang(dest::AbstractArray, src::AbstractArray; flags::Integer = kvImageNoFlags)
             GC.@preserve src dest begin
@@ -320,7 +319,6 @@ for sfx in (:Planar8, :Planar16U, :PlanarF, :ARGB8888, :ARGB16U, :ARGB16S,
     sym   = Symbol("vImageRotate90_", sfx)
     bang  = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
-    bctype = nch == 1 ? T : Ptr{T}
     if nch == 1
         @eval begin
             function $bang(dest::AbstractArray, src::AbstractArray, rotationConstant::Integer;
@@ -673,7 +671,6 @@ for sfx in _CONV_INT
     bang  = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
     bcarg = nch == 1 ? :($T(backColor)) : :(pointer(bc))
-    bctyp = nch == 1 ? T : Ptr{T}
     prep  = nch == 1 ? :(bc = $T[]) : :(bc = convert(Vector{$T}, collect(backColor)))
     @eval function $bang(dest::AbstractArray, src::AbstractArray, kernel::AbstractMatrix{<:Integer};
                         divisor::Integer = 1, backColor = $(nch == 1 ? :(zero($T)) : :(zeros($T, $nch))),
@@ -697,7 +694,6 @@ for sfx in _CONV_FLT
     bang  = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
     bcarg = nch == 1 ? :($T(backColor)) : :(pointer(bc))
-    bctyp = nch == 1 ? T : Ptr{T}
     prep  = nch == 1 ? :(bc = $T[]) : :(bc = convert(Vector{$T}, collect(backColor)))
     @eval function $bang(dest::AbstractArray, src::AbstractArray, kernel::AbstractMatrix{<:Real};
                         backColor = $(nch == 1 ? :(zero($T)) : :(zeros($T, $nch))),
@@ -734,7 +730,6 @@ for sfx in _CONV_INT
     bang  = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
     bcarg = nch == 1 ? :($T(backColor)) : :(pointer(bc))
-    bctyp = nch == 1 ? T : Ptr{T}
     prep  = nch == 1 ? :(bc = $T[]) : :(bc = convert(Vector{$T}, collect(backColor)))
     @eval function $bang(dest::AbstractArray, src::AbstractArray, kernel::AbstractMatrix{<:Integer};
                         divisor::Integer = 1, bias::Integer = 0,
@@ -759,7 +754,6 @@ for sfx in _CONV_FLT
     bang  = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
     bcarg = nch == 1 ? :($T(backColor)) : :(pointer(bc))
-    bctyp = nch == 1 ? T : Ptr{T}
     prep  = nch == 1 ? :(bc = $T[]) : :(bc = convert(Vector{$T}, collect(backColor)))
     @eval function $bang(dest::AbstractArray, src::AbstractArray, kernel::AbstractMatrix{<:Real};
                         bias::Real = 0, backColor = $(nch == 1 ? :(zero($T)) : :(zeros($T, $nch))),
@@ -1272,7 +1266,6 @@ piecewiseGamma_PlanarF
 for (sfx, DT, TBL) in ((:Planar8toPlanar16, UInt16, UInt16), (:Planar8toPlanarF, Float32, Cfloat))
     sym   = Symbol("vImageLookupTable_", sfx)
     bang  = Symbol(_jlname(sym), "!")
-    alloc = _jlname(sym)
     @eval begin
         function $bang(dest::AbstractMatrix{$DT}, src::AbstractMatrix{UInt8}, table::AbstractVector;
                        flags::Integer = kvImageNoFlags)
@@ -1791,7 +1784,7 @@ sepConvolve_PlanarF
 
 # ---- Flatten (4-channel interleaved output) -----------------------------------------
 for sfx in (:ARGB8888, :RGBA8888, :ARGB16U, :RGBA16U, :ARGB16Q12, :RGBA16Q12, :ARGBFFFF, :RGBAFFFF)
-    T, nch = _VFMT[sfx]
+    T, _ = _VFMT[sfx]
     sym  = Symbol("vImageFlatten_", sfx)
     bang = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)
@@ -1850,7 +1843,7 @@ overwriteChannels_ARGB8888
 
 # ---- OverwriteChannelsWithPixel : (pixel, src, dest, copyMask, flags) ----------------
 for sfx in (:ARGB8888, :ARGB16U, :ARGBFFFF)
-    T, nch = _VFMT[sfx]
+    T, _ = _VFMT[sfx]
     sym  = Symbol("vImageOverwriteChannelsWithPixel_", sfx)
     bang = Symbol(_jlname(sym), "!")
     alloc = _jlname(sym)

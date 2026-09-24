@@ -2678,8 +2678,8 @@ bfftradix5(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _ff
 # on split-complex data; results are identical. Forward output matches the DFT
 # (no scaling); the inverse is unnormalized (scaled by N).
 
-for (N, copv, zopv) in ((16, :vDSP_FFT16_copv, :vDSP_FFT16_zopv),
-                        (32, :vDSP_FFT32_copv, :vDSP_FFT32_zopv))
+for (N, zopv) in ((16, :vDSP_FFT16_zopv),
+                  (32, :vDSP_FFT32_zopv))
     @eval function $(Symbol("_fft", N))(x::StridedVector{ComplexF32}, direction::Int)
         length(x) == $N || throw(DimensionMismatch(string("input must have length ", $N,
                                                           "; got ", length(x))))
