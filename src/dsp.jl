@@ -812,8 +812,8 @@ end
     "Convert the input to Float32 (e.g. dct(Float32.(x))) or use FFTW.jl for a ",
     "double-precision DCT.")))
 
-dct(X::StridedVector{Float64}, setup::DFTSetup) = _dct_no_float64()
-dct(X::StridedVector{Float64}, dct_type::Int=2) = _dct_no_float64()
+dct(::StridedVector{Float64}, ::DFTSetup) = _dct_no_float64()
+dct(::StridedVector{Float64}, ::Int=2) = _dct_no_float64()
 
 """
     idct(X::Vector{Float32})
@@ -827,7 +827,7 @@ Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/
 Not available for `Float64` inputs: see the note in [`dct`](@ref).
 """
 idct(X::StridedVector{Float32}) = dct(X, 3) .* (2.0f0 / length(X))
-idct(X::StridedVector{Float64}) = _dct_no_float64()
+idct(::StridedVector{Float64}) = _dct_no_float64()
 
 
 """
