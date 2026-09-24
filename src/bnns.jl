@@ -25,9 +25,9 @@
 # Apple docs: https://developer.apple.com/documentation/accelerate/bnns
 
 using .LibAccelerate:
-    BNNSNDArrayDescriptor, BNNSDataType, BNNSDataLayout,
-    BNNSDataTypeFloat16, BNNSDataTypeFloat32, BNNSDataTypeInt32,
-    BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix
+    BNNSDataLayout, BNNSDataLayoutColumnMajorMatrix, BNNSDataLayoutVector,
+    BNNSDataType, BNNSDataTypeFloat16, BNNSDataTypeFloat32, BNNSDataTypeInt32,
+    BNNSNDArrayDescriptor
 
 # Alias the raw layer so the many BNNS enum values, structs and ccall wrappers can
 # be reached without an unwieldy explicit import list. All new wrappers below go
