@@ -812,12 +812,22 @@ const _INTENT_REV = Dict(UInt32(LA.BNNSGraphArgumentIntentIn) => :in,
                          UInt32(LA.BNNSGraphArgumentIntentOut) => :out,
                          UInt32(LA.BNNSGraphArgumentIntentInOut) => :inout)
 
-"Per-argument intents (`:in`/`:out`/`:inout`) of `func` (`BNNSGraphGetArgumentIntents`)."
+function _graph_argument_intent(v)
+    code = UInt32(v)
+    return get(_INTENT_REV, code) do
+        throw(ArgumentError("BNNS: unknown graph argument intent $(repr(code))"))
+    end
+end
+
+"""
+Per-argument intents (`:in`/`:out`/`:inout`) of `func` (`BNNSGraphGetArgumentIntents`).
+Throws `ArgumentError` if BNNS returns an unknown intent code.
+"""
 function bnns_graph_argument_intents(g::BNNSGraph, func = nothing)
     keep, fptr = _fnarg(func); n = bnns_graph_argument_count(g, func)
     buf = zeros(LA.BNNSGraphArgumentIntent, n)
     GC.@preserve keep buf _bnns_check(LA.BNNSGraphGetArgumentIntents(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetArgumentIntents")
-    return [get(_INTENT_REV, UInt32(v), v) for v in buf]
+    return map(_graph_argument_intent, buf)
 end
 
 "0-based position of a named `argument` within `func` (`BNNSGraphGetArgumentPosition`)."
