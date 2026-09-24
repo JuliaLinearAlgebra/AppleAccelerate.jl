@@ -366,6 +366,7 @@ function Base.inv(p::FFTPlan{T,K}) where {T,K}
     elseif K === :brfft
         return _real_plan(T, p.outsize, true, scale)
     else # :dct — II ↔ III, IV ↔ IV; vDSP's round trip scales by n/2
+        scale isa Float32 || _dct_no_float64()
         return _dct_plan(p.insize[1], (3, 2, 4)[p.dcttype - 1], 2 * scale)
     end
 end
