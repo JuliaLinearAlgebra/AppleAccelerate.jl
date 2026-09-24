@@ -1687,10 +1687,11 @@ end
 const _RDFT_SETUP_CACHE = Dict{Tuple{DataType,Int,Int},DFTSetup}()
 
 # Shared, cached real-input DFTSetup{T}, keyed by length and direction.
-function _cached_rdftsetup(::Type{T}, n::Int, direction::Int) where {T<:Union{Float32,Float64}}
-    key = (T, n, direction)
+function _cached_rdftsetup(::Type{T}, n::Integer, direction::Int) where {T<:Union{Float32,Float64}}
+    ni = Int(n)
+    key = (T, ni, direction)
     return lock(_SETUP_CACHE_LOCK) do
-        get!(() -> _plan_rdft(n, direction, T), _RDFT_SETUP_CACHE, key)
+        get!(() -> _plan_rdft(ni, direction, T), _RDFT_SETUP_CACHE, key)
     end::DFTSetup{T}
 end
 

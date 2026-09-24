@@ -579,7 +579,7 @@ end
 # never picks another backend on its own (issue #139).
 # Whether vDSP's real-input mixed-radix DFT has a setup for length `n`. The accepted
 # set is irregular (it differs between Float32 and Float64), so ask the create call.
-function _rdft_supported(::Type{T}, n::Int) where {T<:_PlanReal}
+function _rdft_supported(::Type{T}, n::Integer) where {T<:_PlanReal}
     try
         _cached_rdftsetup(T, n, DFT_FORWARD)
         return true
