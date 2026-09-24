@@ -106,6 +106,9 @@ umbrella symbols, so private per-type implementations legitimately show as unref
   libclang under the default GCC artifact include path (we capture ~93% of vDSP, all the
   pointer/length array ops). These SIMD-typed overloads are not part of the idiomatic
   surface anyway.
+- Clang.jl omits the SIMD typedef `vUInt32` but leaves references to it in the vBigNum
+  union `.v` accessors. `prologue.jl` supplies `NTuple{4,VecElement{UInt32}}`, preserving
+  its 16-byte size and alignment; `test/lib_tests.jl` checks the layout and accessors.
 - `Sparse/Solve.h` includes the whole `<Accelerate/Accelerate.h>` umbrella when it
   resolves, which reaches CoreGraphics → CoreFoundation → libdispatch and aborts Clang.jl
   (`no definition for dispatch_queue_t's underlying type`). `generate.jl` pre-defines the
@@ -124,6 +127,6 @@ umbrella symbols, so private per-type implementations legitimately show as unref
 | `generate.jl` | Entry point: resolves SDK paths, runs Clang.jl, strips out-of-scope BLAS |
 | `coverage_audit.jl` | Exact list of raw functions the idiomatic layer never calls (IR walk, not grep) |
 | `generator.toml` | Clang.jl options (module name, library, enum style, …) |
-| `prologue.jl` | Spliced into the generated module — `libacc` + BNNSGraph opaque handles |
+| `prologue.jl` | Spliced into the generated module — `libacc`, `vUInt32`, and BNNSGraph opaque handles |
 | `shims/bnns_graph_shim.h` | Neutralizes availability attributes that break Clang.jl |
 | `Project.toml` | Generator environment; `[compat]` pins Clang.jl |
