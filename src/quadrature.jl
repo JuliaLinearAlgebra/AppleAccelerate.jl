@@ -8,14 +8,13 @@
 # ABI-level is imported from the generated module.
 
 using .LibAccelerate:
+    QUADRATURE_INTEGRATE_QAG,
+    QUADRATURE_INTEGRATE_QAGS,
+    QUADRATURE_INTEGRATE_QNG,
+    QUADRATURE_SUCCESS,
     quadrature_integrate,
     quadrature_integrate_function,
-    quadrature_integrate_options,
-    quadrature_status,
-    QUADRATURE_SUCCESS,
-    QUADRATURE_INTEGRATE_QNG,
-    QUADRATURE_INTEGRATE_QAG,
-    QUADRATURE_INTEGRATE_QAGS
+    quadrature_integrate_options
 
 # Mutable box passed to the C trampoline via the user-pointer. Holds the Julia
 # integrand and a slot for any exception it throws, so the error can be carried

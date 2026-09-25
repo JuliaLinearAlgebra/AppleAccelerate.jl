@@ -160,6 +160,40 @@ end
         @test v ≈ AA.fft(x)
     end
 
+    @testset "real FFT with $I lengths" for I in (Int128, UInt)
+        # Exercise setup creation with a non-Int length, not just a warm cache hit.
+        for direction in (AA.DFT_FORWARD, AA.DFT_INVERSE)
+            lock(AA._SETUP_CACHE_LOCK) do
+                delete!(AA._RDFT_SETUP_CACHE, (T, 48, direction))
+            end
+            setup = AA._cached_rdftsetup(T, I(48), direction)
+            @test setup isa AA.DFTSetup{T}
+            @test AA._cached_rdftsetup(T, 48, direction) === setup
+        end
+        @test AA._rdft_supported(T, I(48))
+        @test !AA._rdft_supported(T, I(24))
+
+        # These index ranges give a StridedVector view a non-Int length.
+        for n in (48, 64)  # mixed-radix DFT and power-of-two FFT
+            data = randn(T, n + 2)
+            v = view(data, I(2):I(n + 1))
+            original = copy(data)
+            expected = AA.rfft(data[2:n + 1])
+            @test v isa StridedVector{T}
+            @test AA.rfft(v) ≈ expected
+            @test AA.rfft(v; fallback = _ -> error("fallback must not be called")) ≈ expected
+            @test data == original
+        end
+        for n in (7, 24)  # rejected by the length check and the real DFT setup, respectively
+            data = randn(T, n + 2)
+            v = view(data, I(2):I(n + 1))
+            original = copy(data)
+            @test_throws ArgumentError AA.rfft(v)
+            @test AA.rfft(v; fallback = identity) === v
+            @test data == original
+        end
+    end
+
     @testset "in-place real FFT needs contiguous memory" begin
         y = copy(r)
         @test AA.rfft!(_contig(y)) ≈ AA.rfft!(copy(r))

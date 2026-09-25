@@ -25,9 +25,9 @@
 # Apple docs: https://developer.apple.com/documentation/accelerate/bnns
 
 using .LibAccelerate:
-    BNNSNDArrayDescriptor, BNNSDataType, BNNSDataLayout,
-    BNNSDataTypeFloat16, BNNSDataTypeFloat32, BNNSDataTypeInt32,
-    BNNSDataLayoutVector, BNNSDataLayoutColumnMajorMatrix
+    BNNSDataLayout, BNNSDataLayoutColumnMajorMatrix, BNNSDataLayoutVector,
+    BNNSDataType, BNNSDataTypeFloat16, BNNSDataTypeFloat32, BNNSDataTypeInt32,
+    BNNSNDArrayDescriptor
 
 # Alias the raw layer so the many BNNS enum values, structs and ccall wrappers can
 # be reached without an unwieldy explicit import list. All new wrappers below go
@@ -812,12 +812,22 @@ const _INTENT_REV = Dict(UInt32(LA.BNNSGraphArgumentIntentIn) => :in,
                          UInt32(LA.BNNSGraphArgumentIntentOut) => :out,
                          UInt32(LA.BNNSGraphArgumentIntentInOut) => :inout)
 
-"Per-argument intents (`:in`/`:out`/`:inout`) of `func` (`BNNSGraphGetArgumentIntents`)."
+function _graph_argument_intent(v)
+    code = UInt32(v)
+    return get(_INTENT_REV, code) do
+        throw(ArgumentError("BNNS: unknown graph argument intent $(repr(code))"))
+    end
+end
+
+"""
+Per-argument intents (`:in`/`:out`/`:inout`) of `func` (`BNNSGraphGetArgumentIntents`).
+Throws `ArgumentError` if BNNS returns an unknown intent code.
+"""
 function bnns_graph_argument_intents(g::BNNSGraph, func = nothing)
     keep, fptr = _fnarg(func); n = bnns_graph_argument_count(g, func)
     buf = zeros(LA.BNNSGraphArgumentIntent, n)
     GC.@preserve keep buf _bnns_check(LA.BNNSGraphGetArgumentIntents(g.graph, fptr, Csize_t(n), pointer(buf)), "BNNSGraphGetArgumentIntents")
-    return [get(_INTENT_REV, UInt32(v), v) for v in buf]
+    return map(_graph_argument_intent, buf)
 end
 
 "0-based position of a named `argument` within `func` (`BNNSGraphGetArgumentPosition`)."
@@ -1241,7 +1251,6 @@ scores of `input` along Julia dimension `dim` (`BNNSDirectApplyInTopK`). `input`
 may be `Float32` or `Float16`.
 """
 function bnns_in_topk(input::Array{<:Union{Float32,Float16}}, targets::Array{Int32}, K::Integer; dim::Integer = 1)
-    batch = length(targets)
     out = Array{Bool}(undef, size(targets))
     di = _desc(input); dt = _desc(targets); do_ = _desc(out)
     GC.@preserve input targets out begin

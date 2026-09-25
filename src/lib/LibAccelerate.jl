@@ -7,6 +7,11 @@ module LibAccelerate
 # the same binary for its dead-symbol strip pass and verifies this line at generation time.
 const libacc = "/System/Library/Frameworks/Accelerate.framework/Accelerate"
 
+# vecLibTypes.h defines vUInt32 as a 16-byte vector of unsigned int. Clang.jl omits
+# its definition but still references it in the vBigNum union accessors. VecElement
+# preserves the SIMD representation and 16-byte alignment; a plain UInt32 tuple does not.
+const vUInt32 = NTuple{4, VecElement{UInt32}}
+
 # BNNSGraph opaque handles. In bnns_graph.h these are anonymous structs that all share the
 # same `{ void *data; size_t size }` layout. The shim (gen/shims/bnns_graph_shim.h) lets
 # Clang.jl's resolver get past their trailing availability attributes, but Clang.jl still

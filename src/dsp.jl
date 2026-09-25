@@ -812,8 +812,8 @@ end
     "Convert the input to Float32 (e.g. dct(Float32.(x))) or use FFTW.jl for a ",
     "double-precision DCT.")))
 
-dct(X::StridedVector{Float64}, setup::DFTSetup) = _dct_no_float64()
-dct(X::StridedVector{Float64}, dct_type::Int=2) = _dct_no_float64()
+dct(::StridedVector{Float64}, ::DFTSetup) = _dct_no_float64()
+dct(::StridedVector{Float64}, ::Int=2) = _dct_no_float64()
 
 """
     idct(X::Vector{Float32})
@@ -827,7 +827,7 @@ Wraps [`vDSP_DCT_Execute`](https://developer.apple.com/documentation/accelerate/
 Not available for `Float64` inputs: see the note in [`dct`](@ref).
 """
 idct(X::StridedVector{Float32}) = dct(X, 3) .* (2.0f0 / length(X))
-idct(X::StridedVector{Float64}) = _dct_no_float64()
+idct(::StridedVector{Float64}) = _dct_no_float64()
 
 
 """
@@ -1687,10 +1687,11 @@ end
 const _RDFT_SETUP_CACHE = Dict{Tuple{DataType,Int,Int},DFTSetup}()
 
 # Shared, cached real-input DFTSetup{T}, keyed by length and direction.
-function _cached_rdftsetup(::Type{T}, n::Int, direction::Int) where {T<:Union{Float32,Float64}}
-    key = (T, n, direction)
+function _cached_rdftsetup(::Type{T}, n::Integer, direction::Int) where {T<:Union{Float32,Float64}}
+    ni = Int(n)
+    key = (T, ni, direction)
     return lock(_SETUP_CACHE_LOCK) do
-        get!(() -> _plan_rdft(n, direction, T), _RDFT_SETUP_CACHE, key)
+        get!(() -> _plan_rdft(ni, direction, T), _RDFT_SETUP_CACHE, key)
     end::DFTSetup{T}
 end
 
@@ -2678,8 +2679,8 @@ bfftradix5(x::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}} = _ff
 # on split-complex data; results are identical. Forward output matches the DFT
 # (no scaling); the inverse is unnormalized (scaled by N).
 
-for (N, copv, zopv) in ((16, :vDSP_FFT16_copv, :vDSP_FFT16_zopv),
-                        (32, :vDSP_FFT32_copv, :vDSP_FFT32_zopv))
+for (N, zopv) in ((16, :vDSP_FFT16_zopv),
+                  (32, :vDSP_FFT32_zopv))
     @eval function $(Symbol("_fft", N))(x::StridedVector{ComplexF32}, direction::Int)
         length(x) == $N || throw(DimensionMismatch(string("input must have length ", $N,
                                                           "; got ", length(x))))
