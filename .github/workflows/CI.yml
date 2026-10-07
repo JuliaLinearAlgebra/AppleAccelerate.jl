@@ -34,6 +34,17 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+  jetls:
+    name: JETLS check
+    # The wrappers are only included on Apple platforms.
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Bump the action and `version` together to update JETLS.
+      - uses: aviatesk/JETLS.jl/.github/actions/check@2026-09-25
+        with:
+          files: src/AppleAccelerate.jl
+          version: '2026-09-25'
   docs:
     name: Documentation
     runs-on: macOS-latest

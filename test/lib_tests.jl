@@ -12,6 +12,41 @@
     @test AppleAccelerate.LibAccelerate.__SPARSE_float_complex === ComplexF32
 end
 
+# vecLibTypes.h's vUInt32 is a 16-byte SIMD vector, not a scalar or a plain tuple.
+# Clang.jl leaves references to it in the vBigNum union accessors without defining it.
+@testset "LibAccelerate vUInt32 and vBigNum accessors" begin
+    LA = AppleAccelerate.LibAccelerate
+    @test LA.vUInt32 === NTuple{4, VecElement{UInt32}}
+    @test isbitstype(LA.vUInt32)
+    @test sizeof(LA.vUInt32) == 16
+    @test Base.datatype_alignment(LA.vUInt32) == 16
+
+    for (U, S, n) in ((LA.vU128, LA.vS128, 1), (LA.vU256, LA.vS256, 2),
+                      (LA.vU512, LA.vS512, 4), (LA.vU1024, LA.vS1024, 8)), T in (U, S)
+        @testset "$T" begin
+            V = n == 1 ? LA.vUInt32 : NTuple{n, LA.vUInt32}
+            @test sizeof(T) == sizeof(V) == 16n
+            vectors = ntuple(j -> ntuple(i -> VecElement(UInt32(4(j - 1) + i)), 4), n)
+            value = n == 1 ? only(vectors) : vectors
+            bytes = reinterpret(NTuple{sizeof(T), UInt8}, value)
+            x = T(bytes)
+            @test x.v === value
+
+            r = Ref(x)
+            GC.@preserve r begin
+                p = Base.unsafe_convert(Ptr{T}, r)
+                @test p.v isa Ptr{V}
+                @test UInt(p.v) == UInt(p)
+                @test unsafe_load(p.v) === value
+                replacement = reverse(value)
+                p.v = replacement
+                @test r[].v === replacement
+                @test getfield(r[], :data) === reinterpret(NTuple{sizeof(T), UInt8}, replacement)
+            end
+        end
+    end
+end
+
 # Drift guard for dead wrappers. Clang.jl turns every C declaration into a `function`
 # wrapper, including inline-only / macro / non-exported "functions" (e.g. the high-level
 # Sparse/Dense Solve inline API, header-only BNNS graph setters, the `CF_ENUM` macro).

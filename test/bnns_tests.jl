@@ -296,7 +296,9 @@ if AA.get_macos_version() >= v"15"
     @test AA.bnns_graph_input_names(g) == ["x"]
     @test AA.bnns_graph_output_names(g) == ["z"]
     @test AA.bnns_graph_argument_names(g) == ["z", "x"]         # outputs first
-    @test AA.bnns_graph_argument_intents(g) == [:out, :in]
+    intents = AA.bnns_graph_argument_intents(g)
+    @test intents isa Vector{Symbol}
+    @test intents == [:out, :in]
     @test AA.bnns_graph_argument_position(g, "x") == 1
     @test (AA.bnns_graph_input_count(g), AA.bnns_graph_output_count(g), AA.bnns_graph_argument_count(g)) == (1, 1, 2)
 

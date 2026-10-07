@@ -332,8 +332,8 @@ by `2/n`, so `plan \\ (plan * x) ≈ x`.
 """
 dctplan(x::StridedVector{Float32}, dct_type::Integer=2) = _dct_plan(length(x), Int(dct_type), 1f0)
 dctplan(::Type{Float32}, n::Integer, dct_type::Integer=2) = _dct_plan(Int(n), Int(dct_type), 1f0)
-dctplan(::StridedVector{Float64}, dct_type::Integer=2) = _dct_no_float64()
-dctplan(::Type{Float64}, n::Integer, dct_type::Integer=2) = _dct_no_float64()
+dctplan(::StridedVector{Float64}, ::Integer=2) = _dct_no_float64()
+dctplan(::Type{Float64}, ::Integer, ::Integer=2) = _dct_no_float64()
 
 function _dct_plan(n::Int, dct_type::Int, scale::Float32)
     2 <= dct_type <= 4 || throw(ArgumentError(
@@ -366,6 +366,7 @@ function Base.inv(p::FFTPlan{T,K}) where {T,K}
     elseif K === :brfft
         return _real_plan(T, p.outsize, true, scale)
     else # :dct — II ↔ III, IV ↔ IV; vDSP's round trip scales by n/2
+        scale isa Float32 || _dct_no_float64()
         return _dct_plan(p.insize[1], (3, 2, 4)[p.dcttype - 1], 2 * scale)
     end
 end
@@ -421,7 +422,7 @@ function _execute!(y, p::FFTPlan{Float32,:dct,1}, x)
 end
 
 # Mixed-radix real: pack/unpack through the existing DFT helpers.
-_execute!(y, p::FFTPlan{T,:rfft,1,DFTSetup{T}}, x) where {T} =
+_execute!(y, ::FFTPlan{T,:rfft,1,DFTSetup{T}}, x) where {T} =
     copyto!(y, _rfft1d_dft(x isa Vector ? x : Vector(x)))
 _execute!(y, p::FFTPlan{T,:brfft,1,DFTSetup{T}}, x) where {T} =
     copyto!(y, _brfft1d_dft(x isa Vector ? x : Vector(x), p.outsize[1]))
@@ -578,7 +579,7 @@ end
 # never picks another backend on its own (issue #139).
 # Whether vDSP's real-input mixed-radix DFT has a setup for length `n`. The accepted
 # set is irregular (it differs between Float32 and Float64), so ask the create call.
-function _rdft_supported(::Type{T}, n::Int) where {T<:_PlanReal}
+function _rdft_supported(::Type{T}, n::Integer) where {T<:_PlanReal}
     try
         _cached_rdftsetup(T, n, DFT_FORWARD)
         return true
@@ -588,5 +589,5 @@ function _rdft_supported(::Type{T}, n::Int) where {T<:_PlanReal}
     end
 end
 
-_fft_fallback(::Nothing, err, n, args...) = err(n)
-_fft_fallback(fallback, err, n, args...) = fallback(args...)
+_fft_fallback(::Nothing, err, n, _args...) = err(n)
+_fft_fallback(fallback, _err, _n, args...) = fallback(args...)

@@ -19,7 +19,7 @@
     end
     return true
 end
-@inline _iscontiguous(A::DenseArray) = true
+@inline _iscontiguous(::DenseArray) = true
 
 function _check_contiguous(As::StridedArray...)
     for A in As
