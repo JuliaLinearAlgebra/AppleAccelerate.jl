@@ -63,13 +63,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
-        @doc """
-            vneg(X::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
-            vneg!(result, X)
-
-        Complex negation: `result[i] = -X[i]`.
-        Wraps [`vDSP_zvneg`](https://developer.apple.com/documentation/accelerate/vdsp_zvneg).
-        """
         function vneg(X::StridedVector{Complex{$T}})
             result = similar(X)
             vneg!(result, X)
@@ -112,6 +105,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 end
 
 @doc """
+    vneg(X::Vector{Complex{T}}) -> Vector{Complex{T}}
+    vneg!(result, X)
+
+Complex negation: `result[i] = -X[i]`.
+Wraps [`vDSP_zvneg`](https://developer.apple.com/documentation/accelerate/vdsp_zvneg).
+""" vneg(::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
+
+@doc """
     vconj(X::Vector{Complex{T}}) -> Vector{Complex{T}}
     vconj!(result, X)
 
@@ -146,13 +147,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
-        @doc """
-            vmul(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
-            vmul!(result, X, Y)
-
-        Element-wise complex multiplication: `result[i] = X[i] * Y[i]`.
-        Wraps [`vDSP_zvmul`](https://developer.apple.com/documentation/accelerate/vdsp_zvmul).
-        """
         function vmul(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             result = similar(X)
             vmul!(result, X, Y)
@@ -174,13 +168,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
-        @doc """
-            vdiv(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
-            vdiv!(result, X, Y)
-
-        Element-wise complex division: `result[i] = X[i] / Y[i]`.
-        Wraps [`vDSP_zvdiv`](https://developer.apple.com/documentation/accelerate/vdsp_zvdiv).
-        """
         function vdiv(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             result = similar(X)
             vdiv!(result, X, Y)
@@ -203,19 +190,36 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
-        @doc """
-            vsmul(X::Vector{Complex{$($T)}}, c::Complex{$($T)}) -> Vector{Complex{$($T)}}
-            vsmul!(result, X, c)
-
-        Complex vector-scalar multiplication: `result[i] = X[i] * c`.
-        Wraps [`vDSP_zvzsml`](https://developer.apple.com/documentation/accelerate/vdsp_zvzsml).
-        """
         function vsmul(X::StridedVector{Complex{$T}}, c::Complex{$T})
             result = similar(X)
             vsmul!(result, X, c)
         end
     end
 end
+
+@doc """
+    vmul(X::Vector{Complex{T}}, Y::Vector{Complex{T}}) -> Vector{Complex{T}}
+    vmul!(result, X, Y)
+
+Element-wise complex multiplication: `result[i] = X[i] * Y[i]`.
+Wraps [`vDSP_zvmul`](https://developer.apple.com/documentation/accelerate/vdsp_zvmul).
+""" vmul(::StridedVector{Complex{T}}, ::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
+
+@doc """
+    vdiv(X::Vector{Complex{T}}, Y::Vector{Complex{T}}) -> Vector{Complex{T}}
+    vdiv!(result, X, Y)
+
+Element-wise complex division: `result[i] = X[i] / Y[i]`.
+Wraps [`vDSP_zvdiv`](https://developer.apple.com/documentation/accelerate/vdsp_zvdiv).
+""" vdiv(::StridedVector{Complex{T}}, ::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
+
+@doc """
+    vsmul(X::Vector{Complex{T}}, c::Complex{T}) -> Vector{Complex{T}}
+    vsmul!(result, X, c)
+
+Complex vector-scalar multiplication: `result[i] = X[i] * c`.
+Wraps [`vDSP_zvzsml`](https://developer.apple.com/documentation/accelerate/vdsp_zvzsml).
+""" vsmul(::StridedVector{Complex{T}}, ::Complex{T}) where {T<:Union{Float32,Float64}}
 
 # ============================================================
 # Complex → Real operations (interleaved complex in, real out)
@@ -235,13 +239,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return result
         end
-        @doc """
-            vabs(X::Vector{Complex{$($T)}}) -> Vector{$($T)}
-            vabs!(result, X)
-
-        Complex absolute value (modulus): `result[i] = abs(X[i])`.
-        Wraps [`vDSP_zvabs`](https://developer.apple.com/documentation/accelerate/vdsp_zvabs).
-        """
         function vabs(X::StridedVector{Complex{$T}})
             result = Vector{$T}(undef, length(X))
             vabs!(result, X)
@@ -304,6 +301,14 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
 end
 
 @doc """
+    vabs(X::Vector{Complex{T}}) -> Vector{T}
+    vabs!(result, X)
+
+Complex absolute value (modulus): `result[i] = abs(X[i])`.
+Wraps [`vDSP_zvabs`](https://developer.apple.com/documentation/accelerate/vdsp_zvabs).
+""" vabs(::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
+
+@doc """
     vphase(X::Vector{Complex{T}}) -> Vector{T}
     vphase!(result, X)
 
@@ -333,14 +338,6 @@ Wraps [`vDSP_zvmgsa`](https://developer.apple.com/documentation/accelerate/vdsp_
 for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
                             (Float64, "D", :DSPDoubleSplitComplex))
     @eval begin
-        @doc """
-            dot(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
-
-        Conjugated complex dot product `sum(conj(X) .* Y)`, matching
-        `LinearAlgebra.dot`. Wraps the conjugating routine
-        [`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr).
-        For the un-conjugated product `sum(X .* Y)` use [`dotu`](@ref).
-        """
         function dot(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dot: X and Y must have equal lengths"))
             n = length(X)
@@ -356,14 +353,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             return complex(out[1], out[2])
         end
 
-        @doc """
-            dotu(X::Vector{Complex{$($T)}}, Y::Vector{Complex{$($T)}})
-
-        Un-conjugated complex dot product `sum(X .* Y)` (the "bilinear" dot,
-        without conjugating `X`). Wraps
-        [`vDSP_zdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zdotpr).
-        For the conjugated product matching `LinearAlgebra.dot` use [`dot`](@ref).
-        """
         function dotu(X::StridedVector{Complex{$T}}, Y::StridedVector{Complex{$T}})
             length(X) == length(Y) || throw(DimensionMismatch("dotu: X and Y must have equal lengths"))
             n = length(X)
@@ -379,6 +368,24 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         end
     end
 end
+
+@doc """
+    dot(X::Vector{Complex{T}}, Y::Vector{Complex{T}})
+
+Conjugated complex dot product `sum(conj(X) .* Y)`, matching
+`LinearAlgebra.dot`. Wraps the conjugating routine
+[`vDSP_zidotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zidotpr).
+For the un-conjugated product `sum(X .* Y)` use [`dotu`](@ref).
+""" dot(::StridedVector{Complex{T}}, ::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
+
+@doc """
+    dotu(X::Vector{Complex{T}}, Y::Vector{Complex{T}})
+
+Un-conjugated complex dot product `sum(X .* Y)` (the "bilinear" dot,
+without conjugating `X`). Wraps
+[`vDSP_zdotpr`](https://developer.apple.com/documentation/accelerate/vdsp_zdotpr).
+For the conjugated product matching `LinearAlgebra.dot` use [`dot`](@ref).
+""" dotu
 
 # ============================================================
 # Coordinate conversion (interleaved format)
@@ -853,15 +860,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return D
         end
-        @doc """
-            zmsm(A::Matrix{Complex{$($T)}}, B::Matrix{Complex{$($T)}}, C::Matrix{Complex{$($T)}}) -> Matrix{Complex{$($T)}}
-            zmsm!(D, A, B, C)
-
-        Complex matrix multiply and reverse-subtract: `D = C - A*B`.
-        Wraps [`vDSP_zmsm`](https://developer.apple.com/documentation/accelerate/vdsp_zmsm)
-        (the vDSP.h header labels this "matrix multiply and reverse subtract";
-        confirmed empirically to compute `C - A*B`, not `(A-B)*C`).
-        """
         function zmsm(A::StridedMatrix{Complex{$T}}, B::StridedMatrix{Complex{$T}}, C::StridedMatrix{Complex{$T}})
             m = size(A, 1)
             n = size(B, 2)
@@ -891,13 +889,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return F
         end
-        @doc """
-            zvmmaa(A::Vector{Complex{$($T)}}, B::Vector{Complex{$($T)}}, C::Vector{Complex{$($T)}}, D::Vector{Complex{$($T)}}, E::Vector{Complex{$($T)}}) -> Vector{Complex{$($T)}}
-            zvmmaa!(F, A, B, C, D, E)
-
-        Elementwise vector multiply-multiply-add-add: `F[i] = A[i]*B[i] + C[i]*D[i] + E[i]`.
-        Wraps [`vDSP_zvmmaa`](https://developer.apple.com/documentation/accelerate/vdsp_zvmmaa).
-        """
         function zvmmaa(A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}}, C::StridedVector{Complex{$T}}, D::StridedVector{Complex{$T}}, E::StridedVector{Complex{$T}})
             F = similar(A)
             zvmmaa!(F, A, B, C, D, E)
@@ -941,17 +932,6 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
             end
             return C
         end
-        @doc """
-            zrdesamp(A::Vector{Complex{$($T)}}, DF::Int, F::Vector{$($T)}) -> Vector{Complex{$($T)}}
-            zrdesamp!(C, A, DF, F)
-
-        Complex-real decimating resample/correlation using `vDSP_zrdesamp`.
-        Filters complex input `A` with real FIR coefficients `F` (`P` taps)
-        and decimation factor `DF`. `C` must have at least
-        `div(length(A) - P, DF) + 1` elements.
-        Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed).
-        Wraps [`vDSP_zrdesamp`](https://developer.apple.com/documentation/accelerate/vdsp_zrdesamp).
-        """
         function zrdesamp(A::StridedVector{Complex{$T}}, DF::Int, F::StridedVector{$T})
             length(A) >= length(F) ||
                 error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
@@ -962,6 +942,36 @@ for (T, suff, DSPSplit) in ((Float32, "", :DSPSplitComplex),
         end
     end
 end
+
+@doc """
+    zmsm(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, C::Matrix{Complex{T}}) -> Matrix{Complex{T}}
+    zmsm!(D, A, B, C)
+
+Complex matrix multiply and reverse-subtract: `D = C - A*B`.
+Wraps [`vDSP_zmsm`](https://developer.apple.com/documentation/accelerate/vdsp_zmsm)
+(the vDSP.h header labels this "matrix multiply and reverse subtract";
+confirmed empirically to compute `C - A*B`, not `(A-B)*C`).
+""" zmsm
+
+@doc """
+    zvmmaa(A::Vector{Complex{T}}, B::Vector{Complex{T}}, C::Vector{Complex{T}}, D::Vector{Complex{T}}, E::Vector{Complex{T}}) -> Vector{Complex{T}}
+    zvmmaa!(F, A, B, C, D, E)
+
+Elementwise vector multiply-multiply-add-add: `F[i] = A[i]*B[i] + C[i]*D[i] + E[i]`.
+Wraps [`vDSP_zvmmaa`](https://developer.apple.com/documentation/accelerate/vdsp_zvmmaa).
+""" zvmmaa
+
+@doc """
+    zrdesamp(A::Vector{Complex{T}}, DF::Int, F::Vector{T}) -> Vector{Complex{T}}
+    zrdesamp!(C, A, DF, F)
+
+Complex-real decimating resample/correlation using `vDSP_zrdesamp`.
+Filters complex input `A` with real FIR coefficients `F` (`P` taps)
+and decimation factor `DF`. `C` must have at least
+`div(length(A) - P, DF) + 1` elements.
+Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed).
+Wraps [`vDSP_zrdesamp`](https://developer.apple.com/documentation/accelerate/vdsp_zrdesamp).
+""" zrdesamp
 
 # ============================================================
 # Format conversion (interleaved ↔ split complex)
