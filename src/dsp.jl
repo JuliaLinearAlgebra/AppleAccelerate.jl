@@ -51,12 +51,6 @@ const     SIGNAL_STRIDE       = 1
 
 for (T, suff) in ((Float64, "D"), (Float32, ""))
 
-    """
-    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-    Result vector should have at least length(X) + length(K) - 1 elements
-
-    Returns: 'result'. Computation result is also stored in 'result' argument.
-    """
     @eval begin
         function conv!(result::StridedVector{$T}, X::StridedVector{$T}, K::StridedVector{$T})
             ksize = length(K)
@@ -77,12 +71,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-
-    Returns: Vector{T} with length = length(X) + length(K) - 1
-    """
     @eval begin
         function conv(X::StridedVector{$T}, K::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(K) - 1)
@@ -90,13 +78,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
-    Result vector should have at least length(X) + length(Y) - 1 elements
-
-    Returns: 'result'. The result of the computation is also stored in 'result'
-    """
     @eval begin
         function xcorr!(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
             ysize = length(Y)
@@ -115,12 +96,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
-
-    Returns: Vector{T} with length(X) + length(Y) - 1
-    """
     @eval begin
         function xcorr(X::StridedVector{$T}, Y::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(Y) - 1)
@@ -128,14 +103,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-
-
-    """
-    Performs auto-correlation of a 1-D signal with itself.
-
-    Returns: Vector{T} with length = 2*length(X) - 1
-    """
     @eval begin
         function xcorr(X::StridedVector{$T})
             xcorr(X, X)
@@ -700,60 +667,56 @@ function hanning(length::Int, rtype::DataType=Float64)
 end
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-
-    """
-    Generates a Blackman window of length 'length' and stores it in `result'. By
-    default, a full window is created, but if flag=1, only the first (n+1)/2 points
-    will be calculated.
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function blackman!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        """
+        Generates a Blackman window of length 'length' and stores it in `result'. By
+        default, a full window is created, but if flag=1, only the first (n+1)/2 points
+        will be calculated.
+
+        Returns: Vector{$($T)}
+        """
+        function blackman!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_blkman_window", suff)))(result,length,flag)
             return result
         end
     end
 
-
-    """
-    Generates a Hamming window of length 'length' and stores it in `result'. By
-    default, a full window is created, but if flag=1, only the first (n+1)/2 points
-    will be calculated.
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function hamming!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        """
+        Generates a Hamming window of length 'length' and stores it in `result'. By
+        default, a full window is created, but if flag=1, only the first (n+1)/2 points
+        will be calculated.
+
+        Returns: Vector{$($T)}
+        """
+        function hamming!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hamm_window", suff)))(result,length,flag)
             return result
         end
     end
 
-    """
-    Generates a Hanning window of length 'length' and stores it in `result'.
-    Different window options can be set using the flag argument; default value
-    is zero (denormalized Hanning window)
-
-    flag = 0: Returns a denormalized Hanning window
-    flag = 1: Returns a denormalized Hanning window with only (n+1)/2 points
-    flag = 2: Returns a normalized Hanning window
-    flag = 3: Returns a normalized Hanning window with only (n+1)/2 points
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function hanning!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        """
+        Generates a Hanning window of length 'length' and stores it in `result'.
+        Different window options can be set using the flag argument; default value
+        is zero (denormalized Hanning window)
+
+        flag = 0: Returns a denormalized Hanning window
+        flag = 1: Returns a denormalized Hanning window with only (n+1)/2 points
+        flag = 2: Returns a normalized Hanning window
+        flag = 3: Returns a normalized Hanning window with only (n+1)/2 points
+
+        Returns: Vector{$($T)}
+        """
+        function hanning!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hann_window", suff)))(result,length,flag)
             return result
         end
     end
-
 end
-
 
 ## == Discrete Cosine Transform (DCT) & Discrete Fourier Transform (DFT) == ##
 """
