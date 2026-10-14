@@ -44,7 +44,7 @@ jobs:
       - uses: aviatesk/JETLS.jl/.github/actions/check@2026-10-14
         with:
           files: src/AppleAccelerate.jl
-          version: '2026-10-11'
+          version: '2026-10-14'
   docs:
     name: Documentation
     runs-on: macOS-latest
