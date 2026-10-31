@@ -50,13 +50,6 @@ const     SIGNAL_STRIDE       = 1
 ## === FUNCTIONS == ##
 
 for (T, suff) in ((Float64, "D"), (Float32, ""))
-
-    """
-    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-    Result vector should have at least length(X) + length(K) - 1 elements
-
-    Returns: 'result'. Computation result is also stored in 'result' argument.
-    """
     @eval begin
         function conv!(result::StridedVector{$T}, X::StridedVector{$T}, K::StridedVector{$T})
             ksize = length(K)
@@ -77,12 +70,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Convolution between an input Vector{T} 'X', and a kernel/filter Vector{T} 'K'.
-
-    Returns: Vector{T} with length = length(X) + length(K) - 1
-    """
     @eval begin
         function conv(X::StridedVector{$T}, K::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(K) - 1)
@@ -90,13 +77,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
-    Result vector should have at least length(X) + length(Y) - 1 elements
-
-    Returns: 'result'. The result of the computation is also stored in 'result'
-    """
     @eval begin
         function xcorr!(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
             ysize = length(Y)
@@ -115,12 +95,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-    """
-    Cross-correlation of two Vector{T}'s 'X' and 'Y'.
-
-    Returns: Vector{T} with length(X) + length(Y) - 1
-    """
     @eval begin
         function xcorr(X::StridedVector{$T}, Y::StridedVector{$T})
             result = Array{$T}(undef, length(X) + length(Y) - 1)
@@ -128,14 +102,6 @@ for (T, suff) in ((Float64, "D"), (Float32, ""))
         end
     end
 
-
-
-
-    """
-    Performs auto-correlation of a 1-D signal with itself.
-
-    Returns: Vector{T} with length = 2*length(X) - 1
-    """
     @eval begin
         function xcorr(X::StridedVector{$T})
             xcorr(X, X)
@@ -188,16 +154,7 @@ xcorr!
 # Float32 data, vDSP_biquadD processes Float64 data.
 
 for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
-
     @eval begin
-        """
-        Initializes a vDSP_biquad_setup for use with vDSP_biquad. A multi-section filter
-        can be initialized with a single call to biquad_create_setup. coefficients must
-        contain 5 coefficients for each section (as Float64). The three feed-forward
-        coefficients are specified first, followed by the two feedback coefficients.
-
-        Returns: Biquad{$($T)}
-        """
         function biquadcreate(coefficients::StridedVector{Float64}, sections::Int, ::Type{$T})
             _check_contiguous(coefficients)
             if length(coefficients) < 5*sections
@@ -213,13 +170,6 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
     end
 
     @eval begin
-        """
-        Filters an input array X with the specified Biquad filter and filter delay values provided
-        in delays; only numelem elements are filtered. After execution, delays contains the final
-        state data of the filter.
-
-        Returns: Vector{$($T)}
-        """
         function biquad(X::StridedVector{$T}, delays::StridedVector{$T}, numelem::Int, biquad::Biquad{$T})
             _check_contiguous(delays)
             if length(delays) < (2*(biquad.sections)+2)
@@ -236,13 +186,6 @@ for (T, suff, Dsuff) in ((Float64, "D", "D"), (Float32, "", ""))
     end
 
     @eval begin
-        """
-        Frees all resources associated with a particular Biquad previously
-        created through a call to biquad_create_setup. This is called automatically
-        when the setup object is no longer visible to the garbage collector.
-
-        Returns: Cvoid
-        """
         function biquaddestroy(biquad::Biquad{$T})
             LibAccelerate.$(Symbol(string("vDSP_biquad_DestroySetup", Dsuff)))(biquad.setup)
         end
@@ -264,8 +207,9 @@ biquadcreate
 """
     biquad(X, delays, numelem, bq::Biquad{T})
 
-Apply a cascaded biquad IIR filter to input `X`. `delays` holds the filter state
-and is updated in-place. Returns the filtered output vector.
+Apply a cascaded biquad IIR filter to the first `numelem` elements of input `X`.
+`delays` holds the filter state and is updated in-place. Returns the filtered output
+vector.
 Wraps [`vDSP_biquad`](https://developer.apple.com/documentation/accelerate/vdsp_biquad).
 """
 biquad
@@ -296,18 +240,6 @@ end
 # accept Float64 coefficients.
 for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
     @eval begin
-        """
-        Creates a multi-channel biquad IIR filter setup. `coefficients` must contain
-        `5 * channels * sections` Float64 values. Delay values are initialized to zero.
-
-        The coefficients are laid out section-major: for each section (outer), the
-        five values `[b0, b1, b2, a1, a2]` are given for every channel (inner). That
-        is, element `5 * (section * channels + channel)` begins the block for a given
-        `(section, channel)`. With a single section this is just the per-channel
-        blocks back to back.
-
-        Returns: BiquadMulti{$($T)}
-        """
         function biquadm_create(coefficients::StridedVector{Float64}, channels::Int, sections::Int, ::Type{$T})
             _check_contiguous(coefficients)
             if length(coefficients) < 5 * channels * sections
@@ -320,12 +252,6 @@ for (T, suff, Dsuff) in ((Float32, "", ""), (Float64, "D", "D"))
             return BiquadMulti($T, setup, channels, sections)
         end
 
-        """
-        Apply a multi-channel biquad IIR filter. `X` is a vector of input channel vectors,
-        each of length `numelem`. Returns a vector of output channel vectors.
-
-        Returns: Vector{Vector{$($T)}}
-        """
         function biquadm(X::Vector{Vector{$T}}, numelem::Int, setup::BiquadMulti{$T})
             M = setup.channels
             length(X) == M || error("Expected $M channels, got $(length(X))")
@@ -365,7 +291,7 @@ Create a multi-channel biquad IIR filter setup. `coefficients` must contain
 `5 * channels * sections` Float64 values, laid out section-major: for each
 section, the `[b0, b1, b2, a1, a2]` block is given for every channel (so element
 `5 * (section * channels + channel)` starts a given `(section, channel)` block).
-Returns a `BiquadMulti{T}` setup object.
+Delay values are initialized to zero. Returns a `BiquadMulti{T}` setup object.
 Wraps [`vDSP_biquadm_CreateSetup`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm_createsetup).
 """
 biquadm_create
@@ -373,8 +299,8 @@ biquadm_create
 """
     biquadm(X, numelem, setup::BiquadMulti{T})
 
-Apply a multi-channel biquad IIR filter. `X` is a vector of per-channel input vectors.
-Returns a vector of per-channel output vectors.
+Apply a multi-channel biquad IIR filter. `X` is a vector of per-channel input vectors,
+each with at least `numelem` elements. Returns a vector of per-channel output vectors.
 Wraps [`vDSP_biquadm`](https://developer.apple.com/documentation/accelerate/vdsp_biquadm).
 """
 biquadm
@@ -383,12 +309,6 @@ biquadm
 
 for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDoubleSplitComplex))
     @eval begin
-        """
-        Accumulating autospectrum: `C[n] += |A[n]|^2`. `A` is a complex vector,
-        `C` is a real vector that accumulates the power spectrum.
-
-        Wraps [`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec).
-        """
         function zaspec!(C::StridedVector{$T}, A::StridedVector{Complex{$T}})
             _check_contiguous(C)
             n = length(A)
@@ -408,12 +328,6 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             zaspec!(C, A)
         end
 
-        """
-        Coherence function: `D[n] = |C[n]|^2 / (A[n] * B[n])`. `A` and `B` are real
-        power spectra, `C` is a complex cross-spectrum, `D` is the output coherence.
-
-        Wraps [`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher).
-        """
         function zcoher!(D::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T}, C::StridedVector{Complex{$T}})
             _check_contiguous(D, A, B)
             n = length(A)
@@ -434,12 +348,6 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             zcoher!(D, A, B, C)
         end
 
-        """
-        Transfer function: `C[n] = B[n] / A[n]`. `A` is a real power spectrum,
-        `B` is a complex cross-spectrum, `C` is the output complex transfer function.
-
-        Wraps [`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans).
-        """
         function ztrans!(C::StridedVector{Complex{$T}}, A::StridedVector{$T}, B::StridedVector{Complex{$T}})
             _check_contiguous(A)
             n = length(A)
@@ -466,12 +374,6 @@ for (T, suff, SC) in ((Float32, "", :DSPSplitComplex), (Float64, "D", :DSPDouble
             ztrans!(C, A, B)
         end
 
-        """
-        Accumulating cross-spectrum: `C[n] += conj(A[n]) * B[n]`. `A` and `B` are
-        complex vectors, `C` is the complex output that accumulates.
-
-        Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec).
-        """
         function zcspec!(C::StridedVector{Complex{$T}}, A::StridedVector{Complex{$T}}, B::StridedVector{Complex{$T}})
             n = length(A)
             (length(B) >= n && length(C) >= n) || throw(DimensionMismatch(
@@ -513,6 +415,15 @@ See also [`zaspec!`](@ref) for the accumulating in-place variant.
 zaspec
 
 """
+    zaspec!(C::Vector{T}, A::Vector{Complex{T}}) -> C
+
+Accumulating autospectrum: `C[n] += |A[n]|^2`. `A` is a complex vector,
+`C` is a real vector that accumulates the power spectrum.
+Wraps [`vDSP_zaspec`](https://developer.apple.com/documentation/accelerate/vdsp_zaspec).
+"""
+zaspec!
+
+"""
     zcspec(A::Vector{Complex{T}}, B::Vector{Complex{T}}) -> Vector{Complex{T}}
 
 Cross-spectrum: returns a complex vector `C` where `C[n] = conj(A[n]) * B[n]`.
@@ -521,6 +432,15 @@ Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_
 See also [`zcspec!`](@ref) for the accumulating in-place variant.
 """
 zcspec
+
+"""
+    zcspec!(C::Vector{Complex{T}}, A::Vector{Complex{T}}, B::Vector{Complex{T}}) -> C
+
+Accumulating cross-spectrum: `C[n] += conj(A[n]) * B[n]`. `A` and `B` are
+complex vectors, `C` is the complex output that accumulates.
+Wraps [`vDSP_zcspec`](https://developer.apple.com/documentation/accelerate/vdsp_zcspec).
+"""
+zcspec!
 
 """
     zcoher(A::Vector{T}, B::Vector{T}, C::Vector{Complex{T}}) -> Vector{T}
@@ -534,6 +454,15 @@ See also [`zcoher!`](@ref) for the in-place variant.
 zcoher
 
 """
+    zcoher!(D::Vector{T}, A::Vector{T}, B::Vector{T}, C::Vector{Complex{T}}) -> D
+
+Coherence function: `D[n] = |C[n]|^2 / (A[n] * B[n])`. `A` and `B` are real
+power spectra, `C` is a complex cross-spectrum, `D` is the output coherence.
+Wraps [`vDSP_zcoher`](https://developer.apple.com/documentation/accelerate/vdsp_zcoher).
+"""
+zcoher!
+
+"""
     ztrans(A::Vector{T}, B::Vector{Complex{T}}) -> Vector{Complex{T}}
 
 Transfer function: returns a complex vector `C` where `C[n] = B[n] / A[n]`.
@@ -544,21 +473,19 @@ See also [`ztrans!`](@ref) for the in-place variant.
 """
 ztrans
 
+"""
+    ztrans!(C::Vector{Complex{T}}, A::Vector{T}, B::Vector{Complex{T}}) -> C
+
+Transfer function: `C[n] = B[n] / A[n]`. `A` is a real power spectrum,
+`B` is a complex cross-spectrum, `C` is the output complex transfer function.
+Wraps [`vDSP_ztrans`](https://developer.apple.com/documentation/accelerate/vdsp_ztrans).
+"""
+ztrans!
+
 ## == Recursive Filter, FIR Decimation, Wiener-Levinson == ##
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-
     @eval begin
-        """
-            deq22!(C::Vector{$($T)}, A::Vector{$($T)}, B::Vector{$($T)})
-
-        Second-order (two-pole two-zero) recursive filter using `vDSP_deq22`.
-        `A` has N+2 elements (A[1:2] are initial state), `B` has 5 coefficients,
-        `C` has N+2 elements (C[1:2] must be preset as initial output state).
-        Computes: `C[n] = A[n]*B[1] + A[n-1]*B[2] + A[n-2]*B[3] - C[n-1]*B[4] - C[n-2]*B[5]`
-
-        Returns: `C`
-        """
         function deq22!(C::StridedVector{$T}, A::StridedVector{$T}, B::StridedVector{$T})
             _check_contiguous(B)
             length(B) == 5 || error("B must have exactly 5 coefficients")
@@ -569,14 +496,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return C
         end
 
-        """
-            deq22(A::Vector{$($T)}, B::Vector{$($T)})
-
-        Allocating version of `deq22!`. Pads `A` with 2 leading zeros and returns
-        only the N output samples (without the 2-element state prefix).
-
-        Returns: `Vector{$($T)}` of length `length(A)`
-        """
         function deq22(A::StridedVector{$T}, B::StridedVector{$T})
             N = length(A)
             Apad = [$T(0); $T(0); A]
@@ -587,16 +506,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        """
-            desamp!(C::Vector{$($T)}, A::Vector{$($T)}, DF::Int, F::Vector{$($T)})
-
-        FIR decimation filter using `vDSP_desamp`. Filters input `A` with FIR
-        coefficients `F` (P taps) and decimation factor `DF`.
-        `C` must have at least `div(length(A) - P, DF) + 1` elements.
-        Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed)
-
-        Returns: `C`
-        """
         function desamp!(C::StridedVector{$T}, A::StridedVector{$T}, DF::Int, F::StridedVector{$T})
             _check_contiguous(C, A, F)
             # Compute the output count in SIGNED arithmetic; converting to
@@ -610,14 +519,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return C
         end
 
-        """
-            desamp(A::Vector{$($T)}, DF::Int, F::Vector{$($T)})
-
-        Allocating version of `desamp!`. Returns a vector of length
-        `div(length(A) - length(F), DF) + 1`.
-
-        Returns: `Vector{$($T)}`
-        """
         function desamp(A::StridedVector{$T}, DF::Int, F::StridedVector{$T})
             length(A) >= length(F) ||
                 error("length(A) ($(length(A))) must be >= length(F) ($(length(F)))")
@@ -629,16 +530,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        """
-            wiener!(F::Vector{$($T)}, P::Vector{$($T)}, A::Vector{$($T)}, C::Vector{$($T)}; flag::Int=0)
-
-        Wiener-Levinson filter using `vDSP_wiener`. Solves the Wiener-Hopf equation
-        `R * F = C` where `R` is the Toeplitz autocorrelation matrix formed from `A`.
-        `A` = autocorrelation coefficients (L elements), `C` = cross-correlation (L),
-        `F` = output filter coefficients (L), `P` = workspace (L).
-
-        Returns: `(F, error_code)` where error_code is 0 on success.
-        """
         function wiener!(F::StridedVector{$T}, P::StridedVector{$T}, A::StridedVector{$T}, C::StridedVector{$T}; flag::Int=0)
             _check_contiguous(F, P, A, C)
             L = UInt64(length(A))
@@ -650,11 +541,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
             return (F, Int(err[]))
         end
 
-        """
-            wiener(A::Vector{$($T)}, C::Vector{$($T)}; flag::Int=0)
-
-        Allocating version of `wiener!`. Returns `(F, error_code)`.
-        """
         function wiener(A::StridedVector{$T}, C::StridedVector{$T}; flag::Int=0)
             L = length(A)
             F = Vector{$T}(undef, L)
@@ -663,6 +549,69 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
     end
 end
+
+"""
+    deq22!(C::Vector{T}, A::Vector{T}, B::Vector{T})
+
+Second-order (two-pole two-zero) recursive filter using `vDSP_deq22`.
+`A` has N+2 elements (A[1:2] are initial state), `B` has 5 coefficients,
+`C` has N+2 elements (C[1:2] must be preset as initial output state).
+Computes: `C[n] = A[n]*B[1] + A[n-1]*B[2] + A[n-2]*B[3] - C[n-1]*B[4] - C[n-2]*B[5]`
+
+Returns: `C`
+"""
+deq22!
+
+"""
+    deq22(A::Vector{T}, B::Vector{T})
+
+Allocating version of `deq22!`. Pads `A` with 2 leading zeros and returns
+only the N output samples (without the 2-element state prefix).
+
+Returns: `Vector{T}` of length `length(A)`
+"""
+deq22
+
+"""
+    desamp!(C::Vector{T}, A::Vector{T}, DF::Int, F::Vector{T})
+
+FIR decimation filter using `vDSP_desamp`. Filters input `A` with FIR
+coefficients `F` (P taps) and decimation factor `DF`.
+`C` must have at least `div(length(A) - P, DF) + 1` elements.
+Computes: `C[n] = sum(A[n*DF+p] * F[p] for p in 0:P-1)` (0-indexed)
+
+Returns: `C`
+"""
+desamp!
+
+"""
+    desamp(A::Vector{T}, DF::Int, F::Vector{T})
+
+Allocating version of `desamp!`. Returns a vector of length
+`div(length(A) - length(F), DF) + 1`.
+
+Returns: `Vector{T}`
+"""
+desamp
+
+"""
+    wiener!(F::Vector{T}, P::Vector{T}, A::Vector{T}, C::Vector{T}; flag::Int=0)
+
+Wiener-Levinson filter using `vDSP_wiener`. Solves the Wiener-Hopf equation
+`R * F = C` where `R` is the Toeplitz autocorrelation matrix formed from `A`.
+`A` = autocorrelation coefficients (L elements), `C` = cross-correlation (L),
+`F` = output filter coefficients (L), `P` = workspace (L).
+
+Returns: `(F, error_code)` where error_code is 0 on success.
+"""
+wiener!
+
+"""
+    wiener(A::Vector{T}, C::Vector{T}; flag::Int=0)
+
+Allocating version of `wiener!`. Returns `(F, error_code)`.
+"""
+wiener
 
 ## == WINDOW GENERATION == ##
 
@@ -700,60 +649,65 @@ function hanning(length::Int, rtype::DataType=Float64)
 end
 
 for (T, suff) in ((Float32, ""), (Float64, "D"))
-
-    """
-    Generates a Blackman window of length 'length' and stores it in `result'. By
-    default, a full window is created, but if flag=1, only the first (n+1)/2 points
-    will be calculated.
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function blackman!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        function blackman!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_blkman_window", suff)))(result,length,flag)
             return result
         end
     end
 
-
-    """
-    Generates a Hamming window of length 'length' and stores it in `result'. By
-    default, a full window is created, but if flag=1, only the first (n+1)/2 points
-    will be calculated.
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function hamming!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        function hamming!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hamm_window", suff)))(result,length,flag)
             return result
         end
     end
 
-    """
-    Generates a Hanning window of length 'length' and stores it in `result'.
-    Different window options can be set using the flag argument; default value
-    is zero (denormalized Hanning window)
-
-    flag = 0: Returns a denormalized Hanning window
-    flag = 1: Returns a denormalized Hanning window with only (n+1)/2 points
-    flag = 2: Returns a normalized Hanning window
-    flag = 3: Returns a normalized Hanning window with only (n+1)/2 points
-
-    Returns: Vector{$T}
-    """
     @eval begin
-        function hanning!(result::StridedVector{$T},  length::Int, flag::Int=0)
+        function hanning!(result::StridedVector{$T}, length::Int, flag::Int=0)
             _check_contiguous(result)
             LibAccelerate.$(Symbol(string("vDSP_hann_window", suff)))(result,length,flag)
             return result
         end
     end
-
 end
 
+"""
+    blackman!(result, length, [flag=0])
+
+Generate a Blackman window of the given length into `result`, which must have at least
+`length` elements, and return `result`. With `flag = 1`, only the first
+`(length + 1) ÷ 2` points are computed.
+Wraps [`vDSP_blkman_window`](https://developer.apple.com/documentation/accelerate/vdsp_blkman_window).
+"""
+blackman!
+
+"""
+    hamming!(result, length, [flag=0])
+
+Generate a Hamming window of the given length into `result`, which must have at least
+`length` elements, and return `result`. With `flag = 1`, only the first
+`(length + 1) ÷ 2` points are computed.
+Wraps [`vDSP_hamm_window`](https://developer.apple.com/documentation/accelerate/vdsp_hamm_window).
+"""
+hamming!
+
+"""
+    hanning!(result, length, [flag=0])
+
+Generate a Hanning window of the given length into `result`, which must have at least
+`length` elements, and return `result`. `flag` selects the variant:
+
+- `0`: denormalized window
+- `1`: denormalized window, only the first `(length + 1) ÷ 2` points are computed
+- `2`: normalized window
+- `3`: normalized window, only the first `(length + 1) ÷ 2` points are computed
+
+Wraps [`vDSP_hann_window`](https://developer.apple.com/documentation/accelerate/vdsp_hann_window).
+"""
+hanning!
 
 ## == Discrete Cosine Transform (DCT) & Discrete Fourier Transform (DFT) == ##
 """
@@ -778,7 +732,6 @@ function plan_dct(length::Int,  dct_type::Int, previous=C_NULL)
     return DFTSetup(Float32, setup, 0)
 end
 
-
 """
     dct(X::Vector{Float32}, setup::DFTSetup)
     dct(X::Vector{Float32}, [dct_type=2])
@@ -799,7 +752,6 @@ function dct(X::StridedVector{Float32}, setup::DFTSetup)
     LibAccelerate.vDSP_DCT_Execute(setup.setup,X,result)
     return result
 end
-
 
 function dct(X::StridedVector{Float32}, dct_type::Int=2)
     setup = plan_dct(length(X), dct_type)
@@ -829,7 +781,6 @@ Not available for `Float64` inputs: see the note in [`dct`](@ref).
 idct(X::StridedVector{Float32}) = dct(X, 3) .* (2.0f0 / length(X))
 idct(::StridedVector{Float64}) = _dct_no_float64()
 
-
 """
     plan_destroy(setup::DFTSetup)
 
@@ -843,7 +794,6 @@ end
 function plan_destroy(setup::DFTSetup{Float64})
     LibAccelerate.vDSP_DFT_DestroySetupD(setup.setup)
 end
-
 
 # --- Complex DFT (non-power-of-2 support) ---
 
@@ -950,7 +900,6 @@ function idft(X::StridedVector{Complex{T}}) where {T<:Union{Float32,Float64}}
     setup = _cached_dftsetup(T, length(X), DFT_INVERSE)
     return dft(X, setup) ./ length(X)
 end
-
 
 mutable struct FFTSetup{T}
     plan::Ptr{Cvoid}

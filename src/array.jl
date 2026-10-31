@@ -455,17 +455,10 @@ Wraps [`vDSP_minvi`](https://developer.apple.com/documentation/accelerate/vdsp_m
 # Element-wise operations over two vectors
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
-    for (f, name) in ((:vadd, "addition"),  (:vsub, "subtraction"),
-                      (:vdiv, "division"), (:vmul, "multiplication"))
+    for f in (:vadd, :vsub, :vdiv, :vmul)
         f! = Symbol("$(f)!")
 
         @eval begin
-            @doc """
-            `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, Y::StridedVector{$($T)})`
-
-            Implements element-wise **$($name)** over two **Vector{$($T)}** and overwrites
-            the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
-            """ ->
             function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, Y::StridedVector{$T})
                 (length(X) == length(Y) == length(result)) ||
                     throw(DimensionMismatch("result, X and Y must have the same length"))
@@ -475,12 +468,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
 
         @eval begin
-            @doc """
-            `$($f)(X::StridedVector{$($T)}, Y::StridedVector{$($T)})`
-
-            Implements element-wise **$($name)** over two **Vector{$($T)}**. Allocates
-            memory to store result. *Returns:* **Vector{$($T)}**
-            """ ->
             function ($f)(X::StridedVector{$T}, Y::StridedVector{$T})
                 result = similar(X)
                 ($f!)(result, X, Y)
@@ -499,6 +486,27 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 end
 
+for (f, name) in ((:vadd, "addition"),  (:vsub, "subtraction"),
+                  (:vdiv, "division"), (:vmul, "multiplication"))
+    f! = Symbol("$(f)!")
+
+    @eval begin
+        @doc """
+            $($f!)(result::StridedVector{T}, X::StridedVector{T}, Y::StridedVector{T}) where T <: Union{Float32, Float64}
+
+        Implements element-wise **$($name)** over two **Vector{T}** and overwrites
+        the result vector with computed value. *Returns:* **Vector{T}** `result`
+        """ $f!
+
+        @doc """
+            $($f)(X::StridedVector{T}, Y::StridedVector{T}) where T <: Union{Float32, Float64}
+
+        Implements element-wise **$($name)** over two **Vector{T}**. Allocates
+        memory to store result. *Returns:* **Vector{T}**
+        """ $f
+    end
+end
+
 # Disambiguating methods for (Broadcasted, Broadcasted) — resolves ambiguity between
 # Float32 and Float64 broadcasted overrides when both arguments are Broadcasted objects.
 for f in (:vadd, :vsub, :vmul, :vdiv)
@@ -508,16 +516,10 @@ end
 # Element-wise operations over a vector and a scalar
 for (T, suff) in ((Float32, ""), (Float64, "D"))
 
-    for (f, name) in ((:vsadd, "addition"), (:vsdiv, "division"), (:vsmul, "multiplication"))
+    for f in (:vsadd, :vsdiv, :vsmul)
         f! = Symbol("$(f)!")
 
         @eval begin
-            @doc """
-            `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
-
-            Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T) and overwrites
-            the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
-            """ ->
             function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
                 length(result) == length(X) ||
                     throw(DimensionMismatch("result and X must have the same length"))
@@ -527,12 +529,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         end
 
         @eval begin
-            @doc """
-            `$($f)(X::StridedVector{$($T)}, c::$($T))`
-
-            Implements vector-scalar **$($name)** over **Vector{$($T)}** and $($T). Allocates
-            memory to store result. *Returns:* **Vector{$($T)}**
-            """ ->
             function ($f)(X::StridedVector{$T}, c::$T)
                 result = similar(X)
                 ($f!)(result, X, c)
@@ -544,12 +540,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     f! = Symbol("$(f)!")
 
     @eval begin
-        @doc """
-        `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
-
-        Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T) and overwrites
-        the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
-        """ ->
         function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
             length(result) == length(X) ||
                 throw(DimensionMismatch("result and X must have the same length"))
@@ -559,12 +549,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        @doc """
-        `$($f)(X::StridedVector{$($T)}, c::$($T))`
-
-        Implements vector-scalar **subtraction** over **Vector{$($T)}** and $($T). Allocates
-        memory to store result. *Returns:* **Vector{$($T)}**
-        """ ->
         function ($f)(X::StridedVector{$T}, c::$T)
             result = similar(X)
             ($f!)(result, X, c)
@@ -576,12 +560,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     f! = Symbol("$(f)!")
 
     @eval begin
-        @doc """
-        `$($f!)(result::StridedVector{$($T)}, X::StridedVector{$($T)}, c::$($T))`
-
-        Implements vector-scalar **subtraction** over $($T) and **Vector{$($T)}** and overwrites
-        the result vector with computed value. *Returns:* **Vector{$($T)}** `result`
-        """ ->
         function ($f!)(result::StridedVector{$T}, X::StridedVector{$T}, c::$T)
             length(result) == length(X) ||
                 throw(DimensionMismatch("result and X must have the same length"))
@@ -592,12 +570,6 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
     end
 
     @eval begin
-        @doc """
-        `$($f)(X::StridedVector{$($T), c::$($T)})`
-
-        Implements vector-scalar **subtraction** over $($T) and  **Vector{$($T)}**. Allocates
-        memory to store result. *Returns:* **Vector{$($T)}**
-        """ ->
         function ($f)(X::StridedVector{$T}, c::$T)
             result = similar(X)
             ($f!)(result, X, c)
@@ -627,6 +599,41 @@ for (T, suff) in ((Float32, ""), (Float64, "D"))
         Base.broadcasted(::typeof($f), arg1::Base.Broadcast.Broadcasted, arg2::$T) = ($f)(copy(arg1), arg2)
     end
 end
+
+for (f, name) in ((:vsadd, "addition"), (:vssub, "subtraction"), (:vsdiv, "division"),
+                  (:vsmul, "multiplication"))
+    f! = Symbol("$(f)!")
+
+    @eval begin
+        @doc """
+            $($f!)(result::StridedVector{T}, X::StridedVector{T}, c::T) where T <: Union{Float32, Float64}
+
+        Implements vector-scalar **$($name)** over **Vector{T}** and T and overwrites
+        the result vector with computed value. *Returns:* **Vector{T}** `result`
+        """ $f!
+
+        @doc """
+            $($f)(X::StridedVector{T}, c::T) where T <: Union{Float32, Float64}
+
+        Implements vector-scalar **$($name)** over **Vector{T}** and T. Allocates
+        memory to store result. *Returns:* **Vector{T}**
+        """ $f
+    end
+end
+
+@doc """
+    svsub!(result::StridedVector{T}, X::StridedVector{T}, c::T) where T <: Union{Float32, Float64}
+
+Implements vector-scalar **subtraction** over T and **Vector{T}** and overwrites
+the result vector with computed value. *Returns:* **Vector{T}** `result`
+""" svsub!
+
+@doc """
+    svsub(X::StridedVector{T}, c::T) where T <: Union{Float32, Float64}
+
+Implements vector-scalar **subtraction** over T and **Vector{T}**. Allocates
+memory to store result. *Returns:* **Vector{T}**
+""" svsub
 
 # ============================================================
 # vDSP Unary vector operations

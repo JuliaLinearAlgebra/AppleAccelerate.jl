@@ -247,8 +247,11 @@ Wraps Apple's [vDSP window generation functions](https://developer.apple.com/doc
 
 ```@docs
 AppleAccelerate.blackman
+AppleAccelerate.blackman!
 AppleAccelerate.hamming
+AppleAccelerate.hamming!
 AppleAccelerate.hanning
+AppleAccelerate.hanning!
 ```
 
 ## Cross-Precision Multi-Channel Biquad Updates
