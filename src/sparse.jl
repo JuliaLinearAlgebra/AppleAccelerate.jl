@@ -1267,6 +1267,11 @@ is chosen from the matrix's kind attribute:
 Called automatically by [`solve`](@ref) if the factorization has not yet been
 computed.
 
+An LU factorization of a symmetric or Hermitian matrix stored as one triangle (as
+`AASparseMatrix` stores them) factorizes a copy with both triangles stored, since
+libSparse's LU does not read that storage correctly; [`refactor!`](@ref) does the
+same with the new matrix.
+
 !!! note "Complex symmetric (not Hermitian)"
     When the user leaves the factorization type unspecified and passes
     a complex symmetric (but not Hermitian) matrix, we default to LU factorization.
@@ -1290,6 +1295,10 @@ function factor!(aa_fact::AAFactorization{T},
                    (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
                                                     SparseFactorizationQR
         end
+        # libSparse's LU does not read symmetric (one-triangle) storage correctly
+        if _refactor_family(kind) == :LU
+            aa_fact.matrixObj = _full_storage(aa_fact.matrixObj)
+        end
         # matrixObj.matrix holds raw pointers into the CSC buffers; keep the
         # owning wrapper alive across the factorization call.
         fact = GC.@preserve aa_fact SparseFactor(kind, aa_fact.matrixObj.matrix)
@@ -1306,6 +1315,17 @@ function factor!(aa_fact::AAFactorization{T},
             _libsparse_throw(fact.status, "factor")
         end
     end
+end
+
+# `A` with both triangles stored, if it is stored as one triangle of a symmetric or
+# Hermitian matrix: libSparse's LU factorizations ignore that storage and factor the
+# stored triangle only, giving wrong solutions.
+function _full_storage(A::AASparseMatrix)
+    kind = A.matrix.structure.attributes & attr_mask(eltype(A))
+    kind in (ATT_SYMMETRIC, ATT_HERMITIAN) || return A
+    S = SparseMatrixCSC(A)    # the logical matrix
+    return AASparseMatrix(size(S)..., Clong.(S.colptr .- 1), Cint.(S.rowval .- 1),
+                          nonzeros(S), ATT_ORDINARY)
 end
 
 # Translate a libSparse status code into a typed Julia exception. SparseStatusOk
@@ -1423,6 +1443,10 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:v
     status == SparseStatusOk || throw(ArgumentError(
         "refactor! requires an already-computed factorization; call factor! or " *
         "solve first (current status: $status)"))
+    # an LU factorization holds the full storage of a symmetric matrix (see factor!)
+    if _refactor_family(aa_fact._factorization.symbolicFactorization.type) == :LU
+        A = _full_storage(A)
+    end
     old = aa_fact.matrixObj
     size(old) == size(A) || throw(DimensionMismatch(
         "refactor! requires matching dimensions: factored matrix is $(size(old)), " *

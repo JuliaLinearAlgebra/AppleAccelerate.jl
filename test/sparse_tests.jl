@@ -1596,4 +1596,37 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test mul!(copy(yc), M, xc, 2 - im, 0.5im) ≈ (2 - im) * (H * xc) + 0.5im * yc
         end
     end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "LU of a symmetric matrix $T" for T in (Float32, Float64, ComplexF64)
+        AA = AppleAccelerate
+        n = 30
+        tol = real(T) == Float32 ? 1e-3 : 1e-8
+        b = rand(T, n)
+        # AASparseMatrix stores a symmetric (Hermitian) matrix as one triangle, which
+        # libSparse's LU does not read correctly: it factorizes a full copy instead
+        K = spdiagm(-1 => ones(n - 1), 0 => [(-1)^i * (2 + i / n) for i in 1:n], 1 => ones(n - 1),
+                    -5 => fill(0.3, n - 5), 5 => fill(0.3, n - 5))
+        P = spdiagm(-1 => fill(-1.0, n - 1), 0 => fill(4.0, n), 1 => fill(-1.0, n - 1))
+        T <: Complex && (K = K + im * (spdiagm(1 => ones(n - 1)) - spdiagm(-1 => ones(n - 1))))
+        for M in (SparseMatrixCSC{T,Int64}(K), SparseMatrixCSC{T,Int64}(P))
+            @test ishermitian(AASparseMatrix(M))           # stored as one triangle
+            for kind in (:lu, AA.SparseFactorizationLUSPP, AA.SparseFactorizationLUUnpivoted)
+                f = AA.factor(M, kind)
+                @test Matrix(M) * AA.solve(f, b) ≈ b rtol = tol
+            end
+            f = lu(AASparseMatrix(M))
+            @test Matrix(M) * AA.solve(f, b) ≈ b rtol = tol
+            # refactor! and lu! take the symmetric matrix too
+            M2 = copy(M); nonzeros(M2) .*= 2
+            AA.refactor!(f, M2)
+            @test 2 * Matrix(M) * AA.solve(f, b) ≈ b rtol = tol
+            lu!(f, AASparseMatrix(M))
+            @test Matrix(M) * AA.solve(f, b) ≈ b rtol = tol
+        end
+        # also when the symmetric storage is given through the attributes
+        L = SparseMatrixCSC{T,Int64}(tril(P))
+        A = AASparseMatrix(L, (T <: Complex ? AA.ATT_HERMITIAN : AA.ATT_SYMMETRIC) | AA.ATT_LOWER_TRIANGLE)
+        @test Matrix(P) * AA.solve(AA.factor(A, :lu), b) ≈ b rtol = tol
+    end
 end
