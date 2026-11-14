@@ -946,6 +946,39 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{Tv, Ti},
 end
 
 """
+    AASparseMatrix(S::Symmetric{<:Number, <:SparseMatrixCSC})
+    AASparseMatrix(H::Hermitian{<:Number, <:SparseMatrixCSC})
+
+Wrap a symmetric (or Hermitian) matrix given by one triangle. Only the triangle that
+`S` refers to (`:L` or `:U`) is stored, with the symmetric (Hermitian) attributes,
+as libSparse expects for Cholesky and LDLᵀ factorizations; the other triangle of the
+parent matrix is ignored, as in `Symmetric`. As in `Hermitian`, so is the imaginary
+part of a Hermitian matrix's diagonal. A real `Hermitian` matrix is symmetric.
+
+Unlike `AASparseMatrix(::SparseMatrixCSC)`, this does not test the matrix for
+symmetry, so it also serves to wrap the lower triangle of a symmetric matrix as is.
+"""
+function AASparseMatrix(S::Union{Symmetric{<:Number, <:SparseMatrixCSC},
+                                  Hermitian{<:Number, <:SparseMatrixCSC}})
+    P = parent(S)
+    Tv = _aa_eltype(eltype(P))
+    # the stored triangle, copied once into the libSparse element and index types
+    stored = S.uplo == 'L' ? tril(P) : triu(P)
+    vals = eltype(stored) === Tv ? nonzeros(stored) : Vector{Tv}(nonzeros(stored))
+    hermitian = S isa Hermitian && Tv <: Complex
+    if hermitian
+        # as in `Hermitian`, the diagonal of a Hermitian matrix is real
+        for j in 1:size(stored, 2), k in nzrange(stored, j)
+            rowvals(stored)[k] == j && (vals[k] = real(vals[k]))
+        end
+    end
+    kind = hermitian ? ATT_HERMITIAN : ATT_SYMMETRIC
+    triangle = S.uplo == 'L' ? ATT_LOWER_TRIANGLE : ATT_UPPER_TRIANGLE
+    return AASparseMatrix(size(stored)..., Clong.(stored.colptr .- 1),
+                          Cint.(rowvals(stored) .- 1), vals, kind | triangle)
+end
+
+"""
     AASparseMatrix(I, J, V, m, n, attributes = ATT_ORDINARY)
 
 Build an `m`×`n` `AASparseMatrix` from coordinate (COO) triplets: `V[k]` is the
@@ -1269,7 +1302,9 @@ computed.
 
 !!! note "Complex symmetric (not Hermitian)"
     When the user leaves the factorization type unspecified and passes
-    a complex symmetric (but not Hermitian) matrix, we default to LU factorization.
+    a complex symmetric (but not Hermitian) matrix, we default to LU factorization,
+    unless the matrix is stored as one triangle (`AASparseMatrix(Symmetric(S))`):
+    libSparse's LU does not read that storage correctly, so it gets `LDLᵀ`.
     
     On older versions of MacOS, Apple's `SparseFactorizationLDLT` errors on complex
     symmetric (non-Hermitian) matrices, reporting "Cannot
@@ -1286,7 +1321,10 @@ function factor!(aa_fact::AAFactorization{T},
             # non-Hermitian (macOS 15.5+); QR otherwise.
             nrow, ncol = size(aa_fact.matrixObj)
             lu_ok = something(_macos_version[], v"0.0.0") >= v"15.5"
+            # A complex symmetric (not Hermitian) matrix stored as one triangle goes
+            # to LDLᵀ: libSparse's LU does not read the symmetric storage correctly.
             kind = ishermitian(aa_fact.matrixObj) ? SparseFactorizationCholesky :
+                   issymmetric(aa_fact.matrixObj) ? SparseFactorizationLDLT :
                    (nrow == ncol && lu_ok)        ? SparseFactorizationLU :
                                                     SparseFactorizationQR
         end

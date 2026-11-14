@@ -76,6 +76,26 @@ triangular structure and sets the appropriate Apple Accelerate attributes. The C
 constructor uses Accelerate's `SparseConvertFromCoordinate` and accepts
 `Float32`/`Float64` and (macOS 15.5+) `ComplexF32`/`ComplexF64` values.
 
+To give a symmetric or Hermitian matrix by one triangle, wrap it in `Symmetric` or
+`Hermitian`: `AASparseMatrix(Symmetric(S, :L))` (or `:U`) stores only that triangle
+of `S`, with the symmetric (Hermitian) attributes, without testing `S` for symmetry,
+so the lower triangle of a symmetric matrix can be wrapped as is. As in `Symmetric`,
+the other triangle of `S` is ignored, and as in `Hermitian`, so is the imaginary part
+of a Hermitian matrix's diagonal.
+
+```@example sparse
+using LinearAlgebra
+
+L = tril(sprandn(100, 100, 0.05) + 10I)     # the lower triangle of a symmetric matrix
+A = AASparseMatrix(Symmetric(L, :L))
+F = AppleAccelerate.factor(A, :ldlt)
+nothing # hide
+```
+
+!!! note
+    libSparse's LU does not read one-triangle symmetric storage correctly, so use
+    Cholesky or LDLᵀ for such matrices; `factor(A)` picks one of them.
+
 ### Matrix operations
 
 | Function | Description |
