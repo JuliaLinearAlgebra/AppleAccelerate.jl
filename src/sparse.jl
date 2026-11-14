@@ -1338,7 +1338,7 @@ they would not apply).
 If the factorization fails (e.g. a Cholesky factorization of a matrix that is not
 positive definite), `factor!` throws, unless `check = false`: it then keeps the
 failed factorization, whose symbolic part [`refactor!`](@ref) can reuse once the
-values change, and [`issuccess`](@ref LinearAlgebra.issuccess) returns `false`.
+values change, and `issuccess` returns `false`.
 Solving with a failed factorization throws. Invalid arguments always throw.
 
 $(_OPTIONS_DOC)
@@ -1536,7 +1536,7 @@ one (which also reuses the ordering and analysis, but allocates new factor stora
 [`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown. The
 last numeric factorization may have failed (with `check = false`): its symbolic
 factorization is reused. If the refactorization fails, `refactor!` throws, unless
-`check = false`, and [`issuccess`](@ref LinearAlgebra.issuccess) tells the outcome.
+`check = false`, and `issuccess` tells the outcome.
 The factorization object `f` is mutated in place and returned. After
 `refactor!`, `f` references `A`'s data, so keep `A` alive as long as `f` is used.
 
@@ -1578,9 +1578,12 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
     new_options = _numeric_options_with(aa_fact, scaling, pivot_tolerance, zero_tolerance)
     # The stored options are those libSparse applied to the current numeric factors
     # (they are stored only once applied), which its in-place refactorization keeps.
-    # libSparse's own record cannot be read back after a failed factorization.
+    # After a failed numeric factorization, libSparse's record of the options is not
+    # valid, and an in-place refactorization does not restore it, so recovering from a
+    # failure goes through a new numeric factorization too.
     stored = aa_fact._numeric_options
-    if (new_options.scalingMethod, new_options.pivotTolerance, new_options.zeroTolerance) ==
+    if issuccess(aa_fact) &&
+            (new_options.scalingMethod, new_options.pivotTolerance, new_options.zeroTolerance) ==
             (stored.scalingMethod, stored.pivotTolerance, stored.zeroTolerance)
         nfopts = Ref(new_options)
         factref = Ref(aa_fact._factorization)
@@ -1590,13 +1593,10 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
         new_fact = factref[]
     else
         old_fact = aa_fact._factorization
+        # libSparse reports argument errors through the reportError callback, which
+        # throws, so a call that returns has computed new numeric factors, possibly failed
         new_fact = GC.@preserve A SparseFactor(old_fact.symbolicFactorization, A.matrix,
                                                new_options)
-        if !_recoverable(new_fact)
-            # an argument error: keep the previous factorization and options
-            new_fact.status in (SparseYetToBeFactored, SparseStatusReleased) || SparseCleanup(new_fact)
-            _libsparse_throw(new_fact.status, "refactor")
-        end
         SparseCleanup(old_fact)
     end
     aa_fact._numeric_options = new_options

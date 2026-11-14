@@ -1677,10 +1677,12 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         AA.refactor!(c, P; scaling = AA.SparseScalingEquilibriationInf, zero_tolerance = 1e-12)
         @test AA.numeric_options(c).scalingMethod == AA.SparseScalingEquilibriationInf
         @test Matrix(P) * AA.solve(c, b) ≈ b rtol = tol
-        # a refactorization with new options that fails throws and leaves the
-        # factorization as it was
+        # a refactorization with new options that fails throws, and stores the failure,
+        # since libSparse has replaced the numeric factors; refactor! recovers from it
         @test_throws ErrorException AA.refactor!(c, -P; zero_tolerance = 1e-10)
-        @test AA.numeric_options(c).zeroTolerance == 1e-12
+        @test !issuccess(c)
+        AA.refactor!(c, P)
+        @test AA.numeric_options(c).zeroTolerance == 1e-10
         @test Matrix(P) * AA.solve(c, b) ≈ b rtol = tol
         q = AA.factor(P, :qr)
         AA.refactor!(q, P; scaling = AA.SparseScalingEquilibriationInf)
@@ -1731,6 +1733,8 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         # ... and refactor! reuses its symbolic factorization once the values change
         AA.refactor!(f, P)
         @test issuccess(f)
+        # libSparse's record of the options is valid again after the recovery
+        @test AA.numeric_options(f).pivotTolerance == AA.SparseNumericFactorOptions(T).pivotTolerance
         @test Matrix(P) * AA.solve(f, b) ≈ b rtol = tol
         # a failed refactor! is recorded, with or without check
         @test AA.refactor!(f, Nd; check = false) === f
