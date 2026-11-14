@@ -1702,4 +1702,103 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         @test AA.inertia(f) == (positive = n, zero = 0, negative = 0)
         @test Matrix(H) * AA.solve(f, b) ≈ b rtol = tol
     end
+
+    @testset "check = false and issuccess $T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        n = 20
+        P = SparseMatrixCSC{T,Int64}(spdiagm(-1 => fill(-1.0, n - 1), 0 => fill(4.0, n), 1 => fill(-1.0, n - 1)))
+        Nd = copy(P); nonzeros(Nd) .*= -1                       # negative definite
+        b = rand(T, n)
+        tol = T == Float32 ? 1e-4 : 1e-10
+        # check = true (the default) throws, as before
+        @test_throws ErrorException AA.factor(Nd, :cholesky)
+        # check = false keeps the failed factorization
+        f = AA.factor(Nd, :cholesky; check = false)
+        @test !issuccess(f)
+        # every way of using it throws
+        @test_throws ErrorException AA.solve(f, b)
+        @test_throws ErrorException AA.solve!(f, copy(b))
+        @test_throws ErrorException f \ b
+        @test_throws ErrorException ldiv!(f, copy(b))
+        @test_throws ErrorException ldiv!(similar(b), f, b)
+        @test_throws ErrorException AA.factor!(f)            # check = true: it is not recomputed
+        @test AA.factor!(f; check = false) === f
+        @test_throws ArgumentError AA.numeric_options(f)
+        @test_throws ErrorException AA.subfactor(f, AA.SparseSubfactorL)
+        # the kind check of the LinearAlgebra spellings still applies
+        @test_throws ArgumentError lu!(f, P)
+        @test_throws ArgumentError ldlt!(f, P)
+        # ... and refactor! reuses its symbolic factorization once the values change
+        AA.refactor!(f, P)
+        @test issuccess(f)
+        @test Matrix(P) * AA.solve(f, b) ≈ b rtol = tol
+        # a failed refactor! is recorded, with or without check
+        @test AA.refactor!(f, Nd; check = false) === f
+        @test !issuccess(f)
+        AA.refactor!(f, P)
+        @test_throws ErrorException AA.refactor!(f, Nd)
+        @test !issuccess(f)
+        AA.refactor!(f, P; check = false)
+        @test issuccess(f)
+        # with changed options too
+        AA.refactor!(f, Nd; pivot_tolerance = 0.5, check = false)
+        @test !issuccess(f)
+        AA.refactor!(f, P)
+        @test issuccess(f)
+        @test Matrix(P) * AA.solve(f, b) ≈ b rtol = tol
+        # factor! on an AAFactorization
+        g = AAFactorization(Nd)
+        @test !issuccess(g)
+        @test AA.factor!(g, AA.SparseFactorizationCholesky; check = false) === g
+        @test !issuccess(g)
+        # an unfactored AAFactorization still cannot be refactored
+        @test_throws ArgumentError AA.refactor!(AAFactorization(P), P)
+        # the LinearAlgebra spellings take check
+        c = cholesky(AASparseMatrix(Nd); check = false)
+        @test c isa AAFactorization && !issuccess(c)
+        @test cholesky!(c, P; check = false) === c
+        @test issuccess(c)
+        # argument errors throw even with check = false
+        @test_throws ErrorException AA.factor(SparseMatrixCSC{T,Int64}(sprandn(6, 4, 0.5)), :cholesky; check = false)
+    end
+
+    @testset "check = false: QR and unpivoted LDLᵀ $T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        n = 10
+        b = rand(T, n)
+        tol = T == Float32 ? 1e-4 : 1e-10
+        D = SparseMatrixCSC{T,Int64}(spdiagm(0 => T[i == 3 ? 0 : i for i in 1:n]))   # singular
+        R = SparseMatrixCSC{T,Int64}(spdiagm(0 => T.(1:n)))                          # same pattern, regular
+        # QR reports a singular matrix
+        @test_throws SingularException AA.factor(D, :qr)
+        q = AA.factor(D, :qr; check = false)
+        @test !issuccess(q)
+        @test_throws SingularException AA.solve(q, b)
+        AA.refactor!(q, R)
+        @test issuccess(q)
+        @test Matrix(R) * AA.solve(q, b) ≈ b rtol = tol
+        # unpivoted LDLᵀ reports a zero pivot
+        u = AA.factor(D, AA.SparseFactorizationLDLTUnpivoted; check = false)
+        @test !issuccess(u)
+        AA.refactor!(u, R)
+        @test issuccess(u)
+        @test Matrix(R) * AA.solve(u, b) ≈ b rtol = tol
+        # the pivoting LDLᵀ succeeds on the singular matrix: its inertia shows the zero pivot
+        t = AA.factor(D, :ldlt)
+        @test issuccess(t)
+        @test AA.inertia(t) == (positive = n - 1, zero = 1, negative = 0)
+    end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "check = false: complex Hermitian Cholesky $T" for T in (ComplexF32, ComplexF64)
+        AA = AppleAccelerate
+        n = 10
+        H = SparseMatrixCSC{T,Int64}(spdiagm(0 => fill(4.0, n)) + spdiagm(1 => fill(im, n - 1)) - spdiagm(-1 => fill(im, n - 1)))
+        b = rand(T, n)
+        f = AA.factor(-H, :cholesky; check = false)
+        @test !issuccess(f)
+        AA.refactor!(f, H)
+        @test issuccess(f)
+        @test Matrix(H) * AA.solve(f, b) ≈ b rtol = (real(T) == Float32 ? 1e-4 : 1e-10)
+    end
 end

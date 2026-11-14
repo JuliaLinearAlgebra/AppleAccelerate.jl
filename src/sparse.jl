@@ -1335,6 +1335,12 @@ computed. A factorization that is already computed is left as is; use
 [`refactor!`](@ref) to recompute it (passing options to `factor!` then throws, as
 they would not apply).
 
+If the factorization fails (e.g. a Cholesky factorization of a matrix that is not
+positive definite), `factor!` throws, unless `check = false`: it then keeps the
+failed factorization, whose symbolic part [`refactor!`](@ref) can reuse once the
+values change, and [`issuccess`](@ref LinearAlgebra.issuccess) returns `false`.
+Solving with a failed factorization throws. Invalid arguments always throw.
+
 $(_OPTIONS_DOC)
 
 !!! note "Complex symmetric (not Hermitian)"
@@ -1351,11 +1357,13 @@ $(_OPTIONS_DOC)
 function factor!(aa_fact::AAFactorization{T},
             kind::SparseFactorization_t = SparseFactorizationTBD;
             order = nothing, scaling = nothing, pivot_tolerance = nothing,
-            zero_tolerance = nothing) where T<:vTypes
+            zero_tolerance = nothing, check::Bool = true) where T<:vTypes
     if aa_fact._factorization.status != SparseYetToBeFactored
         all(isnothing, (order, scaling, pivot_tolerance, zero_tolerance)) || throw(ArgumentError(
             "factor! does not recompute an existing factorization, so its options would " *
             "not apply; pass the numeric options to refactor! instead"))
+        # a factorization kept after a failure (check = false) is not recomputed either
+        check && _libsparse_throw(aa_fact._factorization.status, "factor")
     end
     if aa_fact._factorization.status == SparseYetToBeFactored
         sfopts = _symbolic_options_with(aa_fact, order)
@@ -1373,7 +1381,9 @@ function factor!(aa_fact::AAFactorization{T},
         # owning wrapper alive across the factorization call.
         fact = GC.@preserve aa_fact SparseFactor(kind, aa_fact.matrixObj.matrix, sfopts, nfopts)
         aa_fact._symbolic_options, aa_fact._numeric_options = sfopts, nfopts
-        if fact.status == SparseStatusOk
+        if fact.status == SparseStatusOk || (!check && _recoverable(fact))
+            # with check = false, a failed numeric factorization is kept: its symbolic
+            # factorization stays valid for refactor!
             aa_fact._factorization = fact
         else
             # The factorization failed (e.g. singular matrix). Free whatever
@@ -1383,10 +1393,37 @@ function factor!(aa_fact::AAFactorization{T},
             # (b) a subsequent factor! retries instead of silently reusing a
             # broken factorization.
             SparseCleanup(fact)
-            _libsparse_throw(fact.status, "factor")
+            # an argument error throws even with check = false
+            (check || !_recoverable(fact)) && _libsparse_throw(fact.status, "factor")
         end
     end
+    return aa_fact
 end
+
+# whether `f` holds a valid symbolic factorization and numeric factors, possibly
+# from a failed numeric factorization (that refactor! can recompute)
+_has_numeric(f::SparseOpaqueFactorization) =
+    f.symbolicFactorization.status == SparseStatusOk && f.numericFactorization != C_NULL
+
+# a failed numeric factorization that refactor! can recompute, as opposed to an argument error
+_recoverable(f::SparseOpaqueFactorization) = _has_numeric(f) && f.status != SparseParameterError
+
+"""
+    issuccess(f::AAFactorization) -> Bool
+
+Whether `f` holds a successful factorization. `false` before the first
+factorization, and after one that failed with `check = false`.
+
+Only some factorizations detect failure: Cholesky (a matrix that is not positive
+definite), unpivoted LDLᵀ (a zero pivot) and QR (a singular matrix). The pivoting
+LDLᵀ and LU factorizations succeed on singular matrices, so `issuccess` is `true`
+for them; for LDLᵀ, [`inertia`](@ref) counts the zero pivots.
+"""
+LinearAlgebra.issuccess(f::AAFactorization) = f._factorization.status == SparseStatusOk
+
+# factor `f` if needed, and throw if it does not hold a successful factorization
+# (factor! throws for a factorization kept after a failure)
+_factored!(f::AAFactorization) = factor!(f)
 
 # Translate a libSparse status code into a typed Julia exception. SparseStatusOk
 # is a no-op so callers can write `_libsparse_throw(result.status, ...)` after
@@ -1418,7 +1455,7 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
         "Matrix and right-hand side size mismatch: got "
         * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
-    factor!(aa_fact)
+    _factored!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
     _libsparse_throw(aa_fact._factorization.status, "solve")
@@ -1439,7 +1476,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vT
                 "solve: x and b are different sizes and Julia cannot resize a matrix."
             )
         )
-    factor!(aa_fact)
+    _factored!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
     _libsparse_throw(aa_fact._factorization.status, "solve")
     return xb # written in imitation of KLU.jl, which also returns
@@ -1457,7 +1494,7 @@ function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
     size(aa_fact.matrixObj)[2] != size(x, 1) && throw(DimensionMismatch(
         "Matrix and output size mismatch: got "
         * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
-    factor!(aa_fact)
+    _factored!(aa_fact)
     SparseSolve(aa_fact._factorization, b, x)
     _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
@@ -1496,7 +1533,10 @@ factorization, so when the numeric options differ from those it recorded,
 one (which also reuses the ordering and analysis, but allocates new factor storage).
 
 `f` must already hold a completed factorization (call [`factor!`](@ref) or
-[`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown.
+[`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown. The
+last numeric factorization may have failed (with `check = false`): its symbolic
+factorization is reused. If the refactorization fails, `refactor!` throws, unless
+`check = false`, and [`issuccess`](@ref LinearAlgebra.issuccess) tells the outcome.
 The factorization object `f` is mutated in place and returned. After
 `refactor!`, `f` references `A`'s data, so keep `A` alive as long as `f` is used.
 
@@ -1509,7 +1549,7 @@ The factorization object `f` is mutated in place and returned. After
 """
 function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
                    scaling = nothing, pivot_tolerance = nothing,
-                   zero_tolerance = nothing, order = nothing) where T<:vTypes
+                   zero_tolerance = nothing, order = nothing, check::Bool = true) where T<:vTypes
     order === nothing || throw(ArgumentError(
         "refactor! cannot change the ordering, which belongs to the symbolic " *
         "factorization; build a new factorization with factor instead"))
@@ -1517,7 +1557,7 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
         "SparseScalingHungarianScalingAndOrdering also orders the matrix, so " *
         "refactor! cannot use it"))
     status = aa_fact._factorization.status
-    status == SparseStatusOk || throw(ArgumentError(
+    _has_numeric(aa_fact._factorization) || throw(ArgumentError(
         "refactor! requires an already-computed factorization; call factor! or " *
         "solve first (current status: $status)"))
     old = aa_fact.matrixObj
@@ -1548,23 +1588,25 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
             _sparse_refactor!(factref, A.matrix, nfopts, Val(family))
         end
         new_fact = factref[]
-        _libsparse_throw(new_fact.status, "refactor")
     else
         old_fact = aa_fact._factorization
         new_fact = GC.@preserve A SparseFactor(old_fact.symbolicFactorization, A.matrix,
                                                new_options)
-        if new_fact.status != SparseStatusOk
+        if !_recoverable(new_fact)
+            # an argument error: keep the previous factorization and options
             new_fact.status in (SparseYetToBeFactored, SparseStatusReleased) || SparseCleanup(new_fact)
             _libsparse_throw(new_fact.status, "refactor")
         end
         SparseCleanup(old_fact)
     end
     aa_fact._numeric_options = new_options
+    # store the result even if it failed: libSparse has overwritten the numeric factors
     aa_fact._factorization = new_fact
     # Keep the new matrix alive: its CSC buffers now back the numeric factors'
     # input, and dropping the old wrapper avoids confusion about which values
     # the factorization reflects.
     aa_fact.matrixObj = A
+    (check || !_recoverable(new_fact)) && _libsparse_throw(new_fact.status, "refactor")
     return aa_fact
 end
 
@@ -1585,8 +1627,9 @@ _is_ldlt_kind(t::SparseFactorization_t) =
 
 function _assert_refactor_kind(aa_fact::AAFactorization, pred, name::AbstractString)
     f = aa_fact._factorization
-    # If F isn't factored yet, let refactor! raise the clearer "call factor! first".
-    f.status == SparseStatusOk || return
+    # If F isn't factored yet, let refactor! raise the clearer "call factor! first";
+    # a failed factorization (check = false) still has a kind to check.
+    _has_numeric(f) || return
     pred(f.symbolicFactorization.type) || throw(ArgumentError(
         "$name requires F to hold the matching factorization kind; it holds " *
         "$(f.symbolicFactorization.type). Build F with that factorization first."))
@@ -2024,7 +2067,7 @@ function solve!(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T},
     size(b, 1) == m || throw(DimensionMismatch("RHS has $(size(b,1)) rows; A has $m rows"))
     size(x, 1) == n || throw(DimensionMismatch("solution has $(size(x,1)) rows; A has $n cols"))
     nrhs = b isa AbstractVector ? 1 : size(b, 2)
-    factor!(aa_fact)
+    _factored!(aa_fact)
     need = solve_workspace_size(aa_fact, nrhs)
     length(workspace) >= need || throw(ArgumentError(
         "workspace too small: need $need bytes, got $(length(workspace)); " *
@@ -2041,7 +2084,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T},
     m == n || throw(ArgumentError("in-place workspace solve requires a square system"))
     size(xb, 1) == n || throw(DimensionMismatch("RHS has $(size(xb,1)) rows; A is $m×$n"))
     nrhs = xb isa AbstractVector ? 1 : size(xb, 2)
-    factor!(aa_fact)
+    _factored!(aa_fact)
     need = solve_workspace_size(aa_fact, nrhs)
     length(workspace) >= need || throw(ArgumentError(
         "workspace too small: need $need bytes, got $(length(workspace))"))
@@ -2126,7 +2169,8 @@ function subfactor(f::AAFactorization{T}, which::SparseSubfactor_t) where {T<:vT
     factor!(f)
     fac = f._factorization
     fac.status == SparseStatusOk ||
-        throw(ArgumentError("subfactor requires a completed factorization"))
+        throw(ArgumentError("subfactor requires a successful factorization; call factor! " *
+                            "first, or refactor! after a failed one"))
     ws, wp = GC.@preserve f _subfactor_ws(which, fac)
     sub = SparseOpaqueSubfactor{T}(_subfactor_attributes(which), which, fac, ws, wp)
     return AASubfactor{T}(sub, f)
@@ -2258,7 +2302,8 @@ function update_partial_lu!(f::AAFactorization{T},
         A_new::AASparseMatrix{T}) where {T<:vTypes}
     fac = f._factorization
     fac.status == SparseStatusOk || throw(ArgumentError(
-        "update_partial_lu! requires a completed factorization; call factor! first"))
+        "update_partial_lu! requires a successful factorization; call factor! first, or " *
+        "refactor! after a failed one"))
     t = fac.symbolicFactorization.type
     t in (SparseFactorizationLUUnpivoted, SparseFactorizationLUSPP, SparseFactorizationLUTPP) ||
         throw(ArgumentError("update_partial_lu! requires a pivotless LU factorization " *
@@ -2315,7 +2360,8 @@ must already be factored. `Float32`/`Float64`/`ComplexF32`/`ComplexF64`.
 """
 function numeric_options(f::AAFactorization{T}) where {T<:vTypes}
     f._factorization.status == SparseStatusOk || throw(ArgumentError(
-        "numeric_options requires a completed factorization; call factor! first"))
+        "numeric_options requires a successful factorization; call factor! first, or " *
+        "refactor! after a failed one"))
     return _numeric_options(f._factorization)
 end
 
@@ -2327,7 +2373,8 @@ for the completed factorization `f`.
 """
 function symbolic_options(f::AAFactorization{T}) where {T<:vTypes}
     f._factorization.status == SparseStatusOk || throw(ArgumentError(
-        "symbolic_options requires a completed factorization; call factor! first"))
+        "symbolic_options requires a successful factorization; call factor! first, or " *
+        "refactor! after a failed one"))
     symb = Ref(f._factorization.symbolicFactorization)
     GC.@preserve symb begin
         return _from_raw(LibAccelerate._SparseGetOptionsFromSymbolicFactor(
@@ -2377,8 +2424,8 @@ are `LinearAlgebra`'s functions, and AppleAccelerate only adds methods to them f
 its own `AASparseMatrix`, never for `SparseMatrixCSC` (that would override
 SuiteSparse session-wide).
 
-The keyword `options` (`order`, `scaling`, `pivot_tolerance`, `zero_tolerance`) are
-those of [`factor!`](@ref).
+The keyword `options` (`order`, `scaling`, `pivot_tolerance`, `zero_tolerance`, and
+`check`) are those of [`factor!`](@ref).
 """
 function factor(A::AASparseMatrix, kind::Union{Symbol,SparseFactorization_t} = :auto; options...)
     f = AAFactorization(A)
@@ -2468,7 +2515,8 @@ sensitive to the pivoting and zero tolerances.
 function inertia(f::AAFactorization{T}) where {T<:vTypes}
     fac = f._factorization
     fac.status == SparseStatusOk || throw(ArgumentError(
-        "inertia requires a completed factorization; call factor! first"))
+        "inertia requires a successful factorization; call factor! first, or " *
+        "refactor! after a failed one"))
     t = fac.symbolicFactorization.type
     # libSparse rejects every other kind through its reportError callback; check
     # the *resolved* type up front (default LDLT resolves to LDLTTPP).

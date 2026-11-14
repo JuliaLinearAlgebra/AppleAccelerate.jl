@@ -221,6 +221,32 @@ AA.numeric_options(f).pivotTolerance
 options throws. The `LinearAlgebra` spellings (`ldlt(A; ...)`, `ldlt!(F, A; ...)`, …)
 take the same keywords.
 
+### Failed factorizations
+
+By default, a factorization that fails (a Cholesky factorization of a matrix that is
+not positive definite, say) throws. With `check = false`, `factor`, `factor!` and
+`refactor!` keep the failed factorization instead, and `issuccess` reports the
+outcome. Its symbolic factorization stays valid, so `refactor!` can recompute it
+once the values change, as in Newton-type iterations that regularize a matrix until
+it factorizes:
+
+```@example sparse
+using LinearAlgebra
+import AppleAccelerate as AA
+
+P = spdiagm(-1 => fill(-1.0, 9), 0 => fill(4.0, 10), 1 => fill(-1.0, 9))
+f = AA.factor(-P, :cholesky; check = false)
+issuccess(f)            # false: -P is not positive definite
+AA.refactor!(f, P)      # reuses the symbolic factorization
+issuccess(f)
+```
+
+Only Cholesky (a matrix that is not positive definite), unpivoted LDLᵀ (a zero
+pivot) and QR (a singular matrix) detect failure. The pivoting LDLᵀ and LU
+factorizations succeed on singular matrices; for LDLᵀ, `inertia` counts the zero
+pivots. Solving with a failed factorization, or calling `factor!` on it, throws;
+argument errors throw regardless of `check`.
+
 ## Factorization conveniences
 
 For matrices wrapped as an `AASparseMatrix`, the usual `LinearAlgebra`
