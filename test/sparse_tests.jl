@@ -1596,4 +1596,104 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             @test mul!(copy(yc), M, xc, 2 - im, 0.5im) ≈ (2 - im) * (H * xc) + 0.5im * yc
         end
     end
+
+    @testset "factorization options $T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        n = 30
+        # symmetric indefinite, deterministic
+        K = spdiagm(-1 => ones(n - 1), 0 => [(-1)^i * (2 + i / n) for i in 1:n], 1 => ones(n - 1),
+                    -5 => fill(0.3, n - 5), 5 => fill(0.3, n - 5))
+        S = SparseMatrixCSC{T,Int64}(K)
+        b = rand(T, n)
+        tol = T == Float32 ? 1e-3 : 1e-8
+        # the defaults are libSparse's, as before
+        f0 = AA.factor(S, :ldlt)
+        d, o0 = AA.SparseNumericFactorOptions(T), AA.numeric_options(f0)
+        @test (o0.scalingMethod, o0.pivotTolerance, o0.zeroTolerance) ==
+              (d.scalingMethod, d.pivotTolerance, d.zeroTolerance)
+        @test AA.symbolic_options(f0).orderMethod == AA.SparseOrderDefault
+        for order in (AA.SparseOrderDefault, AA.SparseOrderAMD, AA.SparseOrderMetis),
+                scaling in (AA.SparseScalingDefault, AA.SparseScalingUser)
+            f = AA.factor(S, :ldlt; order, scaling, pivot_tolerance = 0.5, zero_tolerance = 1e-12)
+            @test AA.symbolic_options(f).orderMethod == order
+            o = AA.numeric_options(f)
+            @test (o.scalingMethod, o.pivotTolerance, o.zeroTolerance) == (scaling, 0.5, 1e-12)
+            @test Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        end
+        # factor! with options on an unfactored AAFactorization
+        f = AAFactorization(S)
+        AA.factor!(f, AA.SparseFactorizationLDLTTPP; pivot_tolerance = 0.25)
+        @test AA.numeric_options(f).pivotTolerance == 0.25
+        # refactor! changes the numeric options and keeps those not given
+        f = AA.factor(S, :ldlt; order = AA.SparseOrderAMD, zero_tolerance = 1e-12)
+        S2 = copy(S); nonzeros(S2) .*= 2
+        AA.refactor!(f, S2; pivot_tolerance = 0.5)
+        o = AA.numeric_options(f)
+        @test (o.pivotTolerance, o.zeroTolerance) == (0.5, 1e-12)
+        @test AA.symbolic_options(f).orderMethod == AA.SparseOrderAMD
+        @test 2 * Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        # the new options take effect: with a zero tolerance above every pivot, all
+        # pivots are zero; refactorizing without options keeps the new tolerance
+        @test AA.inertia(f) == (positive = n ÷ 2, zero = 0, negative = n ÷ 2)
+        AA.refactor!(f, S2; zero_tolerance = 1e3)
+        @test AA.inertia(f) == (positive = 0, zero = n, negative = 0)
+        AA.refactor!(f, S2)
+        @test AA.inertia(f) == (positive = 0, zero = n, negative = 0)
+        AA.refactor!(f, S2; zero_tolerance = 1e-12)
+        @test AA.inertia(f) == (positive = n ÷ 2, zero = 0, negative = n ÷ 2)
+        @test 2 * Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+
+        # options passed to factor! on a computed factorization would not apply: they
+        # throw, and are not stored, so that refactor! still sees them as a change
+        f = AA.factor(S, :ldlt)
+        @test_throws ArgumentError AA.factor!(f; zero_tolerance = 1e3)
+        AA.factor!(f)                                          # no options: a no-op
+        AA.refactor!(f, S; zero_tolerance = 1e3)
+        @test AA.inertia(f) == (positive = 0, zero = n, negative = 0)
+
+        # invalid options
+        @test_throws ArgumentError AA.factor(S, :ldlt; pivot_tolerance = 0.9)
+        @test_throws ArgumentError AA.factor(S, :ldlt; pivot_tolerance = -0.1)
+        @test_throws ArgumentError AA.factor(S, :ldlt; zero_tolerance = -1)
+        @test_throws MethodError AA.factor(S, :ldlt; pivot_tol = 0.1)   # unknown keyword
+        f = AA.factor(S, :ldlt)
+        @test_throws ArgumentError AA.refactor!(f, S; order = AA.SparseOrderAMD)
+        @test_throws ArgumentError AA.refactor!(f, S; scaling = AA.SparseScalingHungarianScalingAndOrdering)
+        @test_throws ArgumentError AA.refactor!(f, S; pivot_tolerance = 0.9)
+        @test Matrix(K) * AA.solve(f, b) ≈ b rtol = tol   # a rejected call leaves f as it was
+        @test AA.numeric_options(f).pivotTolerance == d.pivotTolerance
+
+        # the LinearAlgebra spellings forward the options
+        A = AASparseMatrix(S)
+        g = ldlt(A; pivot_tolerance = 0.25)
+        @test AA.numeric_options(g).pivotTolerance == 0.25
+        ldlt!(g, S; zero_tolerance = 1e3)
+        @test AA.inertia(g) == (positive = 0, zero = n, negative = 0)
+
+        # the new-options path of refactor! for Cholesky and QR
+        P = SparseMatrixCSC{T,Int64}(spdiagm(-1 => fill(-1.0, n - 1), 0 => fill(4.0, n), 1 => fill(-1.0, n - 1)))
+        c = AA.factor(P, :cholesky)
+        AA.refactor!(c, P; scaling = AA.SparseScalingEquilibriationInf, zero_tolerance = 1e-12)
+        @test AA.numeric_options(c).scalingMethod == AA.SparseScalingEquilibriationInf
+        @test Matrix(P) * AA.solve(c, b) ≈ b rtol = tol
+        q = AA.factor(P, :qr)
+        AA.refactor!(q, P; scaling = AA.SparseScalingEquilibriationInf)
+        @test Matrix(P) * AA.solve(q, b) ≈ b rtol = tol
+    end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "factorization options, complex Hermitian $T" for T in (ComplexF32, ComplexF64)
+        AA = AppleAccelerate
+        n = 20
+        H = SparseMatrixCSC{T,Int64}(spdiagm(0 => fill(4.0, n)) + spdiagm(1 => fill(im, n - 1)) - spdiagm(-1 => fill(im, n - 1)))
+        b = rand(T, n)
+        tol = real(T) == Float32 ? 1e-3 : 1e-8
+        f = AA.factor(H, :ldlt; pivot_tolerance = 0.25)
+        @test AA.numeric_options(f).pivotTolerance == 0.25
+        AA.refactor!(f, H; zero_tolerance = 1e3)
+        @test AA.inertia(f) == (positive = 0, zero = n, negative = 0)
+        AA.refactor!(f, H; zero_tolerance = 1e-12)
+        @test AA.inertia(f) == (positive = n, zero = 0, negative = 0)
+        @test Matrix(H) * AA.solve(f, b) ≈ b rtol = tol
+    end
 end

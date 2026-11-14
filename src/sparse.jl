@@ -722,6 +722,16 @@ function SparseFactor(arg1::SparseFactorization_t,
     _SparseFactor_inner(arg1, arg2, arg3, arg4)
 end
 
+# numeric factorization from an existing symbolic factorization, with new numeric
+# options (libSparse reference-counts the symbolic factorization, so the previous
+# numeric factorization can be released afterwards).
+for (T, suff) in ((Cfloat, "18SparseMatrix_Float"), (Cdouble, "19SparseMatrix_Double"),
+                  (ComplexF32, "26SparseMatrix_Complex_Float"), (ComplexF64, "27SparseMatrix_Complex_Double"))
+    sym = Symbol("_Z12SparseFactor33SparseOpaqueSymbolicFactorization", suff, "26SparseNumericFactorOptions")
+    @eval @generateDemangled(SparseFactor, $(QuoteNode(sym)), $T, SparseOpaqueFactorization,
+                             SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
+end
+
 # TODO: SparseSolve variants that take a trailing `void*` workspace pointer, for repeated
 # factorizations. would require adding a workspace buffer to AAFactorization.
 
@@ -1163,11 +1173,15 @@ a Cholesky factorization; otherwise, it defaults to QR.
 mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     matrixObj::AASparseMatrix{T}
     _factorization::SparseOpaqueFactorization{T}
+    # Options of the last factor! / refactor! (see `_numeric_options_with`).
+    _symbolic_options::SparseSymbolicFactorOptions
+    _numeric_options::SparseNumericFactorOptions
 end
 
 # returns an AAFactorization containing A and a dummy "yet-to-be-factored" factorization.
 function AAFactorization(A::AASparseMatrix{T}) where T<:vTypes
-    obj = AAFactorization(A, SparseOpaqueFactorization(T))
+    obj = AAFactorization(A, SparseOpaqueFactorization(T),
+                          SparseSymbolicFactorOptions(), SparseNumericFactorOptions(T))
     function cleanup(aa_fact)
         # If it's yet-to-be-factored, then there's nothing to release
         if !(aa_fact._factorization.status in (SparseYetToBeFactored,
@@ -1253,9 +1267,51 @@ for (T, suff, kind) in _REFACTOR_KINDS
     end
 end
 
+# The options of `f` updated with the keywords given (`nothing` keeps the stored value).
+# Callers store them only once libSparse has accepted them.
+function _symbolic_options_with(f::AAFactorization, order)
+    s = f._symbolic_options
+    order === nothing && return s
+    return SparseSymbolicFactorOptions(s.control, order, s.order,
+        s.ignoreRowsAndColumns, s.malloc, s.free, s.reportError)
+end
+
+function _numeric_options_with(f::AAFactorization, scaling, pivot_tolerance, zero_tolerance)
+    n = f._numeric_options
+    pivot_tolerance === nothing || 0 <= pivot_tolerance <= 0.5 || throw(ArgumentError(
+        "pivot_tolerance must be in [0, 0.5] (libSparse clamps it to that range), got $pivot_tolerance"))
+    zero_tolerance === nothing || zero_tolerance >= 0 || throw(ArgumentError(
+        "zero_tolerance must be nonnegative, got $zero_tolerance"))
+    return SparseNumericFactorOptions(n.control,
+        something(scaling, n.scalingMethod), n.scaling,
+        Float64(something(pivot_tolerance, n.pivotTolerance)),
+        Float64(something(zero_tolerance, n.zeroTolerance)))
+end
+
+const _OPTIONS_DOC = """
+# Options
+
+  - `order::SparseOrder_t`: fill-reducing ordering (`SparseOrderDefault`,
+    `SparseOrderAMD`, `SparseOrderMetis`, `SparseOrderCOLAMD`).
+  - `scaling::SparseScaling_t`: matrix scaling (`SparseScalingDefault`,
+    `SparseScalingUser` without a scaling vector, i.e. no scaling,
+    `SparseScalingEquilibriationInf`, and on macOS 26+
+    `SparseScalingHungarianScalingOnly` and, for LU only,
+    `SparseScalingHungarianScalingAndOrdering`, which [`refactor!`](@ref) cannot reuse).
+  - `pivot_tolerance`: relative pivot threshold of the pivoting factorizations
+    (TPP, SPP), in `[0, 0.5]`; libSparse's default is `0.1` for `Float32` and
+    `0.01` for `Float64`.
+  - `zero_tolerance`: pivots smaller in absolute value are treated as zero;
+    libSparse's default is `eps(real(T)) * 1e-4`.
+
+The options apply to the factorization computed by this call; options that are not
+given keep their current value, so they persist across calls on the same
+factorization.
+"""
+
 # easiest way to make this follow the defaults and naming conventions of LinearAlgebra?
 """
-    factor!(f::AAFactorization, [type::SparseFactorization_t])
+    factor!(f::AAFactorization, [type::SparseFactorization_t]; options...)
 
 Explicitly compute the factorization. If `type` is not specified, the default
 is chosen from the matrix's kind attribute:
@@ -1265,7 +1321,11 @@ is chosen from the matrix's kind attribute:
   - rectangular → QR
 
 Called automatically by [`solve`](@ref) if the factorization has not yet been
-computed.
+computed. A factorization that is already computed is left as is; use
+[`refactor!`](@ref) to recompute it (passing options to `factor!` then throws, as
+they would not apply).
+
+$(_OPTIONS_DOC)
 
 !!! note "Complex symmetric (not Hermitian)"
     When the user leaves the factorization type unspecified and passes
@@ -1279,8 +1339,17 @@ computed.
     unknown.
 """
 function factor!(aa_fact::AAFactorization{T},
-            kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
+            kind::SparseFactorization_t = SparseFactorizationTBD;
+            order = nothing, scaling = nothing, pivot_tolerance = nothing,
+            zero_tolerance = nothing) where T<:vTypes
+    if aa_fact._factorization.status != SparseYetToBeFactored
+        all(isnothing, (order, scaling, pivot_tolerance, zero_tolerance)) || throw(ArgumentError(
+            "factor! does not recompute an existing factorization, so its options would " *
+            "not apply; pass the numeric options to refactor! instead"))
+    end
     if aa_fact._factorization.status == SparseYetToBeFactored
+        sfopts = _symbolic_options_with(aa_fact, order)
+        nfopts = _numeric_options_with(aa_fact, scaling, pivot_tolerance, zero_tolerance)
         if kind == SparseFactorizationTBD
             # Cholesky for Hermitian (incl. real symmetric); LU for square
             # non-Hermitian (macOS 15.5+); QR otherwise.
@@ -1292,7 +1361,8 @@ function factor!(aa_fact::AAFactorization{T},
         end
         # matrixObj.matrix holds raw pointers into the CSC buffers; keep the
         # owning wrapper alive across the factorization call.
-        fact = GC.@preserve aa_fact SparseFactor(kind, aa_fact.matrixObj.matrix)
+        fact = GC.@preserve aa_fact SparseFactor(kind, aa_fact.matrixObj.matrix, sfopts, nfopts)
+        aa_fact._symbolic_options, aa_fact._numeric_options = sfopts, nfopts
         if fact.status == SparseStatusOk
             aa_fact._factorization = fact
         else
@@ -1388,8 +1458,8 @@ end
 # ============================================================
 
 """
-    refactor!(f::AAFactorization, A::AASparseMatrix)
-    refactor!(f::AAFactorization, A::SparseMatrixCSC)
+    refactor!(f::AAFactorization, A::AASparseMatrix; options...)
+    refactor!(f::AAFactorization, A::SparseMatrixCSC; options...)
 
 Recompute the numeric factorization stored in `f` using the values of `A`,
 **reusing the existing symbolic factorization** (the fill-reducing ordering and
@@ -1406,6 +1476,15 @@ For LU/Cholesky/LDLᵀ factorizations you can equivalently use the
 factorization of the matching kind and delegate here. QR reuse has no stdlib
 spelling, so use `refactor!` directly for it.
 
+The numeric options `scaling`, `pivot_tolerance` and `zero_tolerance` (see
+[`factor!`](@ref)) can be changed for this and later refactorizations, e.g. to
+raise the pivot threshold after an inaccurate solve; the ordering is part of the
+symbolic factorization and cannot change, nor can `SparseScalingHungarianScalingAndOrdering`
+be used. libSparse's in-place refactorization keeps the options of the original
+factorization, so when the numeric options differ from those it recorded,
+`refactor!` instead computes a new numeric factorization from the existing symbolic
+one (which also reuses the ordering and analysis, but allocates new factor storage).
+
 `f` must already hold a completed factorization (call [`factor!`](@ref) or
 [`solve`](@ref) at least once first); otherwise an `ArgumentError` is thrown.
 The factorization object `f` is mutated in place and returned. After
@@ -1418,7 +1497,15 @@ The factorization object `f` is mutated in place and returned. After
     cheap guard, but an identical count with a different pattern will not be
     caught.
 """
-function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:vTypes
+function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T};
+                   scaling = nothing, pivot_tolerance = nothing,
+                   zero_tolerance = nothing, order = nothing) where T<:vTypes
+    order === nothing || throw(ArgumentError(
+        "refactor! cannot change the ordering, which belongs to the symbolic " *
+        "factorization; build a new factorization with factor instead"))
+    scaling == SparseScalingHungarianScalingAndOrdering && throw(ArgumentError(
+        "SparseScalingHungarianScalingAndOrdering also orders the matrix, so " *
+        "refactor! cannot use it"))
     status = aa_fact._factorization.status
     status == SparseStatusOk || throw(ArgumentError(
         "refactor! requires an already-computed factorization; call factor! or " *
@@ -1438,13 +1525,31 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:v
     # matrix `A`. Real Hermitian == symmetric, so real types stay :Symmetric.
     family = (T <: Complex && ishermitian(A)) ? :Hermitian :
              _refactor_family(aa_fact._factorization.symbolicFactorization.type)
-    nfopts = Ref(SparseNumericFactorOptions(T))
-    factref = Ref(aa_fact._factorization)
-    GC.@preserve A begin
-        _sparse_refactor!(factref, A.matrix, nfopts, Val(family))
+    new_options = _numeric_options_with(aa_fact, scaling, pivot_tolerance, zero_tolerance)
+    # The stored options are those libSparse applied to the current numeric factors
+    # (they are stored only once applied), which its in-place refactorization keeps.
+    # libSparse's own record cannot be read back after a failed factorization.
+    stored = aa_fact._numeric_options
+    if (new_options.scalingMethod, new_options.pivotTolerance, new_options.zeroTolerance) ==
+            (stored.scalingMethod, stored.pivotTolerance, stored.zeroTolerance)
+        nfopts = Ref(new_options)
+        factref = Ref(aa_fact._factorization)
+        GC.@preserve A begin
+            _sparse_refactor!(factref, A.matrix, nfopts, Val(family))
+        end
+        new_fact = factref[]
+        _libsparse_throw(new_fact.status, "refactor")
+    else
+        old_fact = aa_fact._factorization
+        new_fact = GC.@preserve A SparseFactor(old_fact.symbolicFactorization, A.matrix,
+                                               new_options)
+        if new_fact.status != SparseStatusOk
+            new_fact.status in (SparseYetToBeFactored, SparseStatusReleased) || SparseCleanup(new_fact)
+            _libsparse_throw(new_fact.status, "refactor")
+        end
+        SparseCleanup(old_fact)
     end
-    new_fact = factref[]
-    _libsparse_throw(new_fact.status, "refactor")
+    aa_fact._numeric_options = new_options
     aa_fact._factorization = new_fact
     # Keep the new matrix alive: its CSC buffers now back the numeric factors'
     # input, and dropping the old wrapper avoids confusion about which values
@@ -1453,8 +1558,8 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:v
     return aa_fact
 end
 
-refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}) where T<:vTypes =
-    refactor!(aa_fact, AASparseMatrix(A))
+refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}; options...) where T<:vTypes =
+    refactor!(aa_fact, AASparseMatrix(A); options...)
 
 # LinearAlgebra-style spellings of `refactor!`, matching how SparseArrays exposes
 # symbolic-factorization reuse (`lu!(F, A)` for UMFPACK, `cholesky!(F, A)` /
@@ -1482,8 +1587,8 @@ for (fn, pred) in ((:lu!, :_is_lu_kind),
                    (:cholesky!, :_is_cholesky_kind),
                    (:ldlt!, :_is_ldlt_kind))
     for AT in (:(AASparseMatrix{T}), :(SparseMatrixCSC{T, Int64}))
-        @eval LinearAlgebra.$fn(aa_fact::AAFactorization{T}, A::$AT) where T<:vTypes =
-            (_assert_refactor_kind(aa_fact, $pred, $(string(fn))); refactor!(aa_fact, A))
+        @eval LinearAlgebra.$fn(aa_fact::AAFactorization{T}, A::$AT; kwargs...) where T<:vTypes =
+            (_assert_refactor_kind(aa_fact, $pred, $(string(fn))); refactor!(aa_fact, A; kwargs...))
     end
 end
 
@@ -1548,7 +1653,7 @@ LU factorization of `A` via Apple's Sparse solvers (requires macOS 15.5+ for the
 libSparse LU path). Dispatches on `AASparseMatrix`, so it does not override
 Julia's `lu(::SparseMatrixCSC)`.
 """
-LinearAlgebra.lu(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, SparseFactorizationLU); f)
+LinearAlgebra.lu(A::AASparseMatrix; kwargs...) = (f = AAFactorization(A); factor!(f, SparseFactorizationLU; kwargs...); f)
 
 """
     cholesky(A::AASparseMatrix) -> AAFactorization
@@ -1557,7 +1662,7 @@ Cholesky factorization of `A` via Apple's Sparse solvers. `A` must be symmetric
 (real) or Hermitian (complex) and positive definite. Dispatches on
 `AASparseMatrix`, so it does not override Julia's `cholesky(::SparseMatrixCSC)`.
 """
-LinearAlgebra.cholesky(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, SparseFactorizationCholesky); f)
+LinearAlgebra.cholesky(A::AASparseMatrix; kwargs...) = (f = AAFactorization(A); factor!(f, SparseFactorizationCholesky; kwargs...); f)
 
 """
     qr(A::AASparseMatrix) -> AAFactorization
@@ -1566,7 +1671,7 @@ QR factorization of `A` via Apple's Sparse solvers. Works for rectangular
 matrices and solves least-squares systems through `\\`. Dispatches on
 `AASparseMatrix`, so it does not override Julia's `qr(::SparseMatrixCSC)`.
 """
-LinearAlgebra.qr(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, SparseFactorizationQR); f)
+LinearAlgebra.qr(A::AASparseMatrix; kwargs...) = (f = AAFactorization(A); factor!(f, SparseFactorizationQR; kwargs...); f)
 
 """
     ldlt(A::AASparseMatrix) -> AAFactorization
@@ -1575,7 +1680,7 @@ LDLᵀ factorization of `A` via Apple's Sparse solvers, for symmetric/Hermitian
 (indefinite) matrices. Dispatches on `AASparseMatrix`, so it does not override
 Julia's `ldlt(::SparseMatrixCSC)`.
 """
-LinearAlgebra.ldlt(A::AASparseMatrix) = (f = AAFactorization(A); factor!(f, SparseFactorizationLDLT); f)
+LinearAlgebra.ldlt(A::AASparseMatrix; kwargs...) = (f = AAFactorization(A); factor!(f, SparseFactorizationLDLT; kwargs...); f)
 
 # ============================================================
 # Iterative-solver option structs
@@ -2242,7 +2347,7 @@ _factor_kind(k::Symbol) = get(_FACTOR_KINDS, k) do
 end
 
 """
-    factor(A, kind = :auto) -> AAFactorization
+    factor(A, kind = :auto; options...) -> AAFactorization
 
 Factorize the sparse matrix `A` with Apple's Sparse solvers and return the
 completed [`AAFactorization`](@ref), ready for [`solve`](@ref), `\\`, `ldiv!`,
@@ -2261,14 +2366,17 @@ This is the `SparseMatrixCSC` entry point on purpose: `lu`/`cholesky`/`qr`/`ldlt
 are `LinearAlgebra`'s functions, and AppleAccelerate only adds methods to them for
 its own `AASparseMatrix`, never for `SparseMatrixCSC` (that would override
 SuiteSparse session-wide).
+
+The keyword `options` (`order`, `scaling`, `pivot_tolerance`, `zero_tolerance`) are
+those of [`factor!`](@ref).
 """
-function factor(A::AASparseMatrix, kind::Union{Symbol,SparseFactorization_t} = :auto)
+function factor(A::AASparseMatrix, kind::Union{Symbol,SparseFactorization_t} = :auto; options...)
     f = AAFactorization(A)
-    factor!(f, _factor_kind(kind))
+    factor!(f, _factor_kind(kind); options...)
     return f
 end
-factor(A::SparseMatrixCSC, kind::Union{Symbol,SparseFactorization_t} = :auto) =
-    factor(AASparseMatrix(A), kind)
+factor(A::SparseMatrixCSC, kind::Union{Symbol,SparseFactorization_t} = :auto; options...) =
+    factor(AASparseMatrix(A), kind; options...)
 
 # ============================================================
 # In-place multiply (`mul!`) on AASparseMatrix
