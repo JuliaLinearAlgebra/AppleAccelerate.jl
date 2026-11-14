@@ -1362,7 +1362,8 @@ function factor!(aa_fact::AAFactorization{T},
         all(isnothing, (order, scaling, pivot_tolerance, zero_tolerance)) || throw(ArgumentError(
             "factor! does not recompute an existing factorization, so its options would " *
             "not apply; pass the numeric options to refactor! instead"))
-        # a factorization kept after a failure (check = false) is not recomputed either
+        # a factorization kept after a failure (check = false) is not recomputed either;
+        # the solves call factor!, so this is also what makes them throw on one
         check && _libsparse_throw(aa_fact._factorization.status, "factor")
     end
     if aa_fact._factorization.status == SparseYetToBeFactored
@@ -1421,10 +1422,6 @@ for them; for LDLᵀ, [`inertia`](@ref) counts the zero pivots.
 """
 LinearAlgebra.issuccess(f::AAFactorization) = f._factorization.status == SparseStatusOk
 
-# factor `f` if needed, and throw if it does not hold a successful factorization
-# (factor! throws for a factorization kept after a failure)
-_factored!(f::AAFactorization) = factor!(f)
-
 # Translate a libSparse status code into a typed Julia exception. SparseStatusOk
 # is a no-op so callers can write `_libsparse_throw(result.status, ...)` after
 # every libSparse call without branching.
@@ -1455,7 +1452,7 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     size(aa_fact.matrixObj)[1] != size(b, 1) && throw(DimensionMismatch(
         "Matrix and right-hand side size mismatch: got "
         * "$(size(aa_fact.matrixObj)[1]) and $(size(b, 1))"))
-    _factored!(aa_fact)
+    factor!(aa_fact)
     x = Array{T}(undef, size(aa_fact.matrixObj)[2], size(b)[2:end]...)
     SparseSolve(aa_fact._factorization, b, x)
     _libsparse_throw(aa_fact._factorization.status, "solve")
@@ -1476,7 +1473,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vT
                 "solve: x and b are different sizes and Julia cannot resize a matrix."
             )
         )
-    _factored!(aa_fact)
+    factor!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
     _libsparse_throw(aa_fact._factorization.status, "solve")
     return xb # written in imitation of KLU.jl, which also returns
@@ -1494,7 +1491,7 @@ function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
     size(aa_fact.matrixObj)[2] != size(x, 1) && throw(DimensionMismatch(
         "Matrix and output size mismatch: got "
         * "$(size(aa_fact.matrixObj)[2]) and $(size(x, 1))"))
-    _factored!(aa_fact)
+    factor!(aa_fact)
     SparseSolve(aa_fact._factorization, b, x)
     _libsparse_throw(aa_fact._factorization.status, "solve")
     return x
@@ -2067,7 +2064,7 @@ function solve!(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T},
     size(b, 1) == m || throw(DimensionMismatch("RHS has $(size(b,1)) rows; A has $m rows"))
     size(x, 1) == n || throw(DimensionMismatch("solution has $(size(x,1)) rows; A has $n cols"))
     nrhs = b isa AbstractVector ? 1 : size(b, 2)
-    _factored!(aa_fact)
+    factor!(aa_fact)
     need = solve_workspace_size(aa_fact, nrhs)
     length(workspace) >= need || throw(ArgumentError(
         "workspace too small: need $need bytes, got $(length(workspace)); " *
@@ -2084,7 +2081,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T},
     m == n || throw(ArgumentError("in-place workspace solve requires a square system"))
     size(xb, 1) == n || throw(DimensionMismatch("RHS has $(size(xb,1)) rows; A is $m×$n"))
     nrhs = xb isa AbstractVector ? 1 : size(xb, 2)
-    _factored!(aa_fact)
+    factor!(aa_fact)
     need = solve_workspace_size(aa_fact, nrhs)
     length(workspace) >= need || throw(ArgumentError(
         "workspace too small: need $need bytes, got $(length(workspace))"))
