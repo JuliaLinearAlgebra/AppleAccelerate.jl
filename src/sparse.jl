@@ -966,6 +966,18 @@ function AASparseMatrix(sparseM::SparseMatrixCSC{Tv, Ti},
 end
 
 """
+    nonzeros(A::AASparseMatrix) -> Vector
+
+The stored values of `A`, in compressed-column order. For a symmetric or Hermitian
+matrix stored as one triangle, they are those of that triangle, in the order of
+`nonzeros(tril(S))` (or `triu`) for the logical matrix `S`. The vector is `A`'s own storage,
+shared with `transpose(A)` and `adjoint(A)` (whose values are not conjugated):
+writing to it changes `A`, which [`refactor!`](@ref)`(f)` then refactorizes in
+place, without rebuilding the matrix. The sparsity pattern cannot change.
+"""
+SparseArrays.nonzeros(A::AASparseMatrix) = A._nzval
+
+"""
     AASparseMatrix(I, J, V, m, n, attributes = ATT_ORDINARY)
 
 Build an `m`×`n` `AASparseMatrix` from coordinate (COO) triplets: `V[k]` is the
@@ -1504,11 +1516,16 @@ end
 """
     refactor!(f::AAFactorization, A::AASparseMatrix; options...)
     refactor!(f::AAFactorization, A::SparseMatrixCSC; options...)
+    refactor!(f::AAFactorization; options...)
 
 Recompute the numeric factorization stored in `f` using the values of `A`,
 **reusing the existing symbolic factorization** (the fill-reducing ordering and
 sparsity analysis). `A` must have the **same sparsity pattern** as the matrix
 `f` was originally factored from; only its numeric values may differ.
+
+Without `A`, `f` is refactorized from the current values of the matrix it holds:
+the matrix it was built from, or the last `A` passed to `refactor!`. Its values can
+be updated in place through `nonzeros`, without building a new matrix.
 
 This is substantially cheaper than building a fresh [`AAFactorization`](@ref)
 whenever a matrix changes values but not structure — the common case in Newton
@@ -1609,6 +1626,8 @@ end
 
 refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}; options...) where T<:vTypes =
     refactor!(aa_fact, AASparseMatrix(A); options...)
+
+refactor!(aa_fact::AAFactorization; options...) = refactor!(aa_fact, aa_fact.matrixObj; options...)
 
 # LinearAlgebra-style spellings of `refactor!`, matching how SparseArrays exposes
 # symbolic-factorization reuse (`lu!(F, A)` for UMFPACK, `cholesky!(F, A)` /

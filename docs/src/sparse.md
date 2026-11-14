@@ -303,6 +303,25 @@ refactorization always keeps the options of the original factorization, so with 
 options `refactor!` computes a new numeric factorization from the existing symbolic
 one instead.
 
+### Updating the values in place
+
+`nonzeros(A)` is the matrix's own value storage, in compressed-column order; for a
+symmetric matrix stored as one triangle, that of the triangle, in the order of
+`nonzeros(tril(S))` (or `triu`). Update it in place and
+call `refactor!(F)` without a matrix, which refactorizes the matrix `F` holds — the
+last one passed to `refactor!`, if any.
+
+```@example sparse
+using LinearAlgebra
+import AppleAccelerate as AA
+
+A = AA.AASparseMatrix(sprandn(100, 100, 0.05) + 20I)
+F = AA.factor(A, :lu)
+nonzeros(A) .*= 2                              # new values, same pattern
+AA.refactor!(F)
+nothing # hide
+```
+
 For LU/Cholesky/LDLᵀ factorizations you can equivalently use the `LinearAlgebra`-style
 spellings that mirror how `SparseArrays` exposes symbolic reuse — `lu!(F, A)`,
 `cholesky!(F, A)`, `ldlt!(F, A)`. Each requires `F` to already hold a factorization

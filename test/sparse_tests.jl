@@ -1805,4 +1805,63 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         @test issuccess(f)
         @test Matrix(H) * AA.solve(f, b) ≈ b rtol = (real(T) == Float32 ? 1e-4 : 1e-10)
     end
+
+    @testset "in-place refactor! $T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        n = 40
+        K = spdiagm(-1 => ones(n - 1), 0 => [(-1)^i * (2 + i / n) for i in 1:n], 1 => ones(n - 1),
+                    -7 => fill(0.25, n - 7), 7 => fill(0.25, n - 7))
+        K = SparseMatrixCSC{T,Int64}(K)
+        b = rand(T, n)
+        tol = T == Float32 ? 1e-3 : 1e-8
+        half = (positive = n ÷ 2, zero = 0, negative = n ÷ 2)
+        lower(S) = AASparseMatrix(tril(S), AA.ATT_SYMMETRIC | AA.ATT_LOWER_TRIANGLE)
+        A = lower(K)
+        @test nonzeros(A) == nonzeros(tril(K))
+        @test nonzeros(transpose(A)) === nonzeros(A)
+        # update the values in place, then refactor! without a matrix
+        f = AA.factor(A, :ldlt)
+        nonzeros(A) .*= 3
+        AA.refactor!(f)
+        @test 3 * Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        @test AA.refactor!(f; check = false) === f
+        # refactor!(f) takes options, and keeps them
+        AA.refactor!(f; zero_tolerance = 1e3)
+        @test AA.inertia(f).zero > 0
+        AA.refactor!(f)
+        @test AA.inertia(f).zero > 0
+        AA.refactor!(f; zero_tolerance = 1e-12)
+        @test AA.inertia(f) == half
+        # after refactor!(f, B), f holds B: refactor!(f) uses its values, not A's
+        B = lower(K)
+        AA.refactor!(f, B)
+        nonzeros(A) .*= 100
+        AA.refactor!(f)
+        @test Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        # an unsymmetric matrix, through LU
+        U = K + sparse([1], [n], [T(0.5)], n, n)
+        A = AASparseMatrix(U)
+        @test nonzeros(A) == nonzeros(U)
+        f = AA.factor(A, :lu)
+        nonzeros(A) .*= 2
+        AA.refactor!(f)
+        @test 2 * Matrix(U) * AA.solve(f, b) ≈ b rtol = tol
+    end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "in-place Hermitian refactor! $T" for T in (ComplexF32, ComplexF64)
+        AA = AppleAccelerate
+        n = 20
+        H = SparseMatrixCSC{T,Int64}(spdiagm(0 => fill(4.0, n)) + spdiagm(1 => fill(im, n - 1)) - spdiagm(-1 => fill(im, n - 1)))
+        b = rand(T, n)
+        tol = real(T) == Float32 ? 1e-3 : 1e-8
+        A = AASparseMatrix(tril(H), AA.ATT_HERMITIAN | AA.ATT_LOWER_TRIANGLE)
+        @test ishermitian(A)
+        # with Cholesky: libSparse's complex Hermitian LDLᵀ refactorization can crash in
+        # _SparseGetWorkspaceRequired (see the isolated "Hermitian LDLT refactor" test above)
+        f = AA.factor(A, :cholesky)
+        nonzeros(A) .*= 2
+        AA.refactor!(f)
+        @test 2 * Matrix(H) * AA.solve(f, b) ≈ b rtol = tol
+    end
 end
