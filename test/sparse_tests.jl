@@ -1665,7 +1665,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         @test AA.numeric_options(f).pivotTolerance == d.pivotTolerance
 
         # the LinearAlgebra spellings forward the options
-        A = AASparseMatrix(S)
+        A = AASparseMatrix(tril(S), AA.ATT_SYMMETRIC | AA.ATT_LOWER_TRIANGLE)
         g = ldlt(A; pivot_tolerance = 0.25)
         @test AA.numeric_options(g).pivotTolerance == 0.25
         ldlt!(g, S; zero_tolerance = 1e3)
