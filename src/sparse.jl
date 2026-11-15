@@ -913,14 +913,6 @@ end
 
 function AASparseMatrix(sparseM::SparseMatrixCSC{T, <:Integer},
                         attributes::att_type = ATT_ORDINARY) where T<:vTypes
-    if attributes == ATT_ORDINARY
-        if ishermitian(sparseM)
-            kind = T <: Complex ? ATT_HERMITIAN : ATT_SYMMETRIC
-            return AASparseMatrix(tril(sparseM), kind | ATT_LOWER_TRIANGLE)
-        elseif istril(sparseM) || istriu(sparseM)
-            attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
-        end
-    end
     # NOTE: we deliberately do NOT auto-tag unit-triangular matrices. libSparse
     # treats ATT_UNIT_TRIANGULAR as an *implicit* unit diagonal, but we keep the
     # stored diagonal in the CSC data, so tagging it would double-count the
@@ -955,8 +947,9 @@ as libSparse expects for Cholesky and LDLᵀ factorizations; the other triangle 
 parent matrix is ignored, as in `Symmetric`. As in `Hermitian`, so is the imaginary
 part of a Hermitian matrix's diagonal. A real `Hermitian` matrix is symmetric.
 
-Unlike `AASparseMatrix(::SparseMatrixCSC)`, this does not test the matrix for
-symmetry, so it also serves to wrap the lower triangle of a symmetric matrix as is.
+This is how to get symmetric storage, which Cholesky and LDLᵀ factorizations need:
+`AASparseMatrix(::SparseMatrixCSC)` stores the matrix as it is. The matrix is not
+tested for symmetry, so the lower triangle of a symmetric matrix can be wrapped as is.
 """
 function AASparseMatrix(S::Union{Symmetric{<:Number, <:SparseMatrixCSC},
                                   Hermitian{<:Number, <:SparseMatrixCSC}})
@@ -1190,8 +1183,10 @@ Create via `f = AAFactorization(A::SparseMatrixCSC{T, Int64})`. Calls to `solve`
 `ldiv`, and their in-place versions require explicitly passing in the
 factorization object as the first argument. On construction, the struct stores a
 placeholder yet-to-be-factored object: the factorization is computed upon the first call
-to `solve`, or by explicitly calling `factor!`. If the matrix is symmetric, it defaults to
-a Cholesky factorization; otherwise, it defaults to QR.
+to `solve`, or by explicitly calling `factor!`. If the matrix is stored as symmetric
+(Hermitian), it defaults to a Cholesky factorization; otherwise, to LU for a square
+matrix (macOS 15.5+) and QR for others. `AAFactorization(::SparseMatrixCSC)` stores a
+Hermitian (or real symmetric) matrix so, as [`factor`](@ref) does.
 """
 mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     matrixObj::AASparseMatrix{T}
@@ -1214,7 +1209,22 @@ end
 LinearAlgebra.factorize(A::AASparseMatrix{T}) where T<:vTypes = AAFactorization(A)
 
 # julia's LinearAlgebra module doesn't provide similar constructors.
-AAFactorization(M::SparseMatrixCSC) = AAFactorization(AASparseMatrix(M))
+AAFactorization(M::SparseMatrixCSC) = AAFactorization(_detect_structure(M, SparseFactorizationTBD))
+
+# The `AASparseMatrix` that the `SparseMatrixCSC` conveniences (`factor`, `solve`,
+# `AAFactorization`, `refactor!`) factor with `kind`: like `factorize`, they test the
+# matrix, and store a Hermitian (or real symmetric) matrix as its lower triangle for the
+# factorizations that use it: Cholesky and LDLᵀ, and `:auto`, which then picks Cholesky.
+# A complex symmetric (not Hermitian) matrix is stored so only for an explicit LDLᵀ.
+function _detect_structure(S::SparseMatrixCSC, kind::SparseFactorization_t)
+    symmetric_kind = kind == SparseFactorizationTBD || _refactor_family(kind) == :Symmetric
+    if symmetric_kind && ishermitian(S)
+        return AASparseMatrix(eltype(S) <: Complex ? Hermitian(S, :L) : Symmetric(S, :L))
+    elseif symmetric_kind && kind != SparseFactorizationTBD && issymmetric(S)
+        return AASparseMatrix(Symmetric(S, :L))
+    end
+    return AASparseMatrix(S)
+end
 
 # ============================================================
 # Low-level numeric refactorization kernels
@@ -1491,8 +1501,16 @@ function refactor!(aa_fact::AAFactorization{T}, A::AASparseMatrix{T}) where T<:v
     return aa_fact
 end
 
-refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}) where T<:vTypes =
-    refactor!(aa_fact, AASparseMatrix(A))
+# stored as the matrix that `aa_fact` holds: one triangle of a symmetric (Hermitian) matrix,
+# or both
+function refactor!(aa_fact::AAFactorization{T}, A::SparseMatrixCSC{T, Int64}) where T<:vTypes
+    old = aa_fact.matrixObj
+    uplo = (old.matrix.structure.attributes & ATT_TRIANGLE_MASK) == ATT_UPPER_TRIANGLE ? :U : :L
+    B = ishermitian(old) && T <: Complex ? AASparseMatrix(Hermitian(A, uplo)) :
+        issymmetric(old)                 ? AASparseMatrix(Symmetric(A, uplo)) :
+                                           AASparseMatrix(A)
+    return refactor!(aa_fact, B)
+end
 
 # LinearAlgebra-style spellings of `refactor!`, matching how SparseArrays exposes
 # symbolic-factorization reuse (`lu!(F, A)` for UMFPACK, `cholesky!(F, A)` /
@@ -1878,7 +1896,11 @@ end
 
 function solve(A::SparseMatrixCSC{Tv,Ti}, b::AbstractVecOrMat{<:Number}; kw...) where {Tv<:Number, Ti<:Integer}
     T = _aa_eltype(promote_type(Tv, eltype(b)))
-    AA = AASparseMatrix(Tv === T ? A : SparseMatrixCSC{T,Ti}(A))
+    S = Tv === T ? A : SparseMatrixCSC{T,Ti}(A)
+    # the storage of the factorization for a direct solve; for an iterative one, as for `:auto`
+    kind = get(kw, :method, :direct) === :direct ? _factor_kind(get(kw, :kind, :auto)) :
+                                                   SparseFactorizationTBD
+    AA = _detect_structure(S, kind)
     return solve(AA, b isa StridedVecOrMat{T} ? b : Array{T}(b); kw...)
 end
 
@@ -2288,8 +2310,11 @@ completed [`AAFactorization`](@ref), ready for [`solve`](@ref), `\\`, `ldiv!`,
 
 `A` is an [`AASparseMatrix`](@ref) or a plain `SparseMatrixCSC` — any index type,
 and any numeric element type (values other than `Float32`/`Float64`/`ComplexF32`/
-`ComplexF64` are converted to `Float64`/`ComplexF64`). Symmetric/Hermitian and
-triangular structure of a `SparseMatrixCSC` is detected automatically.
+`ComplexF64` are converted to `Float64`/`ComplexF64`). Like `factorize`, `factor`
+tests a `SparseMatrixCSC` for symmetry: for Cholesky, LDLᵀ and `:auto`, it stores a
+Hermitian (or real symmetric) matrix as its lower triangle, as
+`AASparseMatrix(Hermitian(S, :L))` does. An `AASparseMatrix` is factored as it is
+stored.
 
 `kind` is `:auto` (Cholesky if Hermitian, else LU if square on macOS 15.5+, else
 QR), `:cholesky`, `:ldlt`, `:lu` (macOS 15.5+), `:qr`, or any
@@ -2305,8 +2330,11 @@ function factor(A::AASparseMatrix, kind::Union{Symbol,SparseFactorization_t} = :
     factor!(f, _factor_kind(kind))
     return f
 end
-factor(A::SparseMatrixCSC, kind::Union{Symbol,SparseFactorization_t} = :auto) =
-    factor(AASparseMatrix(A), kind)
+function factor(A::SparseMatrixCSC, kind::Union{Symbol,SparseFactorization_t} = :auto)
+    T = _aa_eltype(eltype(A))
+    S = eltype(A) === T ? A : SparseMatrixCSC{T}(A)
+    return factor(_detect_structure(S, _factor_kind(kind)), kind)
+end
 
 # ============================================================
 # In-place multiply (`mul!`) on AASparseMatrix

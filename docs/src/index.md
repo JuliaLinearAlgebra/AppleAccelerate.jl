@@ -87,7 +87,7 @@ nothing # hide
 ```@example quickstart-sparse
 using AppleAccelerate, LinearAlgebra, SparseArrays
 S = sprandn(500, 500, 0.01); S = S*S' + 500I    # symmetric positive-definite
-As = AppleAccelerate.AASparseMatrix(SparseMatrixCSC{Float64,Int64}(S))
+As = AppleAccelerate.AASparseMatrix(Symmetric(SparseMatrixCSC{Float64,Int64}(S), :L))
 xs = AppleAccelerate.solve(AppleAccelerate.cholesky(As), randn(500))
 nothing # hide
 ```
