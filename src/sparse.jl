@@ -725,15 +725,25 @@ end
 # numeric factorization from an existing symbolic factorization, with new numeric
 # options (libSparse reference-counts the symbolic factorization, so the previous
 # numeric factorization can be released afterwards).
-for (T, suff) in ((Cfloat, "18SparseMatrix_Float"), (Cdouble, "19SparseMatrix_Double"),
-                  (ComplexF32, "26SparseMatrix_Complex_Float"), (ComplexF64, "27SparseMatrix_Complex_Double"))
-    sym = Symbol("_Z12SparseFactor33SparseOpaqueSymbolicFactorization", suff, "26SparseNumericFactorOptions")
-    @eval @generateDemangled(SparseFactor, $(QuoteNode(sym)), $T, SparseOpaqueFactorization,
-                             SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
-end
+@generateDemangled(SparseFactor,
+    :_Z12SparseFactor33SparseOpaqueSymbolicFactorization18SparseMatrix_Float26SparseNumericFactorOptions,
+    Cfloat, SparseOpaqueFactorization,
+    SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
 
-# TODO: SparseSolve variants that take a trailing `void*` workspace pointer, for repeated
-# factorizations. would require adding a workspace buffer to AAFactorization.
+@generateDemangled(SparseFactor,
+    :_Z12SparseFactor33SparseOpaqueSymbolicFactorization19SparseMatrix_Double26SparseNumericFactorOptions,
+    Cdouble, SparseOpaqueFactorization,
+    SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
+
+# complex variants (macOS 15.5+)
+@generateDemangled(SparseFactor,
+    :_Z12SparseFactor33SparseOpaqueSymbolicFactorization26SparseMatrix_Complex_Float26SparseNumericFactorOptions,
+    ComplexF32, SparseOpaqueFactorization,
+    SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
+@generateDemangled(SparseFactor,
+    :_Z12SparseFactor33SparseOpaqueSymbolicFactorization27SparseMatrix_Complex_Double26SparseNumericFactorOptions,
+    ComplexF64, SparseOpaqueFactorization,
+    SparseOpaqueSymbolicFactorization, SparseMatrix, SparseNumericFactorOptions)
 
 # in-place solve, matrix RHS
 @generateDemangled(SparseSolve,
