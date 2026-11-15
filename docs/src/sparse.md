@@ -25,8 +25,10 @@ g = AppleAccelerate.factor(S, :ldlt)                # pick the kind: :cholesky, 
 AppleAccelerate.inertia(g)                          # pivot signs of the LDLᵀ
 ```
 
-`factor(A)` picks Cholesky for a Hermitian matrix, LU for a square one (macOS
-15.5+) and QR otherwise. Element types other than `Float32`/`Float64`/`ComplexF32`/
+`factor(S)` picks Cholesky for a Hermitian matrix, LU for a square one (macOS
+15.5+) and QR otherwise. Like `factorize`, `factor` and `solve` test a
+`SparseMatrixCSC` for symmetry, and for Cholesky and LDLᵀ store a symmetric
+(Hermitian) one as its lower triangle. Element types other than `Float32`/`Float64`/`ComplexF32`/
 `ComplexF64` are converted to `Float64`/`ComplexF64`, and `solve` promotes the
 matrix and right-hand side to a common type.
 
@@ -71,10 +73,36 @@ julia> SparseMatrixCSC(B) == sparse(rows, cols, vals, 3, 3)
 true
 ```
 
-The `SparseMatrixCSC` constructor automatically detects symmetric/Hermitian and
-triangular structure and sets the appropriate Apple Accelerate attributes. The COO
+The `SparseMatrixCSC` constructor stores the matrix as it is, without testing it
+for structure; pass `attributes` (e.g. `ATT_TRI_LOWER`) to set it. The COO
 constructor uses Accelerate's `SparseConvertFromCoordinate` and accepts
 `Float32`/`Float64` and (macOS 15.5+) `ComplexF32`/`ComplexF64` values.
+
+A symmetric or Hermitian matrix, which Cholesky and LDLᵀ need, is given by one
+triangle, wrapped in `Symmetric` or `Hermitian`: `AASparseMatrix(Symmetric(S, :L))`
+(or `:U`) stores only that triangle of `S`, with the symmetric (Hermitian)
+attributes, without testing `S` for symmetry, so the lower triangle of a symmetric
+matrix can be wrapped as is. As in `Symmetric`,
+the other triangle of `S` is ignored, and as in `Hermitian`, so is the imaginary part
+of a Hermitian matrix's diagonal.
+
+```@example sparse
+using LinearAlgebra
+
+L = tril(sprandn(100, 100, 0.05) + 10I)     # the lower triangle of a symmetric matrix
+A = AASparseMatrix(Symmetric(L, :L))
+F = AppleAccelerate.factor(A, :ldlt)
+nothing # hide
+```
+
+!!! note
+    libSparse's LU does not read one-triangle symmetric storage correctly, so use
+    Cholesky or LDLᵀ for such matrices; `factor(A)` picks one of them.
+
+!!! compat "AppleAccelerate 0.9"
+    Until 0.9, `AASparseMatrix(::SparseMatrixCSC)` tested the matrix and stored a
+    symmetric (Hermitian) one as its lower triangle, and tagged a triangular one.
+    Wrap it in `Symmetric` or `Hermitian` instead.
 
 ### Matrix operations
 
@@ -127,8 +155,8 @@ Complex matrices differ from real ones in two ways:
   - **Cholesky and CG use the Hermitian path.** For a complex matrix, `cholesky(A)`
     and `solve(A, b; method = :cg)` require `A` to be **Hermitian** positive-definite
     (`A == A'`), and dispatch to libSparse's Hermitian factorization — not the
-    (complex-)symmetric one. A `SparseMatrixCSC{Complex}` that satisfies `ishermitian`
-    is auto-tagged Hermitian when wrapped.
+    (complex-)symmetric one. Wrap a `SparseMatrixCSC{Complex}` in `Hermitian` to store
+    it as Hermitian: `AASparseMatrix(Hermitian(S, :L))`.
   - **`adjoint` (`A'`) and `transpose` are distinct.** `adjoint` conjugates as well as
     transposes; both are attribute-flag views that share the underlying CSC data.
 
@@ -137,7 +165,7 @@ using AppleAccelerate, SparseArrays, LinearAlgebra
 import AppleAccelerate: AASparseMatrix, cholesky, solve
 
 M = sprandn(ComplexF64, 60, 60, 0.05)
-H = AASparseMatrix(SparseMatrixCSC(M * M' + 60I))   # Hermitian positive-definite
+H = AASparseMatrix(Hermitian(M * M' + 60I, :L))     # Hermitian positive-definite
 b = randn(ComplexF64, 60)
 x = solve(cholesky(H), b)                            # Hermitian Cholesky
 @assert x ≈ Matrix(H) \ b
@@ -209,7 +237,8 @@ G = qr(A)        # QR (also works for rectangular / least-squares)
 nothing # hide
 ```
 
-`cholesky(A)` and `ldlt(A)` are available for symmetric/Hermitian matrices.
+`cholesky(A)` and `ldlt(A)` are available for matrices stored as symmetric (Hermitian),
+e.g. `cholesky(AASparseMatrix(Symmetric(S, :L)))`.
 
 !!! note "No type piracy"
     These methods dispatch on `AppleAccelerate`'s own `AASparseMatrix`, **not** on

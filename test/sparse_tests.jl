@@ -327,13 +327,18 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             symmetricM = sparse(sparseM + sparseM')
             # verify that the julia matrix is has the desired properties.
             @assert issymmetric(symmetricM) && !istril(symmetricM) && !istriu(symmetricM)
-            symmetric = AASparseMatrix(symmetricM)
+            # the structure is not detected: it comes from Symmetric/Hermitian or the attributes
+            @test !issymmetric(AASparseMatrix(symmetricM))
+            symmetric = AASparseMatrix(Symmetric(symmetricM, :L))
             @test issymmetric(symmetric) && !istril(symmetric) && !istriu(symmetric)
             upper_tri, lower_tri = sparse(I, N, N), sparse(I, N, N)
             upper_tri[1, 3] = 1.0
             lower_tri[3, 1] = 1.0
-            @test !issymmetric(upper_tri) && !istril(upper_tri) && istriu(upper_tri)
-            @test !issymmetric(lower_tri) && istril(lower_tri) && !istriu(lower_tri)
+            @test !istriu(AASparseMatrix(upper_tri))
+            upper = AASparseMatrix(upper_tri, AppleAccelerate.ATT_TRI_UPPER)
+            lower = AASparseMatrix(lower_tri, AppleAccelerate.ATT_TRI_LOWER)
+            @test !issymmetric(upper) && !istril(upper) && istriu(upper)
+            @test !issymmetric(lower) && istril(lower) && !istriu(lower)
         end
     end
 
@@ -651,7 +656,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             temp = sprand(T, N, N, 0.3)
             H = sparse(temp * adjoint(temp) + N * I)
             @test ishermitian(H) && !issymmetric(H)
-            aaH = AASparseMatrix(H)
+            aaH = AASparseMatrix(Hermitian(H, :L))
             @test ishermitian(aaH)
             @test !issymmetric(aaH)
             # factor! default for a Hermitian matrix should pick Cholesky.
@@ -788,14 +793,14 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             # Cholesky / LDLᵀ on a symmetric positive-definite matrix.
             M = sprandn(20, 20, 0.3); S = SparseMatrixCSC(M * M' + 20I)
             S2 = copy(S); S2.nzval .*= 1.1
-            fc = cholesky(AASparseMatrix(S))
+            fc = cholesky(AASparseMatrix(Symmetric(S, :L)))
             cholesky!(fc, S2)                       # CSC overload
             @test isapprox(solve(fc, b), Matrix(S2) \ b; rtol = 1e-7)
             @test_throws ArgumentError lu!(fc, S2)  # wrong kind
 
-            fl = AAFactorization(AASparseMatrix(S))
+            fl = AAFactorization(AASparseMatrix(Symmetric(S, :L)))
             factor!(fl, AppleAccelerate.SparseFactorizationLDLT)
-            ldlt!(fl, AASparseMatrix(S2))
+            ldlt!(fl, AASparseMatrix(Symmetric(S2, :L)))
             @test isapprox(solve(fl, b), Matrix(S2) \ b; rtol = 1e-7)
         end
 
@@ -821,10 +826,10 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             b = rand(T, N)
 
             @testset "Hermitian Cholesky refactor" begin
-                f = cholesky(AASparseMatrix(H1))
-                cholesky!(f, AASparseMatrix(H2))
+                f = cholesky(AASparseMatrix(Hermitian(H1, :L)))
+                cholesky!(f, AASparseMatrix(Hermitian(H2, :L)))
                 xref = solve(f, b)
-                xfresh = solve(cholesky(AASparseMatrix(H2)), b)
+                xfresh = solve(cholesky(AASparseMatrix(Hermitian(H2, :L))), b)
                 @test isapprox(xref, xfresh; rtol = rtol)
                 @test isapprox(Matrix(H2) * xref, b; rtol = 10 * rtol)
             end
@@ -872,9 +877,9 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             H1 = sparse(Hermitian(B1 + B1' + N*I))
             H2 = copy(H1); H2.nzval .*= T(1.3)
             b = rand(T, N)
-            f = AAFactorization(AASparseMatrix(H1))
+            f = AAFactorization(AASparseMatrix(Hermitian(H1, :L)))
             factor!(f, AppleAccelerate.SparseFactorizationLDLT)
-            ldlt!(f, AASparseMatrix(H2))                 # Hermitian LDLT refactor
+            ldlt!(f, AASparseMatrix(Hermitian(H2, :L)))  # Hermitian LDLT refactor
             xref = solve(f, b)
             ok = isapprox(Matrix(H2) * xref, b; rtol = 1e-6)
             exit(ok ? 0 : 1)
@@ -903,6 +908,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             S = sparse(Symmetric(sprandn(8, 8, 0.3)))
             @test issymmetric(S)
             @test SparseMatrixCSC(AASparseMatrix(S)) == S
+            @test SparseMatrixCSC(AASparseMatrix(Symmetric(S, :L))) == S
         end
 
         @testset "Hermitian" begin
@@ -910,6 +916,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             H = sparse(Hermitian(B + 8I))
             @test ishermitian(H)
             @test SparseMatrixCSC(AASparseMatrix(H)) == H
+            @test SparseMatrixCSC(AASparseMatrix(Hermitian(H, :L))) == H
         end
 
         @testset "triangular $T" for T in (Float64, ComplexF64)
@@ -936,7 +943,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             B = sprandn(15, 15, 0.3)
             A = sparse(B * B' + 15I)  # symmetric positive definite
             b = rand(15)
-            f = cholesky(AASparseMatrix(A))
+            f = cholesky(AASparseMatrix(Symmetric(A, :L)))
             @test isapprox(solve(f, b), Matrix(A) \ b; rtol = 1e-7)
         end
 
@@ -944,7 +951,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             B = sprandn(12, 12, 0.3)
             A = sparse(B + B' + 12I)  # symmetric
             b = rand(12)
-            f = ldlt(AASparseMatrix(A))
+            f = ldlt(AASparseMatrix(Symmetric(A, :L)))
             @test isapprox(solve(f, b), Matrix(A) \ b; rtol = 1e-7)
         end
 
@@ -1324,7 +1331,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             rtol = T == ComplexF32 ? 1e-3 : 1e-8
             n = 24
             Acsc = hpd(T, n)
-            Aaa = AASparseMatrix(Acsc)
+            Aaa = AASparseMatrix(Hermitian(Acsc, :L))
             @test ishermitian(Aaa)
             b = randn(T, n)
             xref = Matrix(Acsc) \ b
@@ -1511,7 +1518,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             Rm = SparseMatrixCSC{T,Ti}(Arect); br = rand(T, n + 15)
             @test solve(AA.factor(Rm), br) ≈ Matrix(Rm) \ br rtol = 10tol
             # an already-wrapped matrix works too
-            @test solve(AA.factor(AASparseMatrix(S), :cholesky), b) ≈ Matrix(S) \ b rtol = tol
+            @test solve(AA.factor(AASparseMatrix(Symmetric(S, :L)), :cholesky), b) ≈ Matrix(S) \ b rtol = tol
         end
 
         @testset "factor guards" begin
@@ -1595,5 +1602,102 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
             M = AASparseMatrix(H); xc = rand(ComplexF64, n); yc = rand(ComplexF64, n)
             @test mul!(copy(yc), M, xc, 2 - im, 0.5im) ≈ (2 - im) * (H * xc) + 0.5im * yc
         end
+    end
+
+    @testset "symmetric from one triangle $T" for T in (Float32, Float64)
+        AA = AppleAccelerate
+        n = 40
+        K = spdiagm(-1 => ones(n - 1), 0 => [(-1)^i * (2 + i / n) for i in 1:n], 1 => ones(n - 1),
+                    -7 => fill(0.25, n - 7), 7 => fill(0.25, n - 7))
+        K = SparseMatrixCSC{T,Int64}(K)
+        b = rand(T, n)
+        tol = T == Float32 ? 1e-3 : 1e-8
+        half = (positive = n ÷ 2, zero = 0, negative = n ÷ 2)
+        for (S, stored) in ((Symmetric(tril(K), :L), tril(K)), (Symmetric(K, :U), triu(K)),
+                            (Hermitian(K, :L), tril(K)), (Symmetric(SparseMatrixCSC{T,Int32}(K), :L), tril(K)))
+            A = AASparseMatrix(S)
+            @test issymmetric(A)
+            @test SparseMatrixCSC(A) == K                    # the logical matrix
+            @test A._nzval == nonzeros(stored)               # one stored triangle
+            @test A * b ≈ K * b
+            f = AA.factor(A, :ldlt)
+            @test AA.inertia(f) == half
+            @test Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        end
+        # other element types are converted
+        @test SparseMatrixCSC(AASparseMatrix(Symmetric(SparseMatrixCSC{Int,Int64}(round.(Int, 4 * K)), :L))) ==
+              round.(Int, 4 * K)
+        # the other triangle of the parent is ignored, as in Symmetric
+        J = copy(K); J[1, n] = 99
+        @test SparseMatrixCSC(AASparseMatrix(Symmetric(J, :L))) == K
+        # AASparseMatrix(::SparseMatrixCSC) stores the matrix as it is
+        A = AASparseMatrix(K)
+        @test !issymmetric(A) && A._nzval == nonzeros(K)
+        # the SparseMatrixCSC conveniences store it as one triangle for Cholesky and LDLᵀ
+        f = AA.factor(K, :ldlt)
+        @test issymmetric(f.matrixObj) && f.matrixObj._nzval == nonzeros(tril(K))
+        @test AA.inertia(f) == half
+        @test issymmetric(AA.factor(K + 2n * I).matrixObj)          # :auto: Cholesky
+        @test issymmetric(AAFactorization(K).matrixObj)
+        @test Matrix(K) * AA.solve(K, b; kind = :ldlt) ≈ b rtol = tol
+        # and as it is for LU and QR
+        f = AA.factor(K, :lu)
+        @test !issymmetric(f.matrixObj)
+        @test Matrix(K) * AA.solve(f, b) ≈ b rtol = tol
+        @test Matrix(K) * AA.solve(K, b; kind = :lu) ≈ b rtol = tol
+        @test Matrix(K) * AA.solve(AA.factor(K, :qr), b) ≈ b rtol = tol
+        # refactor! with a SparseMatrixCSC stores it as the factored matrix is stored
+        for (f, K2) in ((AA.factor(K, :ldlt), 2K), (AA.factor(AASparseMatrix(Symmetric(K, :U)), :ldlt), 2K),
+                        (AA.factor(K, :lu), 2K))
+            refactor!(f, K2)
+            @test Matrix(K2) * AA.solve(f, b) ≈ b rtol = tol
+        end
+    end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"15.5" &&
+    @testset "Hermitian from one triangle $T" for T in (ComplexF32, ComplexF64)
+        AA = AppleAccelerate
+        n = 20
+        H = SparseMatrixCSC{T,Int64}(spdiagm(0 => fill(4.0, n)) + spdiagm(1 => fill(im, n - 1)) - spdiagm(-1 => fill(im, n - 1)))
+        b = rand(T, n)
+        tol = real(T) == Float32 ? 1e-3 : 1e-8
+        A = AASparseMatrix(Hermitian(H, :L))
+        @test SparseMatrixCSC(A) == H
+        @test ishermitian(A)
+        f = AA.factor(A)                                     # :auto: Hermitian, so Cholesky
+        @test Matrix(H) * AA.solve(f, b) ≈ b rtol = tol
+        @test AA.inertia(AA.factor(A, :ldlt)) == (positive = n, zero = 0, negative = 0)
+        @test ishermitian(AA.factor(H).matrixObj)            # stored as one triangle
+        @test Matrix(H) * AA.solve(H, b) ≈ b rtol = tol
+        # as in Hermitian, the imaginary part of the stored diagonal is ignored
+        G = copy(H); for i in 1:n; G[i, i] += 0.5im; end
+        A = AASparseMatrix(Hermitian(G, :L))
+        @test SparseMatrixCSC(A) == sparse(Hermitian(G, :L))
+        @test A * b ≈ Hermitian(Matrix(G), :L) * b
+        @test Matrix(H) * AA.solve(AA.factor(A, :ldlt), b) ≈ b rtol = tol
+    end
+
+    something(AppleAccelerate.get_macos_version(), v"0.0.0") >= v"26" &&
+    @testset "complex symmetric (not Hermitian) from one triangle $T" for T in (ComplexF32, ComplexF64)
+        AA = AppleAccelerate
+        n = 20
+        C = SparseMatrixCSC{T,Int64}(spdiagm(0 => fill(4.0 + 1im, n), 1 => fill(1.0im, n - 1), -1 => fill(1.0im, n - 1)))
+        @test issymmetric(C) && !ishermitian(C)
+        b = rand(T, n)
+        tol = real(T) == Float32 ? 1e-3 : 1e-8
+        A = AASparseMatrix(Symmetric(C, :L))
+        @test SparseMatrixCSC(A) == C
+        f = AA.factor(A)                                     # :auto: LDLᵀ, not LU
+        @test f._factorization.symbolicFactorization.type in (AA.SparseFactorizationLDLT, AA.SparseFactorizationLDLTTPP)
+        @test Matrix(C) * AA.solve(f, b) ≈ b rtol = tol
+        @test Matrix(C) * AA.solve(AA.factor(A, :ldlt), b) ≈ b rtol = tol
+        # through the SparseMatrixCSC conveniences: LU on the full storage for :auto,
+        # one triangle for LDLᵀ
+        f = AA.factor(C)
+        @test !issymmetric(f.matrixObj)
+        @test Matrix(C) * AA.solve(f, b) ≈ b rtol = tol
+        f = AA.factor(C, :ldlt)
+        @test issymmetric(f.matrixObj)
+        @test Matrix(C) * AA.solve(f, b) ≈ b rtol = tol
     end
 end
