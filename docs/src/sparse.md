@@ -194,6 +194,59 @@ nothing # hide
 | `factor!(f, type)` | Compute factorization with specific type |
 | `factorize(A::AASparseMatrix)` | Create an `AAFactorization` from a sparse matrix |
 
+### Factorization options
+
+`factor`, `factor!` and `refactor!` take keyword options, which are stored on the
+`AAFactorization` and used again by later calls:
+
+| Keyword | Values |
+|---------|--------|
+| `order` | `SparseOrderDefault`, `SparseOrderAMD`, `SparseOrderMetis`, `SparseOrderCOLAMD` |
+| `scaling` | `SparseScalingDefault`, `SparseScalingUser` (no scaling, without a scaling vector), `SparseScalingEquilibriationInf`; on macOS 26+, `SparseScalingHungarianScalingOnly` and, for LU, `SparseScalingHungarianScalingAndOrdering` |
+| `pivot_tolerance` | relative pivot threshold, in `[0, 0.5]` (default `0.1` for `Float32`, `0.01` for `Float64`) |
+| `zero_tolerance` | pivots smaller in absolute value are zero (default `eps(real(T)) * 1e-4`) |
+
+```@example sparse
+import AppleAccelerate as AA
+
+S = sprandn(100, 100, 0.1); S = S + S' + 10I
+f = AA.factor(S, :ldlt; order = AA.SparseOrderAMD, pivot_tolerance = 0.1)
+AA.numeric_options(f).pivotTolerance
+```
+
+`refactor!` can change the numeric options (`scaling`, `pivot_tolerance`,
+`zero_tolerance`) but not the ordering, which belongs to the symbolic factorization
+(nor `SparseScalingHungarianScalingAndOrdering`, which also orders the matrix).
+`factor!` on a factorization that is already computed does nothing, so passing it
+options throws. The `LinearAlgebra` spellings (`ldlt(A; ...)`, `ldlt!(F, A; ...)`, …)
+take the same keywords.
+
+### Failed factorizations
+
+By default, a factorization that fails (a Cholesky factorization of a matrix that is
+not positive definite, say) throws. With `check = false`, `factor`, `factor!` and
+`refactor!` keep the failed factorization instead, and `issuccess` reports the
+outcome. Its symbolic factorization stays valid, so `refactor!` can recompute it
+once the values change, as in Newton-type iterations that regularize a matrix until
+it factorizes:
+
+```@example sparse
+using LinearAlgebra
+import AppleAccelerate as AA
+
+P = spdiagm(-1 => fill(-1.0, 9), 0 => fill(4.0, 10), 1 => fill(-1.0, 9))
+f = AA.factor(-P, :cholesky; check = false)
+issuccess(f)            # false: -P is not positive definite
+AA.refactor!(f, P)      # reuses the symbolic factorization
+issuccess(f)
+```
+
+Only Cholesky (a matrix that is not positive definite), unpivoted LDLᵀ (a zero
+pivot) and QR (a singular matrix) detect failure. The pivoting LDLᵀ and LU
+factorizations succeed on singular matrices; for LDLᵀ, `inertia` counts the zero
+pivots. Solving with a failed factorization, or calling `factor!` on it, throws;
+argument errors throw regardless of `check`.
+
 ## Factorization conveniences
 
 For matrices wrapped as an `AASparseMatrix`, the usual `LinearAlgebra`
@@ -243,6 +296,31 @@ nothing # hide
 
 `F` must already hold a completed factorization (call `factor!`/`solve` once first),
 and `A` must have the same number of stored nonzeros as the original matrix.
+
+Pass numeric options to change them, e.g. `refactor!(F, P2; pivot_tolerance = 0.5)`
+to pivot more conservatively after an inaccurate solve. libSparse's in-place
+refactorization always keeps the options of the original factorization, so with new
+options `refactor!` computes a new numeric factorization from the existing symbolic
+one instead.
+
+### Updating the values in place
+
+`nonzeros(A)` is the matrix's own value storage, in compressed-column order; for a
+symmetric matrix stored as one triangle, that of the triangle, in the order of
+`nonzeros(tril(S))` (or `triu`). Update it in place and
+call `refactor!(F)` without a matrix, which refactorizes the matrix `F` holds — the
+last one passed to `refactor!`, if any.
+
+```@example sparse
+using LinearAlgebra
+import AppleAccelerate as AA
+
+A = AA.AASparseMatrix(sprandn(100, 100, 0.05) + 20I)
+F = AA.factor(A, :lu)
+nonzeros(A) .*= 2                              # new values, same pattern
+AA.refactor!(F)
+nothing # hide
+```
 
 For LU/Cholesky/LDLᵀ factorizations you can equivalently use the `LinearAlgebra`-style
 spellings that mirror how `SparseArrays` exposes symbolic reuse — `lu!(F, A)`,
