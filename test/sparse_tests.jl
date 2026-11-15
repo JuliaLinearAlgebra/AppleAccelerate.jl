@@ -1758,7 +1758,7 @@ import AppleAccelerate: AAFactorization, AASparseMatrix, factor!, muladd!, refac
         # an unfactored AAFactorization still cannot be refactored
         @test_throws ArgumentError AA.refactor!(AAFactorization(P), P)
         # the LinearAlgebra spellings take check
-        c = cholesky(AASparseMatrix(Nd); check = false)
+        c = cholesky(AASparseMatrix(tril(Nd), AA.ATT_SYMMETRIC | AA.ATT_LOWER_TRIANGLE); check = false)
         @test c isa AAFactorization && !issuccess(c)
         @test cholesky!(c, P; check = false) === c
         @test issuccess(c)
